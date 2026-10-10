@@ -99,25 +99,29 @@ function AppShell() {
     }
   };
 
-  // Sync browser back/forward buttons with current view tab
+  // Sync browser back/forward buttons with current view tab and login page
   useEffect(() => {
     const handleHistoryChange = () => {
-      const nextTab = getTabFromHash();
-      setActiveTabState(nextTab);
+      const cleanHash = window.location.hash.replace(/^#\/?/, '').trim().toLowerCase();
+
+      // If user clicks Back arrow all the way back to login or empty root while authenticated
+      if (cleanHash === 'login' || cleanHash === 'activate' || !cleanHash) {
+        if (currentUser) {
+          handleLogout();
+        }
+      } else if (VALID_TABS.includes(cleanHash as NavTab)) {
+        setActiveTabState(cleanHash as NavTab);
+      }
     };
 
     window.addEventListener('popstate', handleHistoryChange);
     window.addEventListener('hashchange', handleHistoryChange);
 
-    if (currentUser && !window.location.hash) {
-      window.history.replaceState({ tab: 'dashboard' }, '', '#/dashboard');
-    }
-
     return () => {
       window.removeEventListener('popstate', handleHistoryChange);
       window.removeEventListener('hashchange', handleHistoryChange);
     };
-  }, [currentUser]);
+  }, [currentUser, handleLogout]);
 
   // If not authenticated, render LoginPortal
   if (!currentUser) {

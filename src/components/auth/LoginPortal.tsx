@@ -54,7 +54,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
   const [matchedInvitedUser, setMatchedInvitedUser] = useState<User | null>(null);
   const [matchedInvitedOrg, setMatchedInvitedOrg] = useState<Organization | null>(null);
 
-  // Auto-detect ?invite= token from URL on mount
+  // Auto-detect ?invite= token or URL hash on mount
   useEffect(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
@@ -62,11 +62,52 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
       if (urlToken) {
         setActivationTokenInput(urlToken);
         setAuthMode('ACTIVATE');
+        if (typeof window !== 'undefined') {
+          window.history.replaceState({ mode: 'activate' }, '', '#/activate');
+        }
+        return;
+      }
+
+      const hash = window.location.hash.toLowerCase();
+      if (hash.includes('activate')) {
+        setAuthMode('ACTIVATE');
+      } else {
+        setAuthMode('SIGNIN');
+        if (!window.location.hash && typeof window !== 'undefined') {
+          window.history.replaceState({ mode: 'login' }, '', '#/login');
+        }
       }
     } catch (e) {
       // URL parsing fallback
     }
+
+    const handlePopState = () => {
+      const hash = window.location.hash.toLowerCase();
+      if (hash.includes('activate')) {
+        setAuthMode('ACTIVATE');
+      } else {
+        setAuthMode('SIGNIN');
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    window.addEventListener('hashchange', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('hashchange', handlePopState);
+    };
   }, []);
+
+  const handleSwitchAuthMode = (mode: 'SIGNIN' | 'ACTIVATE') => {
+    setAuthMode(mode);
+    setError(null);
+    if (typeof window !== 'undefined') {
+      const targetHash = mode === 'ACTIVATE' ? '#/activate' : '#/login';
+      if (window.location.hash !== targetHash) {
+        window.history.pushState({ mode }, '', targetHash);
+      }
+    }
+  };
 
   // When activationTokenInput changes, find matching user
   useEffect(() => {
@@ -259,7 +300,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
         <div className="flex bg-slate-900/90 border border-slate-800 rounded-2xl p-1 mb-4 shadow-lg">
           <button
             type="button"
-            onClick={() => { setAuthMode('SIGNIN'); setError(null); }}
+            onClick={() => handleSwitchAuthMode('SIGNIN')}
             className={`flex-1 py-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 ${
               authMode === 'SIGNIN'
                 ? 'bg-emerald-500 text-slate-950 shadow-md'
@@ -271,7 +312,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => { setAuthMode('ACTIVATE'); setError(null); }}
+            onClick={() => handleSwitchAuthMode('ACTIVATE')}
             className={`flex-1 py-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 ${
               authMode === 'ACTIVATE'
                 ? 'bg-emerald-500 text-slate-950 shadow-md'
