@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Organization, User, SystemNotification } from '../types';
+import { Organization, User, SystemNotification, Branch, Asset } from '../types';
 import { 
   Bell, 
   Search, 
@@ -15,9 +15,12 @@ import {
   Wifi,
   WifiOff,
   RefreshCw,
-  LogOut
+  LogOut,
+  Settings,
+  ChevronRight
 } from 'lucide-react';
 import { subscribeOfflineStatus, OfflineSyncStatus } from '../lib/offline-sync';
+import { UserSettingsModal } from './UserSettingsModal';
 
 interface NavbarProps {
   currentOrg: Organization;
@@ -33,6 +36,8 @@ interface NavbarProps {
   isMobileMenuOpen?: boolean;
   onOpenScanner?: () => void;
   onLogout?: () => void;
+  branches?: Branch[];
+  assets?: Asset[];
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -48,11 +53,15 @@ export const Navbar: React.FC<NavbarProps> = ({
   onToggleMobileMenu,
   isMobileMenuOpen,
   onOpenScanner,
-  onLogout
+  onLogout,
+  branches = [],
+  assets = []
 }) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
   const [showMobileSearch, setShowMobileSearch] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showRoleSimulator, setShowRoleSimulator] = useState(false);
 
   // Network & TiDB offline sync status
   const [syncStatus, setSyncStatus] = useState<OfflineSyncStatus>({
@@ -270,23 +279,59 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className="text-[10px] text-emerald-400 mt-1 font-mono">{currentUser.branchName}</div>
                 </div>
 
+                {/* My Profile & Settings Action */}
                 <div className="p-2 border-b border-slate-700">
-                  <div className="text-[10px] uppercase font-bold text-slate-400 px-2 py-1">Role Simulator</div>
-                  {orgUsers.map(user => (
-                    <button
-                      key={user.id}
-                      onClick={() => { onSelectUser(user); setShowUserMenu(false); }}
-                      className={`w-full text-left p-2 rounded-lg text-xs flex items-center justify-between transition-colors ${user.id === currentUser.id ? 'bg-emerald-500/10 text-emerald-300' : 'hover:bg-slate-700/50 text-slate-300'}`}
-                    >
-                      <div className="truncate">
-                        <div className="font-semibold text-white">{user.fullName}</div>
-                        <div className="text-[10px] text-slate-400">{user.email}</div>
-                      </div>
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded border font-mono font-bold shrink-0 ml-2 ${getRoleBadgeColor(user.role)}`}>
-                        {user.role}
+                  <button
+                    onClick={() => {
+                      setShowSettingsModal(true);
+                      setShowUserMenu(false);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-700/70 transition-colors flex items-center justify-between group cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Settings className="w-4 h-4 text-emerald-400 group-hover:rotate-45 transition-transform" />
+                      <span>My Profile & Settings</span>
+                    </div>
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300" />
+                  </button>
+                </div>
+
+                {/* Collapsible Role Simulator for testing/preview */}
+                <div className="p-2 border-b border-slate-700">
+                  <button
+                    onClick={() => setShowRoleSimulator(!showRoleSimulator)}
+                    className="w-full flex items-center justify-between px-2.5 py-1.5 text-[10px] uppercase font-bold text-slate-400 hover:text-slate-200 transition-colors cursor-pointer rounded-lg hover:bg-slate-700/40"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <span>Role Simulator</span>
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-750 border border-slate-700 text-slate-400 normal-case font-normal font-sans">
+                        Preview
                       </span>
-                    </button>
-                  ))}
+                    </span>
+                    <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${showRoleSimulator ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {showRoleSimulator && (
+                    <div className="mt-1 space-y-0.5 max-h-48 overflow-y-auto pr-1">
+                      {orgUsers.map(user => (
+                        <button
+                          key={user.id}
+                          onClick={() => { onSelectUser(user); setShowUserMenu(false); }}
+                          className={`w-full text-left p-2 rounded-lg text-xs flex items-center justify-between transition-colors cursor-pointer ${
+                            user.id === currentUser.id ? 'bg-emerald-500/10 text-emerald-300' : 'hover:bg-slate-700/50 text-slate-300'
+                          }`}
+                        >
+                          <div className="truncate">
+                            <div className="font-semibold text-white">{user.fullName}</div>
+                            <div className="text-[10px] text-slate-400">{user.email}</div>
+                          </div>
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded border font-mono font-bold shrink-0 ml-2 ${getRoleBadgeColor(user.role)}`}>
+                            {user.role}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {onLogout && (
@@ -311,6 +356,21 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
       </header>
+
+      {/* User Settings & Profile Modal */}
+      {showSettingsModal && onUpdateUser && (
+        <UserSettingsModal
+          currentUser={currentUser}
+          currentOrg={currentOrg}
+          branches={branches}
+          assets={assets}
+          isOpen={showSettingsModal}
+          onClose={() => setShowSettingsModal(false)}
+          onUpdateUser={(updated) => {
+            onUpdateUser(updated);
+          }}
+        />
+      )}
 
       {/* Mobile Search Bar Dropdown */}
       {showMobileSearch && (

@@ -488,6 +488,23 @@ export async function persistUser(user: User, allUsers?: User[]): Promise<boolea
   const exists = current.some(u => u.id === user.id);
   const updated = exists ? current.map(u => (u.id === user.id ? sanitizedUser : u)) : [...current, sanitizedUser];
   saveToStorage(STORAGE_KEYS.USERS, updated);
+
+  try {
+    await fetch('/api/auth/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        fullName: user.fullName,
+        avatar: user.avatar,
+        departmentId: user.departmentId,
+        departmentName: user.departmentName
+      })
+    });
+  } catch {
+    // Offline resilient
+  }
+
   return true;
 }
 

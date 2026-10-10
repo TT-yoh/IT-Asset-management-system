@@ -156,6 +156,8 @@ function AppShell() {
         isMobileMenuOpen={isMobileMenuOpen}
         onOpenScanner={() => setIsGlobalScannerOpen(true)}
         onLogout={handleLogout}
+        branches={currentOrgBranches}
+        assets={filteredAssets}
       />
 
       {/* Main Container: Sidebar + Active Tab Viewport */}
