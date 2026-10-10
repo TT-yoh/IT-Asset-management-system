@@ -73,6 +73,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const handleLoginSuccess = (user: User, org: Organization) => {
     setCurrentOrg(org);
     setCurrentUser(user);
+    if (typeof window !== 'undefined') {
+      const initialTab = window.location.hash || '#/dashboard';
+      window.history.replaceState({ tab: initialTab.replace(/^#\/?/, '') }, '', initialTab);
+    }
   };
 
   const handleLogout = async () => {
@@ -93,6 +97,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
     setCurrentUser(null);
+    if (typeof window !== 'undefined') {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
   };
 
   /**

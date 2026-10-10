@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Navbar } from './components/Navbar';
 import { Sidebar, NavTab } from './components/Sidebar';
 import { Dashboard3D } from './components/Dashboard3D';
@@ -22,6 +22,14 @@ import {
   useAssets
 } from './context';
 import { Asset } from './types';
+
+const VALID_TABS: NavTab[] = ['dashboard', 'assets', 'checkout', 'repair', 'users', 'reports', 'budget', 'audit'];
+
+const getTabFromHash = (): NavTab => {
+  if (typeof window === 'undefined') return 'dashboard';
+  const clean = window.location.hash.replace(/^#\/?/, '').trim();
+  return VALID_TABS.includes(clean as NavTab) ? (clean as NavTab) : 'dashboard';
+};
 
 function AppShell() {
   const {
@@ -73,10 +81,43 @@ function AppShell() {
     lastSyncedAt
   } = useAssets();
 
-  const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
+  const [activeTab, setActiveTabState] = useState<NavTab>(() => getTabFromHash());
   const [initialAssetStatusFilter, setInitialAssetStatusFilter] = useState<string>('ALL');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   const [isGlobalScannerOpen, setIsGlobalScannerOpen] = useState<boolean>(false);
+
+  // Navigate between tabs with browser history tracking (popstate / back arrow support)
+  const navigateToTab = (tab: NavTab, replace = false) => {
+    setActiveTabState(tab);
+    if (typeof window !== 'undefined') {
+      const targetHash = `#/${tab}`;
+      if (replace) {
+        window.history.replaceState({ tab }, '', targetHash);
+      } else if (window.location.hash !== targetHash) {
+        window.history.pushState({ tab }, '', targetHash);
+      }
+    }
+  };
+
+  // Sync browser back/forward buttons with current view tab
+  useEffect(() => {
+    const handleHistoryChange = () => {
+      const nextTab = getTabFromHash();
+      setActiveTabState(nextTab);
+    };
+
+    window.addEventListener('popstate', handleHistoryChange);
+    window.addEventListener('hashchange', handleHistoryChange);
+
+    if (currentUser && !window.location.hash) {
+      window.history.replaceState({ tab: 'dashboard' }, '', '#/dashboard');
+    }
+
+    return () => {
+      window.removeEventListener('popstate', handleHistoryChange);
+      window.removeEventListener('hashchange', handleHistoryChange);
+    };
+  }, [currentUser]);
 
   // If not authenticated, render LoginPortal
   if (!currentUser) {
@@ -118,7 +159,7 @@ function AppShell() {
         <Sidebar
           activeTab={activeTab}
           onSelectTab={(tab) => {
-            setActiveTab(tab);
+            navigateToTab(tab);
             setIsMobileMenuOpen(false);
             if (tab !== 'assets') {
               setInitialAssetStatusFilter('ALL');
@@ -143,7 +184,7 @@ function AppShell() {
               currentUser={currentUser}
               onNavigateToAssets={(status) => {
                 setInitialAssetStatusFilter(status);
-                setActiveTab('assets');
+                navigateToTab('assets');
               }}
             />
           )}
@@ -179,7 +220,7 @@ function AppShell() {
                   expectedCompletion: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().split('T')[0]!,
                   cost: 150
                 });
-                setActiveTab('repair');
+                navigateToTab('repair');
               }}
             />
           )}
@@ -223,7 +264,7 @@ function AppShell() {
               auditLogs={filteredAuditLogs}
               onUpdateBranch={handleUpdateBranch}
               onRegisterBranch={handleRegisterBranch}
-              onNavigateToUsers={() => setActiveTab('users')}
+              onNavigateToUsers={() => navigateToTab('users')}
             />
           )}
 
@@ -260,11 +301,11 @@ function AppShell() {
         currentUser={currentUser}
         onSelectAssetForCheckout={(ast) => {
           setSearchQuery(ast.assetCode);
-          setActiveTab('assets');
+          navigateToTab('assets');
         }}
         onSelectAssetForReturn={(ast) => {
           setSearchQuery(ast.assetCode);
-          setActiveTab('assets');
+          navigateToTab('assets');
         }}
         onSelectAssetForRepair={(ast) => {
           handleReportIssue({
@@ -281,11 +322,11 @@ function AppShell() {
             expectedCompletion: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().split('T')[0]!,
             cost: 150
           });
-          setActiveTab('repair');
+          navigateToTab('repair');
         }}
         onEnrollScannedTag={(tag) => {
           setSearchQuery(tag);
-          setActiveTab('assets');
+          navigateToTab('assets');
         }}
         onUpdateAssetStatus={(assetId, st) => {
           handleBatchUpdateStatus([assetId], st);
