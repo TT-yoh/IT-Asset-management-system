@@ -30,7 +30,7 @@ export const AssetCheckOutModal: React.FC<AssetCheckOutModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    const targetUser = users.find(u => u.id === selectedUserId) || users[0]!;
+    const targetUser = users.find(u => u.id === selectedUserId) || users[0] || currentUser;
     const nowIso = new Date().toISOString().split('T')[0]!;
 
     const checkoutRecord: CheckoutRecord = {

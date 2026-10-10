@@ -36,7 +36,7 @@ export const CheckinForm: React.FC<CheckinFormProps> = ({
       return;
     }
 
-    if (confirm(`Confirm return check-in of ${asset.name} (${asset.assetCode})? Checked in condition: ${condition}${damageReported ? ' [DAMAGE REPORTED]' : ''}.`)) {
+    if (confirm(`Confirm return check-in of ${asset?.name || 'Device'} (${asset?.assetCode || 'N/A'})? Checked in condition: ${condition}${damageReported ? ' [DAMAGE REPORTED]' : ''}.`)) {
       onSubmitCheckin(condition, damageReported, damageDesc.trim(), notes.trim());
     }
   };
@@ -51,7 +51,7 @@ export const CheckinForm: React.FC<CheckinFormProps> = ({
           </div>
           <div>
             <span className="font-mono text-[10px] text-sky-400 font-bold bg-sky-500/10 px-2 py-0.5 rounded">
-              {asset.assetCode}
+              {asset?.assetCode || 'N/A'}
             </span>
             <h3 className="text-base font-bold text-slate-100 mt-0.5">Hardware Return Check-In</h3>
           </div>

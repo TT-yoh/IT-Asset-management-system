@@ -70,16 +70,17 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
   const [assignBranchId, setAssignBranchId] = useState(branches[0]?.id || '');
 
   React.useEffect(() => {
-    if (targetAssetId) {
+    if (targetAssetId && assets.length > 0) {
       const selectedAsset = assets.find(a => a.id === targetAssetId);
-      const isLaptopOrPhone = selectedAsset && (
-        selectedAsset.categoryName.toLowerCase().includes('laptop') ||
-        selectedAsset.categoryName.toLowerCase().includes('phone') ||
-        selectedAsset.categoryName.toLowerCase().includes('mobile') ||
-        selectedAsset.categoryName.toLowerCase().includes('cell') ||
-        selectedAsset.categoryName.toLowerCase().includes('smartphone') ||
-        selectedAsset.categoryId === 'cat-lap' ||
-        selectedAsset.categoryId === 'cat-phone'
+      const catName = selectedAsset?.categoryName?.toLowerCase() || '';
+      const isLaptopOrPhone = Boolean(
+        catName.includes('laptop') ||
+        catName.includes('phone') ||
+        catName.includes('mobile') ||
+        catName.includes('cell') ||
+        catName.includes('smartphone') ||
+        selectedAsset?.categoryId === 'cat-lap' ||
+        selectedAsset?.categoryId === 'cat-phone'
       );
       if (isLaptopOrPhone) {
         setAssignType('CUSTOM');
@@ -479,27 +480,52 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
          ==================================================================== */}
       {showCheckoutModal && (
         <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
-          <div className="max-w-lg w-full relative">
-            <div className="mb-3 bg-slate-900 border border-slate-800 p-3 rounded-2xl text-xs flex items-center justify-between">
-              <span className="text-slate-400">Select Target Device:</span>
-              <select
-                value={targetAssetId}
-                onChange={e => setTargetAssetId(e.target.value)}
-                className="bg-slate-950 border border-slate-700 text-white rounded-xl px-2.5 py-1 font-mono focus:outline-none"
-              >
-                {activeAssetsPool.map(a => <option key={a.id} value={a.id}>[{a.assetCode}] {a.name}</option>)}
-              </select>
+          {activeAssetsPool.length === 0 ? (
+            <div className="max-w-md w-full relative bg-slate-900 border border-slate-700 rounded-3xl p-6 md:p-8 shadow-2xl text-xs text-center space-y-4">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">No Assets Available for Checkout</h3>
+                <p className="text-slate-400 mt-1.5 leading-relaxed">
+                  {assets.length === 0
+                    ? "Your organization currently has 0 hardware devices in the inventory. Please register or intake devices in the Assets tab first before issuing a checkout."
+                    : "All registered hardware assets are currently assigned or undergoing maintenance."}
+                </p>
+              </div>
+              <div className="pt-2 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setShowCheckoutModal(false)}
+                  className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold transition cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
             </div>
+          ) : (
+            <div className="max-w-lg w-full relative">
+              <div className="mb-3 bg-slate-900 border border-slate-800 p-3 rounded-2xl text-xs flex items-center justify-between">
+                <span className="text-slate-400">Select Target Device:</span>
+                <select
+                  value={targetAssetId}
+                  onChange={e => setTargetAssetId(e.target.value)}
+                  className="bg-slate-950 border border-slate-700 text-white rounded-xl px-2.5 py-1 font-mono focus:outline-none"
+                >
+                  {activeAssetsPool.map(a => <option key={a.id} value={a.id}>[{a.assetCode}] {a.name}</option>)}
+                </select>
+              </div>
 
-            <CheckoutForm
-              asset={assets.find(a => a.id === targetAssetId) || assets[0]!}
-              users={users}
-              branches={branches}
-              adminUser={currentUser}
-              onSubmitCheckout={handleExecuteCheckout}
-              onCancel={() => setShowCheckoutModal(false)}
-            />
-          </div>
+              <CheckoutForm
+                asset={activeAssetsPool.find(a => a.id === targetAssetId) || activeAssetsPool[0]!}
+                users={users}
+                branches={branches}
+                adminUser={currentUser}
+                onSubmitCheckout={handleExecuteCheckout}
+                onCancel={() => setShowCheckoutModal(false)}
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -509,7 +535,23 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
       {showCheckinModal && targetCheckoutRecord && (
         <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
           <CheckinForm
-            asset={assets.find(a => a.id === targetCheckoutRecord.assetId) || assets[0]!}
+            asset={assets.find(a => a.id === targetCheckoutRecord.assetId) || {
+              id: targetCheckoutRecord.assetId,
+              orgId: currentUser.orgId,
+              branchId: branches[0]?.id || 'br-main',
+              branchName: branches[0]?.name || 'Main Campus',
+              categoryId: 'cat-gen',
+              categoryName: 'Hardware',
+              assetCode: targetCheckoutRecord.assetCode,
+              name: targetCheckoutRecord.assetName,
+              model: '',
+              serialNumber: 'N/A',
+              status: 'ACTIVE',
+              condition: 'GOOD',
+              purchaseDate: targetCheckoutRecord.checkedOutAt,
+              purchaseCost: 0,
+              currentValue: 0
+            }}
             activeCheckout={targetCheckoutRecord}
             onSubmitCheckin={handleExecuteCheckin}
             onCancel={() => {
@@ -524,15 +566,43 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
           MODAL C: ADMIN FORCE ASSIGN (FILE 3 REQUIREMENT)
          ==================================================================== */}
       {showAssignModal && (() => {
-        const selectedAssetForAssign = assets.find(a => a.id === targetAssetId);
-        const isSelectedAssetLaptopOrPhone = selectedAssetForAssign && (
-          selectedAssetForAssign.categoryName.toLowerCase().includes('laptop') ||
-          selectedAssetForAssign.categoryName.toLowerCase().includes('phone') ||
-          selectedAssetForAssign.categoryName.toLowerCase().includes('mobile') ||
-          selectedAssetForAssign.categoryName.toLowerCase().includes('cell') ||
-          selectedAssetForAssign.categoryName.toLowerCase().includes('smartphone') ||
-          selectedAssetForAssign.categoryId === 'cat-lap' ||
-          selectedAssetForAssign.categoryId === 'cat-phone'
+        if (assets.length === 0) {
+          return (
+            <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
+              <div className="max-w-md w-full bg-slate-900 border border-slate-700 rounded-3xl p-6 md:p-8 shadow-2xl text-xs text-center space-y-4">
+                <div className="w-12 h-12 rounded-2xl bg-sky-500/10 border border-sky-500/20 text-sky-400 flex items-center justify-center mx-auto">
+                  <UserCheck className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">No Hardware Assets to Assign</h3>
+                  <p className="text-slate-400 mt-1.5 leading-relaxed">
+                    There are currently 0 hardware assets in the organization inventory. Please register devices in the Assets catalog first.
+                  </p>
+                </div>
+                <div className="pt-2 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => setShowAssignModal(false)}
+                    className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold transition cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        const selectedAssetForAssign = assets.find(a => a.id === targetAssetId) || assets[0];
+        const catName = selectedAssetForAssign?.categoryName?.toLowerCase() || '';
+        const isSelectedAssetLaptopOrPhone = Boolean(
+          catName.includes('laptop') ||
+          catName.includes('phone') ||
+          catName.includes('mobile') ||
+          catName.includes('cell') ||
+          catName.includes('smartphone') ||
+          selectedAssetForAssign?.categoryId === 'cat-lap' ||
+          selectedAssetForAssign?.categoryId === 'cat-phone'
         );
 
         return (
@@ -636,8 +706,8 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
                 </div>
 
                 <div className="pt-3 flex justify-end gap-3">
-                  <button type="button" onClick={() => setShowAssignModal(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl">Cancel</button>
-                  <button type="submit" className="px-5 py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold rounded-xl shadow-lg">Confirm Assign</button>
+                  <button type="button" onClick={() => setShowAssignModal(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl cursor-pointer">Cancel</button>
+                  <button type="submit" className="px-5 py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold rounded-xl shadow-lg cursor-pointer">Confirm Assign</button>
                 </div>
               </form>
             </div>
@@ -651,35 +721,52 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
       {showUnassignModal && (
         <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
           <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-6 md:p-8 shadow-2xl relative text-xs">
-            <button onClick={() => setShowUnassignModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-white">✕</button>
+            <button onClick={() => setShowUnassignModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer">✕</button>
             <h3 className="text-base font-bold text-white flex items-center gap-2">
               <UserX className="w-5 h-5 text-rose-400" />
               <span>Revoke Asset Assignment</span>
             </h3>
             <p className="text-slate-400 mt-1">Clears active employee custody and returns equipment to general pool.</p>
 
-            <form onSubmit={handleDirectUnassignSubmit} className="mt-5 space-y-4">
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Target Assigned Hardware</label>
-                <select value={targetAssetId} onChange={e => setTargetAssetId(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white">
-                  {checkedOutAssetsPool.map(a => <option key={a.id} value={a.id}>[{a.assetCode}] {a.name} (Held by: {a.assignedToUserName})</option>)}
-                </select>
+            {checkedOutAssetsPool.length === 0 ? (
+              <div className="mt-5 p-6 rounded-2xl bg-slate-950/60 border border-slate-800 text-center space-y-3">
+                <AlertCircle className="w-8 h-8 text-amber-400 mx-auto" />
+                <p className="text-slate-300 font-semibold">No Active Custody Assignments</p>
+                <p className="text-slate-500 text-[11px]">
+                  There are currently no hardware devices with assigned custody in this organization.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowUnassignModal(false)}
+                  className="px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  Close
+                </button>
               </div>
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Revocation Reason *</label>
-                <input
-                  type="text"
-                  required
-                  value={unassignReason}
-                  onChange={e => setUnassignReason(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white"
-                />
-              </div>
-              <div className="pt-3 flex justify-end gap-3">
-                <button type="button" onClick={() => setShowUnassignModal(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl">Cancel</button>
-                <button type="submit" className="px-5 py-2 bg-rose-500 hover:bg-rose-400 text-white font-bold rounded-xl shadow-lg">Revoke Custody</button>
-              </div>
-            </form>
+            ) : (
+              <form onSubmit={handleDirectUnassignSubmit} className="mt-5 space-y-4">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Target Assigned Hardware</label>
+                  <select value={targetAssetId} onChange={e => setTargetAssetId(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white">
+                    {checkedOutAssetsPool.map(a => <option key={a.id} value={a.id}>[{a.assetCode}] {a.name} (Held by: {a.assignedToUserName})</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Revocation Reason *</label>
+                  <input
+                    type="text"
+                    required
+                    value={unassignReason}
+                    onChange={e => setUnassignReason(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white"
+                  />
+                </div>
+                <div className="pt-3 flex justify-end gap-3">
+                  <button type="button" onClick={() => setShowUnassignModal(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl cursor-pointer">Cancel</button>
+                  <button type="submit" className="px-5 py-2 bg-rose-500 hover:bg-rose-400 text-white font-bold rounded-xl shadow-lg cursor-pointer">Revoke Custody</button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

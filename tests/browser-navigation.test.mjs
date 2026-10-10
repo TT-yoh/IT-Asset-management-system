@@ -155,11 +155,11 @@ async function runBrowserTest() {
 
     // Wait for login transition
     let loggedIn = false;
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 30; i++) {
       await sleep(500);
       const hash = await cdp.eval('window.location.hash');
-      const hasNavbar = await cdp.eval('!!document.querySelector("nav") || document.body.innerText.includes("OmniAsset") && !document.body.innerText.includes("Corporate Sign-In")');
-      if (hash === '#/dashboard' || hasNavbar) {
+      const hasAside = await cdp.eval('!!document.querySelector("aside")');
+      if (hash === '#/dashboard' && hasAside) {
         loggedIn = true;
         break;
       }

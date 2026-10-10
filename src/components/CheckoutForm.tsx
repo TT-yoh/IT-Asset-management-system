@@ -28,14 +28,16 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
 }) => {
   const defaultReturn = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]!;
   
-  const isLaptopOrPhone =
-    asset.categoryName.toLowerCase().includes('laptop') ||
-    asset.categoryName.toLowerCase().includes('phone') ||
-    asset.categoryName.toLowerCase().includes('mobile') ||
-    asset.categoryName.toLowerCase().includes('cell') ||
-    asset.categoryName.toLowerCase().includes('smartphone') ||
-    asset.categoryId === 'cat-lap' ||
-    asset.categoryId === 'cat-phone';
+  const catName = asset?.categoryName?.toLowerCase() || '';
+  const isLaptopOrPhone = Boolean(
+    catName.includes('laptop') ||
+    catName.includes('phone') ||
+    catName.includes('mobile') ||
+    catName.includes('cell') ||
+    catName.includes('smartphone') ||
+    asset?.categoryId === 'cat-lap' ||
+    asset?.categoryId === 'cat-phone'
+  );
 
   // Assignee Type
   const [assigneeType, setAssigneeType] = useState<'REGISTERED' | 'CUSTOM'>(
@@ -45,7 +47,7 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
   const [customName, setCustomName] = useState<string>('');
   
   // Location / Branch Allocation
-  const [selectedBranchId, setSelectedBranchId] = useState<string>(asset.branchId || branches[0]?.id || '');
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(asset?.branchId || branches[0]?.id || '');
 
   // Checkout Details
   const [reason, setReason] = useState('Daily use');
@@ -53,6 +55,31 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
   const [returnDate, setReturnDate] = useState(defaultReturn);
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  if (!asset) {
+    return (
+      <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl relative text-xs text-center space-y-4">
+        <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
+          <AlertCircle className="w-6 h-6" />
+        </div>
+        <div>
+          <h3 className="text-base font-bold text-white">No Asset Available to Check Out</h3>
+          <p className="text-slate-400 mt-1">
+            There are currently no hardware assets available in the active pool. Please register devices in the Assets tab first.
+          </p>
+        </div>
+        <div className="pt-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold cursor-pointer"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const reasonsList = [
     'Daily use',
