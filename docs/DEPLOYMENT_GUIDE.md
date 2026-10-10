@@ -35,7 +35,7 @@ Upon initial deployment, use the provisioned enterprise Super Admin account to a
 Ensure the following variables are configured in your production environment (e.g., host environment, `.env`, or cloud secrets vault):
 
 ```bash
-# Node & Gateway Port
+# Node & Gateway Port (Optional - defaults to 3001)
 PORT=3001
 NODE_ENV=production
 
@@ -49,12 +49,6 @@ TIDB_USER=<your-tidb-cluster-user>
 TIDB_PASSWORD=<your-tidb-cluster-password>
 TIDB_DATABASE=it_asset_ledger
 TIDB_SSL=true
-
-# AI Assistant & Depreciation Advisor (Optional)
-GEMINI_API_KEY=<your-google-gemini-api-key>
-
-# Application Base URL (for email links and webhooks)
-APP_URL=https://assets.yourcompany.com
 ```
 
 ---
