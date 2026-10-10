@@ -1,7 +1,7 @@
 /**
  * Complete End-to-End System Functionality & Integrity Test Suite
  * Tests 100% of the system workflows:
- * - Super Admin Authentication (ismaelt42@gmail.com / Tatenda3@4)
+ * - Super Admin Authentication (ishmaelt42@gmail.com / Tatenda3@4)
  * - Zero-Roundtrip Init Dataset Scoping
  * - Asset Lifecycle (Create -> Update -> Checkout -> Return -> Maintenance -> Complete -> Write-off)
  * - Branch Hub Operations (Create -> Upsert -> Update -> Read)
@@ -51,12 +51,12 @@ test('1. Health Check Endpoint (/api/health)', async () => {
 });
 
 // 2. Super Admin Login
-test('2. Super Admin Login (ismaelt42@gmail.com / Tatenda3@4)', async () => {
+test('2. Super Admin Login (ishmaelt42@gmail.com / Tatenda3@4)', async () => {
   const res = await fetch(`${BASE_URL}/api/auth/login`, {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify({
-      email: 'ismaelt42@gmail.com',
+      email: 'ishmaelt42@gmail.com',
       password: 'Tatenda3@4'
     })
   });
@@ -72,7 +72,7 @@ test('2. Super Admin Login (ismaelt42@gmail.com / Tatenda3@4)', async () => {
   }
 
   const data = await res.json();
-  if (!data.user || data.user.email !== 'ismaelt42@gmail.com' || data.user.role !== 'ADMIN') {
+  if (!data.user || data.user.email !== 'ishmaelt42@gmail.com' || data.user.role !== 'ADMIN') {
     throw new Error(`Invalid user profile returned on login: ${JSON.stringify(data.user)}`);
   }
 });
@@ -82,7 +82,7 @@ test('3. Verify Authenticated Profile (/api/auth/me)', async () => {
   const res = await fetch(`${BASE_URL}/api/auth/me`, { headers: headers() });
   if (!res.ok) throw new Error(`Failed to fetch /api/auth/me: ${res.status}`);
   const data = await res.json();
-  if (data.user.email !== 'ismaelt42@gmail.com') throw new Error(`Profile email mismatch: ${data.user.email}`);
+  if (data.user.email !== 'ishmaelt42@gmail.com') throw new Error(`Profile email mismatch: ${data.user.email}`);
 });
 
 // 4. Initial Organization Dataset Load

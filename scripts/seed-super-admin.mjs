@@ -20,7 +20,7 @@ async function run() {
     ssl: { minVersion: 'TLSv1.2', rejectUnauthorized: false }
   });
 
-  const email = 'ismaelt42@gmail.com';
+  const email = 'ishmaelt42@gmail.com';
   const rawPassword = 'Tatenda3@4';
   const passwordHash = await bcrypt.hash(rawPassword, 10);
 
@@ -45,12 +45,12 @@ async function run() {
       department_id, department_name, branch_id, branch_name,
       password_hash, two_factor_enabled, avatar, version
     ) VALUES (
-      'usr-super-admin-ismael', ?, ?, 'Ismael (Super Admin)', 'ADMIN', 'ACTIVE',
+      'usr-super-admin-ishmael', ?, ?, 'Ishmael (Super Admin)', 'ADMIN', 'ACTIVE',
       ?, ?, ?, ?,
       ?, 0, 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80', 1
     ) ON DUPLICATE KEY UPDATE
       org_id = VALUES(org_id),
-      full_name = 'Ismael (Super Admin)',
+      full_name = 'Ishmael (Super Admin)',
       role = 'ADMIN',
       status = 'ACTIVE',
       department_id = VALUES(department_id),

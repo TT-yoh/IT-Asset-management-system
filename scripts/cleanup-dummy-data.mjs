@@ -69,8 +69,8 @@ async function cleanup() {
   await conn.query('DELETE FROM `organizations` WHERE `id` NOT IN ("org-omnitech");');
   console.log('✓ Retained single production organization (OmniTech Enterprise Systems)');
 
-  // 6. Delete all dummy users, preserving ONLY Super Admin ismaelt42@gmail.com
-  await conn.query('DELETE FROM `users` WHERE LOWER(`email`) != "ismaelt42@gmail.com";');
+  // 6. Delete all dummy users, preserving ONLY Super Admin ishmaelt42@gmail.com
+  await conn.query('DELETE FROM `users` WHERE LOWER(`email`) != "ishmaelt42@gmail.com";');
   
   // Upsert Super Admin with production bcrypt hash
   const superPasswordHash = await bcrypt.hash('Tatenda3@4', 12);
@@ -79,14 +79,15 @@ async function cleanup() {
       \`id\`, \`org_id\`, \`email\`, \`password_hash\`, \`full_name\`, \`role\`,
       \`status\`, \`department_id\`, \`department_name\`, \`branch_id\`, \`branch_name\`, \`two_factor_enabled\`
     ) VALUES (
-      'usr-super-admin-ismael', 'org-omnitech', 'ismaelt42@gmail.com', ?, 'Ismael (Super Admin)', 'ADMIN',
+      'usr-super-admin-ishmael', 'org-omnitech', 'ishmaelt42@gmail.com', ?, 'Ishmael (Super Admin)', 'ADMIN',
       'ACTIVE', 'dept-sec', 'Cybersecurity & InfoSec', 'branch-main', 'Global Headquarters', 0
     ) ON DUPLICATE KEY UPDATE
       \`password_hash\` = VALUES(\`password_hash\`),
+      \`full_name\` = 'Ishmael (Super Admin)',
       \`role\` = 'ADMIN',
       \`status\` = 'ACTIVE';
   `, [superPasswordHash]);
-  console.log('✓ Preserved ONLY Super Admin account (ismaelt42@gmail.com)');
+  console.log('✓ Preserved ONLY Super Admin account (ishmaelt42@gmail.com)');
 
   // 7. Verify counts
   const [[{ assetCount }]] = await conn.query('SELECT COUNT(*) as assetCount FROM `assets`;');

@@ -10,7 +10,7 @@ All dummy records, test assets, sample work orders, and demo accounts have been 
 | **Checkouts / Custody** | `0 Records` | Zero active checkouts |
 | **Maintenance Tickets** | `0 Records` | Zero open repair orders |
 | **Budgets** | `0 Records` | Ready for financial year allocations |
-| **Super Admin** | `Active` | Email: `ismaelt42@gmail.com` |
+| **Super Admin** | `Active` | Email: `ishmaelt42@gmail.com` |
 | **Primary Organization** | `org-omnitech` | OmniTech Enterprise Systems |
 | **Primary Facility** | `branch-main` | Global Headquarters |
 | **Cryptographic Audit Chain** | `Genesis Initialized` | Sequential SHA-256 hash chaining active |
@@ -22,7 +22,7 @@ All dummy records, test assets, sample work orders, and demo accounts have been 
 Upon initial deployment, use the provisioned enterprise Super Admin account to access the administrative portal and invite staff:
 
 - **Portal URL**: `/` or `/login`
-- **Username / Email**: `ismaelt42@gmail.com`
+- **Username / Email**: `ishmaelt42@gmail.com`
 - **Password**: `Tatenda3@4`
 - **Role**: `SUPER_ADMIN` (Omni-tenant and system-wide privileges)
 

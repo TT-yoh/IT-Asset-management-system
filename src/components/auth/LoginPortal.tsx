@@ -39,7 +39,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
   const [showRegisterCompanyModal, setShowRegisterCompanyModal] = useState(false);
 
   // Standard Sign-In Form State (Default: Super Admin)
-  const [email, setEmail] = useState('ismaelt42@gmail.com');
+  const [email, setEmail] = useState('ishmaelt42@gmail.com');
   const [password, setPassword] = useState('Tatenda3@4');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -160,13 +160,13 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
       setIsLoading(false);
       
       const normalizedInput = email.trim().toLowerCase();
-      const isSuperAdmin = normalizedInput === 'ismaelt42@gmail.com';
+      const isSuperAdmin = normalizedInput === 'ishmaelt42@gmail.com';
 
       // Look up user across company tenants strictly by matching corporate email / identity
       const targetUser = users.find(
         u => u.email.toLowerCase() === normalizedInput || 
              u.email.toLowerCase().split('@')[0] === normalizedInput ||
-             (isSuperAdmin && (u.id === 'usr-super-admin-ismael' || u.email.toLowerCase() === 'ismaelt42@gmail.com'))
+             (isSuperAdmin && (u.id === 'usr-super-admin-ishmael' || u.email.toLowerCase() === 'ishmaelt42@gmail.com'))
       );
       
       if (!targetUser) {

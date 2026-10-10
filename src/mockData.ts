@@ -61,10 +61,10 @@ export const DEPARTMENTS: Department[] = [
 // ============================================================================
 export const USERS: User[] = [
   {
-    id: 'usr-super-admin-ismael',
+    id: 'usr-super-admin-ishmael',
     orgId: 'org-omnitech',
-    email: 'ismaelt42@gmail.com',
-    fullName: 'Ismael (Super Admin)',
+    email: 'ishmaelt42@gmail.com',
+    fullName: 'Ishmael (Super Admin)',
     role: 'ADMIN',
     departmentId: 'dept-sec',
     departmentName: 'Cybersecurity & InfoSec',

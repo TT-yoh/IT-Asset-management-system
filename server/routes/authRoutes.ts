@@ -43,15 +43,15 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     [cleanEmail]
   );
 
-  const isSuperAdmin = cleanEmail === 'ismaelt42@gmail.com';
+  const isSuperAdmin = cleanEmail === 'ishmaelt42@gmail.com';
 
   let user = users[0];
   if (!user && isSuperAdmin && password === 'Tatenda3@4') {
     user = {
-      id: 'usr-super-admin-ismael',
+      id: 'usr-super-admin-ishmael',
       org_id: 'org-omnitech',
-      email: 'ismaelt42@gmail.com',
-      full_name: 'Ismael (Super Admin)',
+      email: 'ishmaelt42@gmail.com',
+      full_name: 'Ishmael (Super Admin)',
       role: 'ADMIN',
       status: 'ACTIVE',
       department_id: 'dept-sec',
@@ -212,7 +212,7 @@ authRouter.get('/me', authenticate, async (req: Request, res: Response) => {
   );
 
   let u = users[0];
-  if (!u && req.auth!.email === 'ismaelt42@gmail.com') {
+  if (!u && req.auth!.email === 'ishmaelt42@gmail.com') {
     u = {
       id: req.auth!.userId,
       org_id: req.auth!.orgId,

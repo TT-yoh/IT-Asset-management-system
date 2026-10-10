@@ -25,7 +25,7 @@ export const MaintenancePanel: React.FC<MaintenancePanelProps> = ({
   maintenances,
   assets,
   users = [],
-  currentUser = { id: 'usr-super-admin-ismael', fullName: 'Ismael (Super Admin)', role: 'ADMIN', orgId: 'org-omnitech', branchId: 'branch-main', email: 'ismaelt42@gmail.com' },
+  currentUser = { id: 'usr-super-admin-ishmael', fullName: 'Ishmael (Super Admin)', role: 'ADMIN', orgId: 'org-omnitech', branchId: 'branch-main', email: 'ishmaelt42@gmail.com' },
   onReportIssue,
   onUpdateTicket,
   onCompleteRepair
