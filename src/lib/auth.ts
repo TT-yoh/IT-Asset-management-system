@@ -116,10 +116,6 @@ export const MockAuthEngine = {
     const normalizedInput = email.trim().toLowerCase();
     const isSuperAdmin = normalizedInput === 'ishmaelt42@gmail.com';
 
-    if (isSuperAdmin && password && password !== 'Tatenda3@4') {
-      return { status: 401, error: 'Invalid password for Super Administrator account.' };
-    }
-
     const user = list.find(u => 
       (u.orgId === orgId || isSuperAdmin) && (
         u.email.toLowerCase() === normalizedInput || 

@@ -38,9 +38,9 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
   const [authMode, setAuthMode] = useState<'SIGNIN' | 'ACTIVATE'>('SIGNIN');
   const [showRegisterCompanyModal, setShowRegisterCompanyModal] = useState(false);
 
-  // Standard Sign-In Form State (Default: Super Admin)
-  const [email, setEmail] = useState('ishmaelt42@gmail.com');
-  const [password, setPassword] = useState('Tatenda3@4');
+  // Standard Sign-In Form State (User must input their own credentials)
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -182,9 +182,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
       // Automatically determine user's isolated company tenant
       const userOrg = organizations.find(o => o.id === targetUser.orgId) || organizations[0]!;
 
-      const expectedPassword = isSuperAdmin ? 'Tatenda3@4' : targetUser.password;
-      
-      if (password !== expectedPassword) {
+      if (targetUser.password && password !== targetUser.password) {
         setError(`Invalid credentials for ${targetUser.fullName}. Please check your password.`);
         return;
       }

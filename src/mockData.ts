@@ -71,7 +71,6 @@ export const USERS: User[] = [
     branchId: 'branch-main',
     branchName: 'Global Headquarters',
     twoFactorEnabled: false,
-    password: 'Tatenda3@4',
     status: 'ACTIVE'
   }
 ];
