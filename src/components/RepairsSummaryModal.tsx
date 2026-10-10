@@ -21,7 +21,7 @@ export const RepairsSummaryModal: React.FC<RepairsSummaryModalProps> = ({
               <BarChart2 className="w-6 h-6" />
             </div>
             <div>
-              <span className="text-[10px] font-mono text-rose-400 font-bold tracking-wider uppercase">File 10 Endpoint Simulation</span>
+              <span className="text-[10px] font-mono text-rose-400 font-bold tracking-wider uppercase">Maintenance Intelligence Analytics</span>
               <h3 className="text-lg font-bold text-white mt-0.5 flex items-center gap-2">
                 <span>Repairs & Maintenance Intelligence Dashboard</span>
               </h3>
@@ -94,7 +94,7 @@ export const RepairsSummaryModal: React.FC<RepairsSummaryModalProps> = ({
             {/* Technician Workload */}
             <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 space-y-4">
               <h4 className="font-bold text-slate-300 uppercase tracking-wider text-[11px] flex items-center gap-2">
-                <Users className="w-4 h-4 text-teal-400" />
+                <Users className="w-4 h-4 text-emerald-400" />
                 <span>Technician Workload & Output</span>
               </h4>
 

@@ -208,8 +208,8 @@ export const ThreeDDashboard: React.FC<ThreeDDashboardProps> = ({
 
         {/* Floating Tooltip */}
         {hoveredNode && (
-          <div className="absolute top-6 right-6 z-20 bg-slate-900/95 border border-teal-500/50 p-3.5 rounded-2xl shadow-2xl text-xs max-w-xs pointer-events-none animate-in fade-in duration-150 backdrop-blur-md">
-            <span className="text-[10px] font-mono text-teal-400 font-bold uppercase tracking-wider block">Telemetry Hover Node</span>
+          <div className="absolute top-6 right-6 z-20 bg-slate-900/95 border border-emerald-500/50 p-3.5 rounded-2xl shadow-2xl text-xs max-w-xs pointer-events-none animate-in fade-in duration-150 backdrop-blur-md">
+            <span className="text-[10px] font-mono text-emerald-400 font-bold uppercase tracking-wider block">Telemetry Hover Node</span>
             <span className="text-white font-bold text-sm mt-0.5 block">{hoveredNode.title}</span>
             {hoveredNode.code && <span className="text-slate-400 font-mono text-[11px] block mt-0.5">ID Code: {hoveredNode.code}</span>}
             {hoveredNode.count !== undefined && <span className="text-emerald-300 font-bold block mt-1">📦 {hoveredNode.count} Active Units</span>}
@@ -245,7 +245,7 @@ export const ThreeDDashboard: React.FC<ThreeDDashboardProps> = ({
           <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl relative text-xs text-slate-300 space-y-4">
             <button onClick={() => setShowLegendModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
             <h3 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-              <Info className="w-5 h-5 text-teal-400 shrink-0" />
+              <Info className="w-5 h-5 text-emerald-400 shrink-0" />
               <span>3D Projection Matrix Legend</span>
             </h3>
 

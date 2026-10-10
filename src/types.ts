@@ -1,4 +1,4 @@
-export type OrgType = 'Mining' | 'RetailIT';
+export type OrgType = 'Enterprise' | 'Technology' | 'Healthcare' | 'Finance' | 'Education' | 'Manufacturing' | 'Retail' | 'Mining' | 'General' | string;
 
 export type UserRole = 'ADMIN' | 'DIRECTOR' | 'BRANCH_MANAGER' | 'IT_SUPPORT' | 'FINANCE' | 'USER';
 
@@ -54,6 +54,10 @@ export interface User {
   avatar: string;
   twoFactorSecret?: string;
   password?: string;
+  status?: 'ACTIVE' | 'INVITED' | 'SUSPENDED';
+  inviteToken?: string;
+  invitedAt?: string;
+  version?: number;
 }
 
 export interface AssetCategory {
@@ -93,6 +97,7 @@ export interface Asset {
   assignedAt?: string;
   imageUrl: string;
   notes?: string;
+  version?: number;
 }
 
 export interface CheckoutRecord {
@@ -112,6 +117,7 @@ export interface CheckoutRecord {
   reason: string;
   status: CheckoutStatus;
   notes?: string;
+  version?: number;
 }
 
 export interface MaintenanceRecord {
@@ -131,6 +137,7 @@ export interface MaintenanceRecord {
   cost: number;
   partsReplaced?: string;
   notes?: string;
+  version?: number;
   auditLogs?: Array<{
     id: string;
     timestamp: string;
@@ -153,13 +160,18 @@ export interface BudgetAllocation {
 export interface AuditLogItem {
   id: string;
   orgId: string;
+  seq?: number;
+  actorId?: string;
   userName: string;
   userRole: UserRole;
   action: string;
-  entityType: 'Asset' | 'User' | 'Maintenance' | 'Checkout' | 'Budget';
+  entityType: 'Asset' | 'User' | 'Maintenance' | 'Checkout' | 'Budget' | 'Organization';
+  entityId?: string;
   entityName: string;
   changes: string;
   timestamp: string;
+  prevHash?: string;
+  hash?: string;
   ipAddress: string;
 }
 

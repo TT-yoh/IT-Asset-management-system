@@ -133,6 +133,9 @@ export class AssetService {
     const serialIdx = headers.indexOf('serial_number');
     const catIdx = headers.indexOf('category');
     const costIdx = headers.indexOf('purchase_cost');
+    const dateIdx = headers.findIndex(h => h.includes('date') || h.includes('purchased') || h.includes('acquired'));
+    const conditionIdx = headers.findIndex(h => h.includes('condition'));
+    const valueIdx = headers.findIndex(h => h.includes('current_value') || h.includes('book_value') || h.includes('current_val'));
     const phoneIdx = headers.findIndex(h => h.includes('phone') || h.includes('number'));
     const emailIdx = headers.findIndex(h => h.includes('email'));
 
@@ -152,6 +155,28 @@ export class AssetService {
       const cost = parseFloat(costStr) || 1000;
       const phoneVal = phoneIdx !== -1 ? cols[phoneIdx] : undefined;
       const emailVal = emailIdx !== -1 ? cols[emailIdx] : undefined;
+
+      // Historical purchase date handling for preexisting assets
+      let rawDate = dateIdx !== -1 ? cols[dateIdx] : undefined;
+      let purchaseDate = new Date().toISOString().split('T')[0]!;
+      if (rawDate) {
+        const parsed = new Date(rawDate);
+        if (!isNaN(parsed.getTime())) {
+          purchaseDate = parsed.toISOString().split('T')[0]!;
+        }
+      }
+
+      // Condition: explicit in CSV, or default based on age
+      const rawCondition = conditionIdx !== -1 ? cols[conditionIdx]?.toUpperCase() : undefined;
+      const condition: Asset['condition'] = (rawCondition === 'NEW' || rawCondition === 'GOOD' || rawCondition === 'FAIR' || rawCondition === 'POOR')
+        ? rawCondition
+        : (purchaseDate < new Date(Date.now() - 365 * 86400000).toISOString().split('T')[0]! ? 'GOOD' : 'NEW');
+
+      // Current Value: explicit in CSV or auto-calculated via straight-line depreciation
+      const explicitVal = valueIdx !== -1 ? parseFloat(cols[valueIdx]) : NaN;
+      const currentValue = !isNaN(explicitVal)
+        ? explicitVal
+        : AssetService.calculateCurrentValue(cost, purchaseDate);
 
       if (!name || !serial) {
         errors.push({ row: i + 1, message: 'Name and Serial Number are mandatory' });
@@ -176,13 +201,13 @@ export class AssetService {
         phoneNumber: phoneVal || undefined,
         registeredEmail: emailVal || undefined,
         status: 'ACTIVE',
-        condition: 'NEW',
-        purchaseDate: new Date().toISOString().split('T')[0]!,
+        condition,
+        purchaseDate,
         purchaseCost: cost,
         warrantyExpiry: new Date(Date.now() + 3 * 365 * 86400000).toISOString().split('T')[0]!,
-        currentValue: cost,
+        currentValue,
         imageUrl: 'https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?w=600&auto=format&fit=crop&q=80',
-        notes: 'Imported via Bulk CSV upload.'
+        notes: `Imported via Bulk CSV upload. (Historical acquisition: ${purchaseDate})`
       };
 
       createdAssets.push(newAst);

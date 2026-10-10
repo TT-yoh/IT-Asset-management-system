@@ -60,7 +60,7 @@ export const BudgetPanel: React.FC<BudgetPanelProps> = ({
           <div>
             <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
               <span className="text-xs font-bold text-white uppercase tracking-wider">Department Budget Ledger (FY 2026)</span>
-              <span className="text-[10px] text-slate-400 font-mono">Prisma Allocation Table</span>
+              <span className="text-[10px] text-emerald-400/90 font-mono">Fiscal Allocations</span>
             </div>
 
             <div className="space-y-4">
@@ -70,14 +70,14 @@ export const BudgetPanel: React.FC<BudgetPanelProps> = ({
                   <div key={b.id} className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/80">
                     <div className="flex items-center justify-between text-xs font-bold text-white mb-1">
                       <span>{b.departmentName}</span>
-                      <span className="font-mono text-teal-400">${b.spent.toLocaleString()} / ${b.allocated.toLocaleString()}</span>
+                      <span className="font-mono text-emerald-400">${b.spent.toLocaleString()} / ${b.allocated.toLocaleString()}</span>
                     </div>
                     <div className="flex items-center justify-between text-[10px] text-slate-400 mb-2">
                       <span>Branch: {b.branchName}</span>
                       <span>{pct}% Utilized</span>
                     </div>
                     <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                      <div className={`h-full transition-all duration-500 ${pct > 85 ? 'bg-rose-500' : pct > 65 ? 'bg-amber-400' : 'bg-teal-400'}`} style={{ width: `${pct}%` }} />
+                      <div className={`h-full transition-all duration-500 ${pct > 85 ? 'bg-rose-500' : pct > 65 ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${pct}%` }} />
                     </div>
                   </div>
                 );
@@ -98,19 +98,19 @@ export const BudgetPanel: React.FC<BudgetPanelProps> = ({
           <div>
             <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
               <div className="flex items-center space-x-2">
-                <Calculator className="w-4 h-4 text-teal-400" />
+                <Calculator className="w-4 h-4 text-emerald-400" />
                 <span className="text-xs font-bold text-white uppercase tracking-wider">Asset Depreciation Simulator</span>
               </div>
               <div className="flex bg-slate-950 rounded-lg p-0.5 border border-slate-800 text-[10px] font-semibold">
                 <button
                   onClick={() => setMethod('STRAIGHT_LINE')}
-                  className={`px-2 py-1 rounded-md transition-colors ${method === 'STRAIGHT_LINE' ? 'bg-teal-500 text-slate-950 font-bold' : 'text-slate-400'}`}
+                  className={`px-2 py-1 rounded-md transition-colors ${method === 'STRAIGHT_LINE' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-400'}`}
                 >
                   Straight Line
                 </button>
                 <button
                   onClick={() => setMethod('DECLINING_BALANCE')}
-                  className={`px-2 py-1 rounded-md transition-colors ${method === 'DECLINING_BALANCE' ? 'bg-teal-500 text-slate-950 font-bold' : 'text-slate-400'}`}
+                  className={`px-2 py-1 rounded-md transition-colors ${method === 'DECLINING_BALANCE' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-400'}`}
                 >
                   Declining Bal.
                 </button>
@@ -139,7 +139,7 @@ export const BudgetPanel: React.FC<BudgetPanelProps> = ({
                     <th className="p-2.5">Year</th>
                     <th className="p-2.5">Start Book ($)</th>
                     <th className="p-2.5 text-rose-400">Depreciation ($)</th>
-                    <th className="p-2.5 text-teal-400">End Book ($)</th>
+                    <th className="p-2.5 text-emerald-400">End Book ($)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 text-slate-200">
@@ -148,7 +148,7 @@ export const BudgetPanel: React.FC<BudgetPanelProps> = ({
                       <td className="p-2.5 font-bold">Year {s.year}</td>
                       <td className="p-2.5">${s.start.toLocaleString()}</td>
                       <td className="p-2.5 text-rose-300">-${s.dep.toLocaleString()}</td>
-                      <td className="p-2.5 text-teal-300 font-bold">${s.end.toLocaleString()}</td>
+                      <td className="p-2.5 text-emerald-300 font-bold">${s.end.toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -158,7 +158,7 @@ export const BudgetPanel: React.FC<BudgetPanelProps> = ({
 
           <div className="mt-4 pt-3 border-t border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
             <span>Method: {method === 'STRAIGHT_LINE' ? 'Equal annual deduction' : 'Accelerated early depreciation'}</span>
-            <span className="text-teal-400 font-semibold flex items-center gap-1"><span>Prisma Table 9</span><ArrowRight className="w-3 h-3" /></span>
+            <span className="text-emerald-400 font-semibold flex items-center gap-1"><span>Depreciation Ledger</span><ArrowRight className="w-3 h-3" /></span>
           </div>
         </div>
       </div>

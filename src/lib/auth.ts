@@ -114,13 +114,19 @@ export const MockAuthEngine = {
 
     const list = customUsersList || USERS;
     const normalizedInput = email.trim().toLowerCase();
-    const isVision = normalizedInput === 'vision' || normalizedInput === 'vision@mineazy.com';
+    const isSuperAdmin = normalizedInput === 'ismaelt42@gmail.com';
 
-    if (isVision && password && password !== 'MyAdmin30$') {
-      return { status: 401, error: 'Invalid password for ADMIN account "vision". Use MyAdmin30$' };
+    if (isSuperAdmin && password && password !== 'Tatenda3@4') {
+      return { status: 401, error: 'Invalid password for Super Administrator account.' };
     }
 
-    const user = list.find(u => u.orgId === orgId && (u.email.toLowerCase() === normalizedInput || (isVision && u.id === 'u-vision')));
+    const user = list.find(u => 
+      (u.orgId === orgId || isSuperAdmin) && (
+        u.email.toLowerCase() === normalizedInput || 
+        (isSuperAdmin && (u.id === 'usr-super-admin-ismael' || u.email.toLowerCase() === 'ismaelt42@gmail.com')) ||
+        u.email.toLowerCase().split('@')[0] === normalizedInput
+      )
+    );
     if (!user) return { status: 401, error: 'Invalid user email or credentials for this organization' };
 
     if (user.twoFactorEnabled) {

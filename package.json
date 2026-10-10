@@ -5,22 +5,32 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
+    "server": "tsx server/index.ts",
+    "start": "tsx server/index.ts",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test:security": "tsx tests/security-scoping.test.ts",
+    "test:audit": "tsx tests/audit-integrity.test.ts",
+    "test:concurrency": "tsx tests/offline-concurrency.test.ts",
+    "test:e2e": "tsx tests/e2e-system-functionality.test.ts",
+    "test": "tsx tests/security-scoping.test.ts && tsx tests/audit-integrity.test.ts && tsx tests/offline-concurrency.test.ts && tsx tests/e2e-system-functionality.test.ts",
+    "db:migrate:tidb": "node scripts/execute-tidb-schema.mjs",
+    "db:clean": "node scripts/cleanup-dummy-data.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
-    "@supabase/supabase-js": "^2.108.2",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
+    "bcryptjs": "^3.0.3",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "html5-qrcode": "^2.3.8",
     "jspdf": "^4.2.1",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "mysql2": "^3.24.5",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "recharts": "^3.9.0",
@@ -29,6 +39,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/three": "^0.185.0",

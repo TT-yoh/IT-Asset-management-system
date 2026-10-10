@@ -56,7 +56,7 @@ export const AssetFilter: React.FC<AssetFilterProps> = ({
             value={searchQuery || ''}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search by name, asset code, serial #, or model..."
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-10 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-teal-500 transition"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-10 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition"
           />
           {searchQuery && (
             <button
@@ -71,9 +71,9 @@ export const AssetFilter: React.FC<AssetFilterProps> = ({
         {/* Filter Stats & Reset */}
         <div className="flex items-center gap-3 justify-end">
           <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800">
-            <Filter className="w-3.5 h-3.5 text-teal-400" />
+            <Filter className="w-3.5 h-3.5 text-emerald-400" />
             <span>Active Filters:</span>
-            <span className="font-mono font-bold text-teal-400 bg-teal-500/10 px-1.5 py-0.5 rounded">
+            <span className="font-mono font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
               {activeCount}
             </span>
           </div>
@@ -95,14 +95,14 @@ export const AssetFilter: React.FC<AssetFilterProps> = ({
         {/* Branch Filter */}
         <div>
           <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 flex items-center gap-1">
-            <Building2 className="w-3 h-3 text-teal-400" />
+            <Building2 className="w-3 h-3 text-emerald-400" />
             <span>Branch Location</span>
           </label>
           <select
             value={selectedBranch}
             disabled={isBranchRestricted}
             onChange={(e) => onBranchChange(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-teal-500 disabled:opacity-60"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500 disabled:opacity-60"
           >
             <option value="ALL">All Branches ({branches.length})</option>
             {branches.map(b => (
@@ -120,7 +120,7 @@ export const AssetFilter: React.FC<AssetFilterProps> = ({
           <select
             value={selectedCategory}
             onChange={(e) => onCategoryChange(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-teal-500"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500"
           >
             <option value="ALL">All Categories ({categories.length})</option>
             {categories.map(c => (
@@ -138,7 +138,7 @@ export const AssetFilter: React.FC<AssetFilterProps> = ({
           <select
             value={selectedStatus}
             onChange={(e) => onStatusChange(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-teal-500 font-mono"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500 font-mono"
           >
             <option value="ALL">ALL STATUSES</option>
             <option value="ACTIVE">ACTIVE (In Production)</option>
@@ -158,7 +158,7 @@ export const AssetFilter: React.FC<AssetFilterProps> = ({
           <select
             value={selectedCondition}
             onChange={(e) => onConditionChange(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-teal-500"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500"
           >
             <option value="ALL">Any Condition</option>
             <option value="NEW">NEW (Pristine / Unassigned)</option>

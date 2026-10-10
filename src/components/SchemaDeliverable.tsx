@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { Database, Copy, Check, Code2, Layers, Zap, GitBranch, Sparkles, Cloud } from 'lucide-react';
-import { SUPABASE_SETUP_SQL } from '../lib/supabase-storage';
+import { TIDB_SETUP_SQL } from '../lib/tidb-client';
 
 export const SchemaDeliverable: React.FC = () => {
   const [copiedSql, setCopiedSql] = useState(false);
   const [copiedPrisma, setCopiedPrisma] = useState(false);
-  const [copiedSupabase, setCopiedSupabase] = useState(false);
-  const [activeTab, setActiveTab] = useState<'supabase' | 'sql' | 'prisma' | 'erd' | 'indexes' | 'migration'>('supabase');
+  const [copiedTiDB, setCopiedTiDB] = useState(false);
+  const [activeTab, setActiveTab] = useState<'tidb' | 'sql' | 'prisma' | 'erd' | 'indexes' | 'migration'>('tidb');
 
   const sqlCode = `-- ============================================================================
 -- PHASE 1 DELIVERABLE: POSTGRESQL MULTI-TENANT IT ASSET SCHEMA
@@ -439,9 +439,9 @@ model Asset {
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-200">
-      <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-indigo-950/80 border border-teal-500/30 p-6 rounded-3xl shadow-2xl relative overflow-hidden">
-        <div className="absolute right-0 top-0 bottom-0 w-96 bg-teal-500/5 blur-3xl pointer-events-none" />
-        <div className="flex items-center space-x-2 text-teal-400 text-xs font-bold uppercase tracking-wider mb-2">
+      <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-emerald-950/40 border border-emerald-500/30 p-6 rounded-3xl shadow-2xl relative overflow-hidden">
+        <div className="absolute right-0 top-0 bottom-0 w-96 bg-emerald-500/5 blur-3xl pointer-events-none" />
+        <div className="flex items-center space-x-2 text-emerald-400 text-xs font-bold uppercase tracking-wider mb-2">
           <Sparkles className="w-4 h-4" />
           <span>Phase 1 Architectural Output</span>
         </div>
@@ -455,19 +455,19 @@ model Asset {
         {/* Tab Selector */}
         <div className="flex flex-wrap items-center gap-2 mt-6 pt-4 border-t border-slate-800">
           <button
-            onClick={() => setActiveTab('supabase')}
+            onClick={() => setActiveTab('tidb')}
             className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'supabase' ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+              activeTab === 'tidb' ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
             }`}
           >
             <Cloud className="w-4 h-4 text-emerald-400" />
-            <span>Supabase Cloud DDL (Live Persistent)</span>
+            <span>TiDB Cloud DDL (HTAP + TiFlash)</span>
           </button>
 
           <button
             onClick={() => setActiveTab('sql')}
             className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'sql' ? 'bg-teal-500 text-slate-950 shadow-lg shadow-teal-500/20' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+              activeTab === 'sql' ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
             }`}
           >
             <Database className="w-4 h-4" />
@@ -477,7 +477,7 @@ model Asset {
           <button
             onClick={() => setActiveTab('prisma')}
             className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'prisma' ? 'bg-teal-500 text-slate-950 shadow-lg shadow-teal-500/20' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+              activeTab === 'prisma' ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
             }`}
           >
             <Code2 className="w-4 h-4" />
@@ -487,7 +487,7 @@ model Asset {
           <button
             onClick={() => setActiveTab('erd')}
             className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'erd' ? 'bg-teal-500 text-slate-950 shadow-lg shadow-teal-500/20' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+              activeTab === 'erd' ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
             }`}
           >
             <Layers className="w-4 h-4" />
@@ -497,7 +497,7 @@ model Asset {
           <button
             onClick={() => setActiveTab('indexes')}
             className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'indexes' ? 'bg-teal-500 text-slate-950 shadow-lg shadow-teal-500/20' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+              activeTab === 'indexes' ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
             }`}
           >
             <Zap className="w-4 h-4" />
@@ -507,7 +507,7 @@ model Asset {
           <button
             onClick={() => setActiveTab('migration')}
             className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'migration' ? 'bg-teal-500 text-slate-950 shadow-lg shadow-teal-500/20' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+              activeTab === 'migration' ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
             }`}
           >
             <GitBranch className="w-4 h-4" />
@@ -517,32 +517,32 @@ model Asset {
       </div>
 
       {/* Tab Content Display */}
-      {activeTab === 'supabase' && (
+      {activeTab === 'tidb' && (
         <div className="bg-slate-900 border border-emerald-500/30 rounded-3xl p-6 shadow-2xl relative">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 pb-4 border-b border-slate-800">
             <div>
               <div className="flex items-center space-x-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
-                <h3 className="text-sm font-bold text-white">Supabase Cloud Database Schema (8 Tables + RLS + Realtime)</h3>
+                <h3 className="text-sm font-bold text-white">TiDB Cloud Database Schema (8 Tables + TiFlash HTAP Columnar Replicas)</h3>
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
-                Optimized PostgreSQL DDL for Supabase SQL Editor. Creates branches, users, budgets, assets, checkouts, maintenances, audit_logs, and notifications with permissive client policies.
+                Optimized MySQL 8.0 / TiDB DDL for TiDB Cloud SQL Editor. Creates branches, users, budgets, assets, checkouts, maintenances, audit_logs, and notifications with columnar analytics engine.
               </p>
             </div>
             <button
               onClick={() => {
-                copyToClipboard(SUPABASE_SETUP_SQL, 'sql');
-                setCopiedSupabase(true);
-                setTimeout(() => setCopiedSupabase(false), 2500);
+                copyToClipboard(TIDB_SETUP_SQL, 'sql');
+                setCopiedTiDB(true);
+                setTimeout(() => setCopiedTiDB(false), 2500);
               }}
               className="flex items-center space-x-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs px-4 py-2.5 rounded-xl transition-all font-bold shadow-lg shadow-emerald-500/20"
             >
-              {copiedSupabase ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-              <span>{copiedSupabase ? 'Copied Supabase SQL!' : 'Copy Supabase DDL'}</span>
+              {copiedTiDB ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              <span>{copiedTiDB ? 'Copied TiDB SQL!' : 'Copy TiDB DDL'}</span>
             </button>
           </div>
           <pre className="p-4 bg-slate-950 rounded-2xl overflow-x-auto text-emerald-300/90 font-mono text-[11px] leading-relaxed max-h-[600px] border border-slate-800">
-            {SUPABASE_SETUP_SQL}
+            {TIDB_SETUP_SQL}
           </pre>
         </div>
       )}
@@ -558,7 +558,7 @@ model Asset {
               onClick={() => copyToClipboard(sqlCode, 'sql')}
               className="flex items-center space-x-2 bg-slate-800 hover:bg-slate-700 text-white text-xs px-4 py-2 rounded-xl border border-slate-700 transition-all font-bold"
             >
-              {copiedSql ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-teal-400" />}
+              {copiedSql ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-emerald-400" />}
               <span>{copiedSql ? 'Copied SQL!' : 'Copy SQL Schema'}</span>
             </button>
           </div>
@@ -579,11 +579,11 @@ model Asset {
               onClick={() => copyToClipboard(prismaCode, 'prisma')}
               className="flex items-center space-x-2 bg-slate-800 hover:bg-slate-700 text-white text-xs px-4 py-2 rounded-xl border border-slate-700 transition-all font-bold"
             >
-              {copiedPrisma ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-teal-400" />}
+              {copiedPrisma ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-emerald-400" />}
               <span>{copiedPrisma ? 'Copied Prisma!' : 'Copy Prisma Schema'}</span>
             </button>
           </div>
-          <pre className="p-4 bg-slate-950 rounded-2xl overflow-x-auto text-teal-300 font-mono text-[11px] leading-relaxed max-h-[600px] border border-slate-800">
+          <pre className="p-4 bg-slate-950 rounded-2xl overflow-x-auto text-emerald-300 font-mono text-[11px] leading-relaxed max-h-[600px] border border-slate-800">
             {prismaCode}
           </pre>
         </div>
@@ -595,9 +595,9 @@ model Asset {
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-2">
-              <div className="text-teal-400 font-bold uppercase tracking-wider text-[11px]">Core Tenancy Hub (Organizations)</div>
+              <div className="text-emerald-400 font-bold uppercase tracking-wider text-[11px]">Core Tenancy Hub (Organizations)</div>
               <p className="leading-relaxed">
-                The <code className="text-white bg-slate-800 px-1 rounded">Organization</code> table acts as the root boundary. Every downstream entity (Branches, Departments, Users, Assets, Budgets) contains a mandatory <code className="text-teal-300">org_id UUID</code> foreign key. This guarantees strict multi-tenant data segregation between <em>Mineazy Mining Solutions</em> and <em>EBS Retail</em>.
+                The <code className="text-white bg-slate-800 px-1 rounded">Organization</code> table acts as the root boundary. Every downstream entity (Branches, Departments, Users, Assets, Budgets) contains a mandatory <code className="text-emerald-300">org_id UUID</code> foreign key. This guarantees strict multi-tenant data segregation between <em>Mineazy Mining Solutions</em> and <em>EBS Retail</em>.
               </p>
             </div>
 
@@ -631,7 +631,7 @@ model Asset {
           
           <div className="space-y-4 font-mono">
             <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800">
-              <div className="text-teal-400 font-bold mb-1">1. Composite Tenant Indexing (High Frequency Filtering)</div>
+              <div className="text-emerald-400 font-bold mb-1">1. Composite Tenant Indexing (High Frequency Filtering)</div>
               <code className="text-white bg-slate-900 p-2 rounded block text-[11px]">CREATE INDEX idx_assets_org_branch_status ON assets(org_id, branch_id, status);</code>
               <p className="font-sans text-[11px] text-slate-400 mt-2">
                 Why: 90% of dashboard queries filter by organization first, then branch (e.g. Kalgoorlie Mine), then active status. A composite B-Tree index resolves this in O(log N).
@@ -663,9 +663,9 @@ model Asset {
 
           <div className="space-y-4">
             <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-2">
-              <div className="text-teal-400 font-bold">Step 1: Expand and Contract Strategy (Zero Downtime)</div>
+              <div className="text-emerald-400 font-bold">Step 1: Expand and Contract Strategy (Zero Downtime)</div>
               <p>
-                When adding mandatory columns (e.g. <code className="text-white">mac_address</code>), never use <code className="text-rose-400">NOT NULL</code> without a default on large tables. First add as <code className="text-teal-300">NULLABLE</code>, backfill data asynchronously in batches of 10,000 rows, then alter table to add constraint.
+                When adding mandatory columns (e.g. <code className="text-white">mac_address</code>), never use <code className="text-rose-400">NOT NULL</code> without a default on large tables. First add as <code className="text-emerald-300">NULLABLE</code>, backfill data asynchronously in batches of 10,000 rows, then alter table to add constraint.
               </p>
             </div>
 
@@ -678,12 +678,12 @@ model Asset {
             </div>
 
             <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-2">
-              <div className="text-amber-400 font-bold">Step 3: Supabase RLS Enforcement</div>
+              <div className="text-amber-400 font-bold">Step 3: TiFlash Columnar Analytics Engine</div>
               <p>
-                Enable Row Level Security on all 13 tables immediately after initial schema execution:<br/>
+                Enable TiFlash columnar replicas across all core operational tables for sub-second HTAP reporting and live depreciation queries:<br/>
                 <code className="text-white bg-slate-900 p-2 rounded block font-mono mt-1 text-[11px]">
-                  ALTER TABLE assets ENABLE ROW LEVEL SECURITY;<br/>
-                  CREATE POLICY tenant_isolation_policy ON assets FOR ALL USING (org_id = current_setting('app.current_tenant')::uuid);
+                  ALTER TABLE assets SET TIFLASH REPLICA 1;<br/>
+                  ALTER TABLE checkouts SET TIFLASH REPLICA 1;
                 </code>
               </p>
             </div>

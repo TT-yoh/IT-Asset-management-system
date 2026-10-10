@@ -115,15 +115,15 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
   };
 
   return (
-    <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl relative animate-in fade-in zoom-in-95 duration-200 text-xs text-slate-300">
+    <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl relative animate-in fade-in zoom-in-95 duration-200 text-xs text-slate-300 max-h-[92vh] overflow-y-auto">
       {/* Header */}
       <div className="flex items-center justify-between pb-4 border-b border-slate-800">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
             <Laptop className="w-5 h-5" />
           </div>
           <div>
-            <span className="font-mono text-[10px] text-teal-400 font-bold bg-teal-500/10 px-2 py-0.5 rounded">
+            <span className="font-mono text-[10px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded">
               {asset.assetCode}
             </span>
             <h3 className="text-base font-bold text-slate-100 mt-0.5">{asset.name}</h3>
@@ -179,7 +179,7 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
               onClick={() => setAssigneeType('REGISTERED')}
               className={`p-3 rounded-xl border text-center transition flex flex-col items-center gap-1.5 ${
                 assigneeType === 'REGISTERED'
-                  ? 'bg-teal-500/10 border-teal-500 text-teal-400 font-bold shadow'
+                  ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400 font-bold shadow'
                   : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
               }`}
             >
@@ -191,7 +191,7 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
               onClick={() => setAssigneeType('CUSTOM')}
               className={`p-3 rounded-xl border text-center transition flex flex-col items-center gap-1.5 ${
                 assigneeType === 'CUSTOM'
-                  ? 'bg-teal-500/10 border-teal-500 text-teal-400 font-bold shadow'
+                  ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400 font-bold shadow'
                   : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
               }`}
             >
@@ -209,7 +209,7 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
               <select
                 value={selectedUserId}
                 onChange={e => setSelectedUserId(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl p-2.5 focus:outline-none focus:border-teal-500"
+                className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl p-2.5 focus:outline-none focus:border-emerald-500"
               >
                 {users.map(u => (
                   <option key={u.id} value={u.id}>
@@ -228,7 +228,7 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
                 value={customName}
                 onChange={e => setCustomName(e.target.value)}
                 placeholder={isLaptopOrPhone ? "Write the name of the person given to..." : "Type assignee full name..."}
-                className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl p-2.5 focus:outline-none focus:border-teal-500 font-semibold"
+                className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl p-2.5 focus:outline-none focus:border-emerald-500 font-semibold"
               />
               <p className="text-[10px] text-slate-500 font-mono">
                 {isLaptopOrPhone 
@@ -248,7 +248,7 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
           <select
             value={selectedBranchId}
             onChange={e => setSelectedBranchId(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl p-2.5 focus:outline-none focus:border-teal-500"
+            className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl p-2.5 focus:outline-none focus:border-emerald-500"
           >
             {branches.length === 0 ? (
               <option value="">No Branches Configured - Register Under Secure Portal</option>
@@ -266,13 +266,13 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
         {/* Reason Dropdown */}
         <div>
           <label className="block text-slate-300 font-semibold mb-1.5 flex items-center gap-1.5">
-            <FileText className="w-3.5 h-3.5 text-teal-400" />
+            <FileText className="w-3.5 h-3.5 text-emerald-400" />
             <span>Checkout Purpose / Reason *</span>
           </label>
           <select
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-slate-200 focus:outline-none focus:border-teal-500 transition"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500 transition"
           >
             {reasonsList.map(r => (
               <option key={r} value={r}>{r}</option>
@@ -289,7 +289,7 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
               value={customReason}
               onChange={(e) => setCustomReason(e.target.value)}
               placeholder="e.g. Field engineering test project..."
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-teal-500"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500"
             />
           </div>
         )}
@@ -305,7 +305,7 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
             required
             value={returnDate}
             onChange={(e) => setReturnDate(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-slate-200 font-mono focus:outline-none focus:border-teal-500"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-slate-200 font-mono focus:outline-none focus:border-emerald-500"
           />
           <p className="text-[10px] text-amber-400/80 mt-1 flex items-center gap-1 font-mono">
             <ShieldAlert className="w-3 h-3" />
@@ -320,7 +320,7 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="e.g. Original MagSafe 140W charger and padded Targus sleeve included..."
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-200 h-20 focus:outline-none focus:border-teal-500 placeholder:text-slate-600"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-200 h-20 focus:outline-none focus:border-emerald-500 placeholder:text-slate-600"
           />
         </div>
 
@@ -335,7 +335,7 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
           </button>
           <button
             type="submit"
-            className="px-6 py-2.5 bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold rounded-xl shadow-lg shadow-teal-500/20 transition flex items-center gap-2"
+            className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl shadow-lg shadow-emerald-500/20 transition flex items-center gap-2"
           >
             <span>Complete Checkout</span>
             <ArrowRight className="w-4 h-4" />

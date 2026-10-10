@@ -574,7 +574,7 @@ export async function POST(req: Request) {
       {/* Header Banner */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400">
+          <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
             <ShieldCheck className="w-6 h-6" />
           </div>
           <div>
@@ -582,7 +582,7 @@ export async function POST(req: Request) {
               <h1 className="text-xl md:text-2xl font-bold tracking-tight text-slate-100">
                 Phase 2: Authentication & User Management
               </h1>
-              <span className="bg-teal-500/20 text-teal-400 border border-teal-500/30 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+              <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
                 Active Deliverable
               </span>
             </div>
@@ -598,7 +598,7 @@ export async function POST(req: Request) {
             onClick={() => setPanelMode('SIMULATOR')}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition ${
               panelMode === 'SIMULATOR'
-                ? 'bg-teal-500 text-slate-950 shadow-md'
+                ? 'bg-emerald-500 text-slate-950 shadow-md'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -609,7 +609,7 @@ export async function POST(req: Request) {
             onClick={() => setPanelMode('CODE_DELIVERABLES')}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition ${
               panelMode === 'CODE_DELIVERABLES'
-                ? 'bg-teal-500 text-slate-950 shadow-md'
+                ? 'bg-emerald-500 text-slate-950 shadow-md'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -635,12 +635,12 @@ export async function POST(req: Request) {
                   onClick={() => setSimStep('LOGIN')}
                   className={`w-full flex items-center justify-between p-3 rounded-xl text-xs font-medium transition ${
                     simStep === 'LOGIN' || simStep === '2FA_TOTP'
-                      ? 'bg-teal-500/10 text-teal-400 border border-teal-500/30 font-bold'
+                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold'
                       : 'text-slate-300 hover:bg-slate-800/60'
                   }`}
                 >
                   <div className="flex items-center gap-2.5">
-                    <KeyRound className="w-4 h-4 text-teal-400" />
+                    <KeyRound className="w-4 h-4 text-emerald-400" />
                     <span>Login & 2FA Flow</span>
                   </div>
                   <span className="text-[10px] font-mono bg-slate-950 px-1.5 py-0.5 rounded text-slate-400">
@@ -652,7 +652,7 @@ export async function POST(req: Request) {
                   onClick={() => setSimStep('REGISTER_REQUEST')}
                   className={`w-full flex items-center justify-between p-3 rounded-xl text-xs font-medium transition ${
                     simStep === 'REGISTER_REQUEST'
-                      ? 'bg-teal-500/10 text-teal-400 border border-teal-500/30 font-bold'
+                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold'
                       : 'text-slate-300 hover:bg-slate-800/60'
                   }`}
                 >
@@ -669,7 +669,7 @@ export async function POST(req: Request) {
                   onClick={() => setSimStep('ADMIN_APPROVALS')}
                   className={`w-full flex items-center justify-between p-3 rounded-xl text-xs font-medium transition ${
                     simStep === 'ADMIN_APPROVALS'
-                      ? 'bg-teal-500/10 text-teal-400 border border-teal-500/30 font-bold'
+                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold'
                       : 'text-slate-300 hover:bg-slate-800/60'
                   }`}
                 >
@@ -686,7 +686,7 @@ export async function POST(req: Request) {
                   onClick={() => setSimStep('RBAC_MATRIX')}
                   className={`w-full flex items-center justify-between p-3 rounded-xl text-xs font-medium transition ${
                     simStep === 'RBAC_MATRIX'
-                      ? 'bg-teal-500/10 text-teal-400 border border-teal-500/30 font-bold'
+                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold'
                       : 'text-slate-300 hover:bg-slate-800/60'
                   }`}
                 >
@@ -706,7 +706,7 @@ export async function POST(req: Request) {
                     onClick={() => setSimStep('REGISTER_BRANCH')}
                     className={`w-full flex items-center justify-between p-3 rounded-xl text-xs font-medium transition ${
                       simStep === 'REGISTER_BRANCH'
-                        ? 'bg-teal-500/10 text-teal-400 border border-teal-500/30 font-bold'
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold'
                         : 'text-slate-300 hover:bg-slate-800/60'
                     }`}
                   >
@@ -723,7 +723,7 @@ export async function POST(req: Request) {
                     onClick={() => setSimStep('REGISTER_USER')}
                     className={`w-full flex items-center justify-between p-3 rounded-xl text-xs font-medium transition ${
                       simStep === 'REGISTER_USER'
-                        ? 'bg-teal-500/10 text-teal-400 border border-teal-500/30 font-bold'
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold'
                         : 'text-slate-300 hover:bg-slate-800/60'
                     }`}
                   >
@@ -743,7 +743,7 @@ export async function POST(req: Request) {
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Current JWT User</span>
-                <span className="text-[10px] font-mono text-teal-400 bg-teal-500/10 px-2 py-0.5 rounded">Active Claims</span>
+                <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">Active Claims</span>
               </div>
               <div className="p-3 bg-slate-950 rounded-xl border border-slate-800/80 space-y-1 text-xs">
                 <p className="font-bold text-slate-200">{currentUser.fullName}</p>
@@ -785,7 +785,7 @@ export async function POST(req: Request) {
                 </button>
 
                 <div className="text-center mb-6">
-                  <div className="w-12 h-12 bg-teal-500/10 border border-teal-500/30 rounded-xl flex items-center justify-center mx-auto mb-3 text-teal-400">
+                  <div className="w-12 h-12 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center justify-center mx-auto mb-3 text-emerald-400">
                     <Clock className="w-6 h-6 animate-pulse" />
                   </div>
                   <h2 className="text-xl font-bold text-slate-100">Two-Factor Authentication (2FA)</h2>
@@ -795,9 +795,9 @@ export async function POST(req: Request) {
                 </div>
 
                 {/* Simulated Speakeasy Hint Banner */}
-                <div className="mb-6 p-3 bg-teal-500/10 border border-teal-500/30 rounded-xl text-center">
-                  <p className="text-[10px] text-teal-300 uppercase tracking-wider font-bold">Speakeasy TOTP Simulator Hint</p>
-                  <p className="text-xl font-mono tracking-widest text-teal-400 font-bold mt-1 select-all">
+                <div className="mb-6 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-center">
+                  <p className="text-[10px] text-emerald-300 uppercase tracking-wider font-bold">Speakeasy TOTP Simulator Hint</p>
+                  <p className="text-xl font-mono tracking-widest text-emerald-400 font-bold mt-1 select-all">
                     {totpHint}
                   </p>
                   <p className="text-[10px] text-slate-400 mt-1">Accepts this code or 123456</p>
@@ -819,13 +819,13 @@ export async function POST(req: Request) {
                       onChange={(e) => setTotpInput(e.target.value.replace(/\D/g, ''))}
                       placeholder="• • • • • •"
                       required
-                      className="w-full text-center tracking-[0.5em] font-mono text-2xl py-3 bg-slate-900 border border-slate-700 rounded-xl text-teal-400 focus:outline-none focus:border-teal-500 shadow-inner"
+                      className="w-full text-center tracking-[0.5em] font-mono text-2xl py-3 bg-slate-900 border border-slate-700 rounded-xl text-emerald-400 focus:outline-none focus:border-emerald-500 shadow-inner"
                     />
                   </div>
 
                   <div className="flex items-center justify-between text-xs text-slate-400">
                     <div className="flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-teal-400" />
+                      <Clock className="w-3.5 h-3.5 text-emerald-400" />
                       <span>Code refreshes in <strong className="text-slate-200">{totpTimer}s</strong></span>
                     </div>
                     <button
@@ -834,7 +834,7 @@ export async function POST(req: Request) {
                         setTotpHint(Math.floor(100000 + Math.random() * 900000).toString());
                         setTotpTimer(60);
                       }}
-                      className="text-teal-400 hover:text-teal-300 underline font-medium flex items-center gap-1"
+                      className="text-emerald-400 hover:text-emerald-300 underline font-medium flex items-center gap-1"
                     >
                       <RefreshCw className="w-3 h-3" />
                       <span>Resend code</span>
@@ -843,7 +843,7 @@ export async function POST(req: Request) {
 
                   <button
                     type="submit"
-                    className="w-full bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold py-3 px-4 rounded-xl shadow-lg shadow-teal-500/20 transition text-sm"
+                    className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-3 px-4 rounded-xl shadow-lg shadow-emerald-500/20 transition text-sm"
                   >
                     Verify Authenticator Token
                   </button>
@@ -892,7 +892,7 @@ export async function POST(req: Request) {
                     <select
                       value={selectedOrgId}
                       onChange={(e) => setSelectedOrgId(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
                     >
                       {organizations.map(o => (
                         <option key={o.id} value={o.id}>{o.name}</option>
@@ -910,7 +910,7 @@ export async function POST(req: Request) {
                       onChange={(e) => setRegFullName(e.target.value)}
                       placeholder="Elena Rostova"
                       required
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
 
@@ -924,7 +924,7 @@ export async function POST(req: Request) {
                       onChange={(e) => setRegEmail(e.target.value)}
                       placeholder="e.rostova@company.com"
                       required
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
 
@@ -938,7 +938,7 @@ export async function POST(req: Request) {
                         value={regPhone}
                         onChange={(e) => setRegPhone(e.target.value)}
                         placeholder="+1 (555) 000-0000"
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
                       />
                     </div>
 
@@ -949,7 +949,7 @@ export async function POST(req: Request) {
                       <select
                         value={regDept}
                         onChange={(e) => setRegDept(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
                       >
                         <option value="dept-it">IT Infrastructure</option>
                         <option value="dept-ops">Mining / Field Ops</option>
@@ -966,7 +966,7 @@ export async function POST(req: Request) {
                       <select
                         value={regRole}
                         onChange={(e) => setRegRole(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
                       >
                         <option value="ADMIN">System Admin ("me")</option>
                         <option value="DIRECTOR">Director</option>
@@ -983,7 +983,7 @@ export async function POST(req: Request) {
                       <select
                         value={regBranchId || (branches.filter(b => b.orgId === selectedOrgId)[0]?.id || '')}
                         onChange={(e) => setRegBranchId(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
                       >
                         {branches.filter(b => b.orgId === selectedOrgId).map(b => (
                           <option key={b.id} value={b.id}>{b.name} ({b.city})</option>
@@ -1055,7 +1055,7 @@ export async function POST(req: Request) {
                           <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400 pt-1">
                             <span className="flex items-center gap-1.5"><Mail className="w-3.5 h-3.5 text-slate-500" /> {item.email}</span>
                             <span className="flex items-center gap-1.5"><Phone className="w-3.5 h-3.5 text-slate-500" /> {item.phone}</span>
-                            <span className="flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5 text-teal-400" /> {item.departmentName}</span>
+                            <span className="flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5 text-emerald-400" /> {item.departmentName}</span>
                             <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-slate-500" /> {item.requestedAt}</span>
                           </div>
                         </div>
@@ -1106,7 +1106,7 @@ export async function POST(req: Request) {
                         <th className="py-3 px-4 font-bold uppercase tracking-wider">System Permission / Action</th>
                         <th className="py-3 px-2 text-center text-rose-400 font-bold">ADMIN</th>
                         <th className="py-3 px-2 text-center text-purple-400 font-bold">DIRECTOR</th>
-                        <th className="py-3 px-2 text-center text-teal-400 font-bold">BRANCH MGR</th>
+                        <th className="py-3 px-2 text-center text-emerald-400 font-bold">BRANCH MGR</th>
                         <th className="py-3 px-2 text-center text-sky-400 font-bold">IT SUPPORT</th>
                         <th className="py-3 px-2 text-center text-amber-400 font-bold">FINANCE</th>
                         <th className="py-3 px-2 text-center text-slate-400 font-bold">USER</th>
@@ -1183,7 +1183,7 @@ export async function POST(req: Request) {
                     <select
                       value={selectedOrgId}
                       onChange={(e) => setSelectedOrgId(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
                     >
                       {organizations.map(o => (
                         <option key={o.id} value={o.id}>{o.name}</option>
@@ -1201,7 +1201,7 @@ export async function POST(req: Request) {
                       onChange={(e) => setBranchName(e.target.value)}
                       placeholder="e.g. Nevada Lithium Basin Branch"
                       required
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
 
@@ -1216,7 +1216,7 @@ export async function POST(req: Request) {
                         onChange={(e) => setBranchCode(e.target.value)}
                         placeholder="e.g. NV-LIT-01"
                         required
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
                       />
                     </div>
 
@@ -1230,7 +1230,7 @@ export async function POST(req: Request) {
                         onChange={(e) => setBranchCity(e.target.value)}
                         placeholder="e.g. Reno"
                         required
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
                       />
                     </div>
                   </div>
@@ -1244,7 +1244,7 @@ export async function POST(req: Request) {
                       value={branchLocation}
                       onChange={(e) => setBranchLocation(e.target.value)}
                       placeholder="e.g. Grid Sector 4, Basin 2, NV"
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
 
@@ -1297,7 +1297,7 @@ export async function POST(req: Request) {
                           const orgBranches = branches.filter(b => b.orgId === e.target.value);
                           setDirectBranchId(orgBranches[0]?.id || '');
                         }}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
                       >
                         {organizations.map(o => (
                           <option key={o.id} value={o.id}>{o.name}</option>
@@ -1312,7 +1312,7 @@ export async function POST(req: Request) {
                       <select
                         value={directBranchId || (branches.filter(b => b.orgId === selectedOrgId)[0]?.id || '')}
                         onChange={(e) => setDirectBranchId(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
                       >
                         {branches.filter(b => b.orgId === selectedOrgId).map(b => (
                           <option key={b.id} value={b.id}>{b.name} ({b.city})</option>
@@ -1334,7 +1334,7 @@ export async function POST(req: Request) {
                       onChange={(e) => setDirectFullName(e.target.value)}
                       placeholder="e.g. John Doe"
                       required
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
 
@@ -1348,7 +1348,7 @@ export async function POST(req: Request) {
                       onChange={(e) => setDirectEmail(e.target.value)}
                       placeholder="e.g. j.doe@company.com"
                       required
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
 
@@ -1360,7 +1360,7 @@ export async function POST(req: Request) {
                       <select
                         value={directRole}
                         onChange={(e) => setDirectRole(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
                       >
                         <option value="ADMIN">System Admin ("me")</option>
                         <option value="DIRECTOR">Director</option>
@@ -1378,7 +1378,7 @@ export async function POST(req: Request) {
                       <select
                         value={directDept}
                         onChange={(e) => setDirectDept(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
                       >
                         <option value="dept-it">IT Infrastructure</option>
                         <option value="dept-ops">Mining / Field Ops</option>
@@ -1408,7 +1408,7 @@ export async function POST(req: Request) {
           {/* File Selector Rail */}
           <div className="lg:col-span-1 bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 px-2 flex items-center gap-2">
-              <FileCode className="w-4 h-4 text-teal-400" />
+              <FileCode className="w-4 h-4 text-emerald-400" />
               <span>Phase 2 Deliverables</span>
             </h3>
 
@@ -1421,7 +1421,7 @@ export async function POST(req: Request) {
                 }}
                 className={`w-full text-left p-3 rounded-xl text-xs transition block ${
                   activeCodeFile === key
-                    ? 'bg-teal-500 text-slate-950 font-bold shadow-md'
+                    ? 'bg-emerald-500 text-slate-950 font-bold shadow-md'
                     : 'text-slate-300 hover:bg-slate-800/80'
                 }`}
               >
@@ -1480,7 +1480,7 @@ export async function POST(req: Request) {
             </div>
 
             {/* Code Block */}
-            <div className="flex-1 overflow-auto max-h-[600px] bg-slate-900/60 p-4 rounded-xl border border-slate-800 font-mono text-xs text-teal-300 selection:bg-teal-500 selection:text-slate-950 whitespace-pre">
+            <div className="flex-1 overflow-auto max-h-[600px] bg-slate-900/60 p-4 rounded-xl border border-slate-800 font-mono text-xs text-emerald-300 selection:bg-emerald-500 selection:text-slate-950 whitespace-pre">
               {CODE_SNIPPETS[activeCodeFile]?.code}
             </div>
           </div>

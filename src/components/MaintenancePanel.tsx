@@ -8,7 +8,7 @@ import { AssetMaintenanceHistoryModal } from './AssetMaintenanceHistoryModal';
 import { RepairsSummaryModal } from './RepairsSummaryModal';
 import {
   Wrench, AlertTriangle, CheckCircle2, Clock, Plus, Download,
-  Filter, Search, BarChart3, Code2, Layers, Calendar, History
+  Filter, Search, BarChart3, Layers, Calendar, History
 } from 'lucide-react';
 
 interface MaintenancePanelProps {
@@ -25,13 +25,11 @@ export const MaintenancePanel: React.FC<MaintenancePanelProps> = ({
   maintenances,
   assets,
   users = [],
-  currentUser = { id: 'u-admin', fullName: 'System IT Admin', role: 'IT_SUPPORT', orgId: 'org-mineazy', branchId: 'b1', email: 'admin@mineazy.com' },
+  currentUser = { id: 'usr-super-admin-ismael', fullName: 'Ismael (Super Admin)', role: 'ADMIN', orgId: 'org-omnitech', branchId: 'branch-main', email: 'ismaelt42@gmail.com' },
   onReportIssue,
   onUpdateTicket,
   onCompleteRepair
 }) => {
-  // Mode switcher
-  const [panelMode, setPanelMode] = useState<'WORKSPACE' | 'CODE_DELIVERABLE'>('WORKSPACE');
   const [viewType, setViewType] = useState<'GRID' | 'TABLE'>('GRID');
 
   // Modals
@@ -46,9 +44,6 @@ export const MaintenancePanel: React.FC<MaintenancePanelProps> = ({
   const [priorityFilter, setPriorityFilter] = useState('ALL');
   const [techFilter, setTechFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
-
-  // Code deliverable tab state
-  const [selectedCodeFile, setSelectedCodeFile] = useState<string>('file1');
 
   const today = new Date().toISOString().split('T')[0]!;
 
@@ -124,194 +119,6 @@ export const MaintenancePanel: React.FC<MaintenancePanelProps> = ({
     setShowCreateModal(false);
   };
 
-  // Next.js API Code reference strings
-  const codeDeliverableDict: Record<string, { title: string; desc: string; code: string }> = {
-    file1: {
-      title: 'File 1: src/app/api/maintenance/route.ts',
-      desc: 'GET endpoint with filtering & POST endpoint to create tickets and update asset status to REPAIR.',
-      code: `import { NextResponse } from 'next/server';
-import { db } from '@/lib/db'; // Simulated ORM
-import { getServerSession } from '@/lib/auth';
-
-/**
- * File 1: GET & POST /api/maintenance
- */
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const assetId = searchParams.get('asset_id');
-  const status = searchParams.get('status');
-  const priority = searchParams.get('priority');
-
-  // Query maintenance records based on user org & role access
-  const records = await db.maintenanceRecord.findMany({
-    where: {
-      ...(assetId && { assetId }),
-      ...(status && status !== 'ALL' && { status }),
-      ...(priority && priority !== 'ALL' && { priority }),
-    },
-    orderBy: { startDate: 'desc' }
-  });
-
-  return NextResponse.json({ success: true, count: records.length, data: records });
-}
-
-export async function POST(req: Request) {
-  const session = await getServerSession();
-  if (!session || !['ADMIN', 'IT_SUPPORT', 'BRANCH_MANAGER'].includes(session.user.role)) {
-    return NextResponse.json({ error: 'Unauthorized IT Support access' }, { status: 403 });
-  }
-
-  const body = await req.json();
-  const { asset_id, maintenance_type, description, assigned_to_user_id, start_date, expected_completion_date, priority } = body;
-
-  // Transaction: Create maintenance record + update asset status + create audit log
-  const newTicket = await db.$transaction(async (tx) => {
-    const record = await tx.maintenanceRecord.create({
-      data: {
-        assetId: asset_id,
-        type: maintenance_type, // REPAIR, PREVENTIVE, INSPECTION, UPGRADE
-        description,
-        assignedTechnician: assigned_to_user_id || 'IT Repair Pool',
-        startDate: start_date || new Date().toISOString(),
-        expectedCompletion: expected_completion_date,
-        priority: priority || 'MEDIUM',
-        status: 'IN_PROGRESS',
-        reportedBy: session.user.name
-      }
-    });
-
-    await tx.asset.update({
-      where: { id: asset_id },
-      data: { status: 'REPAIR' }
-    });
-
-    await tx.auditLog.create({
-      data: {
-        action: 'MAINTENANCE_CREATED',
-        userId: session.user.id,
-        details: \`Asset \${asset_id} marked under \${maintenance_type} repair.\`
-      }
-    });
-
-    return record;
-  });
-
-  return NextResponse.json({ success: true, data: newTicket }, { status: 201 });
-}`
-    },
-    file2: {
-      title: 'File 2: src/app/api/maintenance/[id]/route.ts',
-      desc: 'PATCH endpoint to update work orders, log parts/costs, and restore assets to ACTIVE upon completion.',
-      code: `import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-
-/**
- * File 2: PATCH /api/maintenance/[id]
- */
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
-  const body = await req.json();
-  const { status, actual_completion_date, cost, parts_replaced, notes } = body;
-
-  const currentRecord = await db.maintenanceRecord.findUnique({ where: { id: params.id } });
-  if (!currentRecord) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-
-  const updated = await db.$transaction(async (tx) => {
-    const rec = await tx.maintenanceRecord.update({
-      where: { id: params.id },
-      data: {
-        ...(status && { status }),
-        ...(actual_completion_date && { actualCompletion: actual_completion_date }),
-        ...(cost !== undefined && { cost: parseFloat(cost) }),
-        ...(parts_replaced && { partsReplaced: parts_replaced }),
-        ...(notes && { notes })
-      }
-    });
-
-    // If marked COMPLETED, restore hardware back to ACTIVE
-    if (status === 'COMPLETED') {
-      await tx.asset.update({
-        where: { id: currentRecord.assetId },
-        data: { status: 'ACTIVE' }
-      });
-    }
-
-    await tx.auditLog.create({
-      data: {
-        action: status === 'COMPLETED' ? 'MAINTENANCE_COMPLETED' : 'MAINTENANCE_UPDATED',
-        details: \`Updated ticket \${params.id}. Status: \${status || currentRecord.status}. Parts: \${parts_replaced || 'N/A'}\`
-      }
-    });
-
-    return rec;
-  });
-
-  return NextResponse.json({ success: true, data: updated });
-}`
-    },
-    file10: {
-      title: 'File 10: src/app/api/maintenance/repairs-summary/route.ts',
-      desc: 'GET endpoint delivering rich repair statistics: average repair turnaround, category expenditure trends, and workload.',
-      code: `import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-
-/**
- * File 10: GET /api/maintenance/repairs-summary
- */
-export async function GET(req: Request) {
-  // Aggregate stats across active & completed work orders
-  const activeTickets = await db.maintenanceRecord.count({
-    where: { status: { in: ['IN_PROGRESS', 'PENDING'] } }
-  });
-
-  const allRecords = await db.maintenanceRecord.findMany({
-    include: { asset: true }
-  });
-
-  const totalCost = allRecords.reduce((sum, r) => sum + (r.cost || 0), 0);
-  
-  // Calculate avg turnaround days
-  let totalDays = 0;
-  let completedCount = 0;
-  allRecords.filter(r => r.status === 'COMPLETED').forEach(r => {
-    const d1 = new Date(r.startDate).getTime();
-    const d2 = new Date(r.actualCompletion || r.expectedCompletion).getTime();
-    totalDays += Math.max(1, Math.round((d2 - d1) / 86400000));
-    completedCount++;
-  });
-  const avgRepairDays = completedCount > 0 ? (totalDays / completedCount).toFixed(1) : '3.5';
-
-  return NextResponse.json({
-    totalItemsUnderRepair: activeTickets,
-    averageRepairTimeDays: parseFloat(avgRepairDays as string),
-    totalRepairCostsMonth: totalCost,
-    totalRepairCostsYear: totalCost * 12,
-    mostRepairedTypes: [
-      { type: 'Motherboard / CPU', count: 14, totalCost: 4200 },
-      { type: 'Display Panels', count: 9, totalCost: 2150 },
-      { type: 'Power Supply / Batteries', count: 18, totalCost: 1890 }
-    ],
-    technicianWorkload: [
-      { name: 'Chen Wei (IT Lead)', activeTickets: 4, completedTickets: 19 },
-      { name: 'Sarah Jenkins (Hardware)', activeTickets: 6, completedTickets: 14 }
-    ]
-  });
-}`
-    },
-    files3to9: {
-      title: 'Files 3 to 9: React Dashboard & Service Layer Specification',
-      desc: 'Frontend dashboard views, reusable forms, detail timelines, and client service architecture.',
-      code: `// File 3: src/app/maintenance/page.tsx (Dashboard with KPI cards, filters, and logs table)
-// File 4: src/app/maintenance/create/page.tsx (Standalone form view for out-of-order intake)
-// File 5: src/app/maintenance/[id]/page.tsx (Detail page with timeline & technician update section)
-// File 6: src/app/assets/[id]/maintenance/page.tsx (Asset-centric history & frequency chart)
-// File 7: src/components/MaintenanceCard.tsx (Visual bento status card with ETA alerts)
-// File 8: src/components/MaintenanceForm.tsx (Reusable ticket intake & editing form)
-// File 9: src/lib/maintenance-service.ts (TypeScript business logic & filtering engine)
-
-/* ALL 10 DELIVERABLES ARE ACTIVELY RUNNING IN THE WORKSPACE TAB! */`
-    }
-  };
-
   const repairsSummaryStats = useMemo(() => {
     return MaintenanceService.getRepairsSummary(maintenances, assets);
   }, [maintenances, assets]);
@@ -331,38 +138,35 @@ export async function GET(req: Request) {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {panelMode === 'WORKSPACE' && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowRepairsSummary(true)}
-                className="flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 text-teal-300 font-bold px-3.5 py-2 rounded-xl border border-teal-500/30 transition-all shadow-lg"
-              >
-                <BarChart3 className="w-4 h-4 text-teal-400" />
-                <span className="hidden sm:inline">Repairs Summary</span>
-              </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowRepairsSummary(true)}
+              className="flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-300 font-bold px-3.5 py-2 rounded-xl border border-emerald-500/30 transition-all shadow-lg"
+            >
+              <BarChart3 className="w-4 h-4 text-emerald-400" />
+              <span className="hidden sm:inline">Repairs Summary</span>
+            </button>
 
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="flex items-center space-x-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold px-4 py-2 rounded-xl shadow-lg shadow-rose-600/25 transition-all"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Report Outage</span>
-              </button>
-            </div>
-          )}
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex items-center space-x-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold px-4 py-2 rounded-xl shadow-lg shadow-rose-600/25 transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Report Outage</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {panelMode === 'WORKSPACE' ? (
-        <div className="space-y-6">
+      <div className="space-y-6">
           {/* Overdue Alert Banner */}
           {kpis.overdue > 0 && (
-            <div className="bg-rose-500/10 border border-rose-500/30 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-pulse">
+            <div className="bg-rose-500/10 border border-rose-500/30 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3 text-rose-300">
                 <div className="p-2.5 rounded-xl bg-rose-500/20 text-rose-400 shrink-0"><AlertTriangle className="w-5 h-5" /></div>
                 <div>
-                  <h4 className="font-bold text-white text-sm">⚠️ {kpis.overdue} Overdue Maintenance Work Orders</h4>
-                  <p className="text-xs text-rose-200/90 mt-0.5">Target completion deadlines have elapsed for hardware under active bench repair. Immediate intervention required.</p>
+                  <h4 className="font-bold text-white text-sm">{kpis.overdue} Overdue Maintenance Work Orders</h4>
+                  <p className="text-xs text-rose-200/90 mt-0.5">Target completion deadlines have elapsed for hardware under active repair. Immediate triage advised.</p>
                 </div>
               </div>
               <button
@@ -504,7 +308,7 @@ export async function GET(req: Request) {
           {/* Asset History quick trigger bar */}
           <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-slate-300">
-              <History className="w-4 h-4 text-teal-400 shrink-0" />
+              <History className="w-4 h-4 text-emerald-400 shrink-0" />
               <span>Inspect asset-specific maintenance history & breakdown logs:</span>
             </div>
             <div className="flex items-center gap-2">
@@ -585,15 +389,15 @@ export async function GET(req: Request) {
                           <td className="p-3.5">
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                               rec.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-300' :
-                              isOver ? 'bg-rose-500/20 text-rose-300 animate-pulse' : 'bg-amber-500/20 text-amber-300'
+                              isOver ? 'bg-rose-500/20 text-rose-300' : 'bg-amber-500/20 text-amber-300'
                             }`}>
                               {rec.status}
                             </span>
                           </td>
                           <td className="p-3.5 font-sans font-bold text-slate-200">{rec.priority || 'MEDIUM'}</td>
-                          <td className="p-3.5 font-sans text-teal-400 truncate max-w-[130px]">{rec.assignedTechnician}</td>
+                          <td className="p-3.5 font-sans text-emerald-400 truncate max-w-[130px]">{rec.assignedTechnician}</td>
                           <td className="p-3.5 text-slate-400">{rec.startDate}</td>
-                          <td className={`p-3.5 font-bold ${isOver ? 'text-rose-400 animate-pulse' : 'text-slate-300'}`}>
+                          <td className={`p-3.5 font-bold ${isOver ? 'text-rose-400' : 'text-slate-300'}`}>
                             {rec.expectedCompletion} {isOver && '⚠️'}
                           </td>
                           <td className="p-3.5 text-right font-sans space-x-2">
@@ -611,46 +415,6 @@ export async function GET(req: Request) {
             </div>
           )}
         </div>
-      ) : (
-        /* CODE DELIVERABLE TAB */
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 space-y-6">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-            <div className="flex items-center gap-2">
-              <Code2 className="w-5 h-5 text-rose-400" />
-              <h3 className="text-base font-bold text-white">Phase 5 Deliverable Code Surface (Files 1-10)</h3>
-            </div>
-            <span className="text-slate-400 font-mono text-[11px]">Next.js App Router Architecture</span>
-          </div>
-
-          <div className="flex flex-wrap gap-2 border-b border-slate-800 pb-4">
-            {[
-              { id: 'file1', label: 'File 1: api/maintenance' },
-              { id: 'file2', label: 'File 2: api/maintenance/[id]' },
-              { id: 'file10', label: 'File 10: repairs-summary' },
-              { id: 'files3to9', label: 'Files 3-9: React Components & Service' }
-            ].map(f => (
-              <button
-                key={f.id}
-                onClick={() => setSelectedCodeFile(f.id)}
-                className={`px-3.5 py-2 rounded-xl font-mono text-xs font-bold transition-all ${
-                  selectedCodeFile === f.id ? 'bg-rose-600 text-white shadow-lg shadow-rose-600/20' : 'bg-slate-950 border border-slate-800 text-slate-400 hover:text-white'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="space-y-3">
-            <h4 className="font-bold text-white text-sm">{codeDeliverableDict[selectedCodeFile]?.title}</h4>
-            <p className="text-slate-400 text-xs">{codeDeliverableDict[selectedCodeFile]?.desc}</p>
-            
-            <div className="relative rounded-xl border border-slate-800 bg-slate-950 p-4 font-mono text-slate-300 text-xs overflow-x-auto max-h-[600px]">
-              <pre>{codeDeliverableDict[selectedCodeFile]?.code}</pre>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* CREATE TICKET MODAL */}
       {showCreateModal && (

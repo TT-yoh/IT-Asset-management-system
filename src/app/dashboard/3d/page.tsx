@@ -32,13 +32,13 @@ export default async function ThreeDDashboardPage() {
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 p-6 rounded-3xl shadow-xl backdrop-blur-xl">
         <div>
           <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-md bg-teal-500/10 text-teal-400 font-mono text-[10px] font-bold border border-teal-500/20 tracking-wider uppercase">
+            <span className="px-2.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 font-mono text-[10px] font-bold border border-emerald-500/20 tracking-wider uppercase">
               Phase 7 Digital Twin Surface
             </span>
             <span className="text-slate-400 text-xs">• WebGL Three.js Matrix</span>
           </div>
           <h1 className="text-2xl font-black text-white mt-1 flex items-center gap-2.5">
-            <Box className="w-7 h-7 text-teal-400 shrink-0" />
+            <Box className="w-7 h-7 text-emerald-400 shrink-0" />
             <span>Interactive 3D Hardware Dashboard</span>
           </h1>
           <p className="text-xs text-slate-400 mt-1 max-w-2xl">
@@ -49,7 +49,7 @@ export default async function ThreeDDashboardPage() {
         <div className="flex items-center gap-3">
           <div className="bg-slate-950 px-4 py-2 rounded-2xl border border-slate-800 font-mono text-xs text-slate-300">
             <span className="text-slate-500 text-[10px] block">TOTAL FLEET VALUE</span>
-            <span className="text-teal-400 font-bold text-sm">$14,899.00</span>
+            <span className="text-emerald-400 font-bold text-sm">$14,899.00</span>
           </div>
         </div>
       </header>
@@ -84,7 +84,7 @@ export default async function ThreeDDashboardPage() {
               Rendering hardware geometry via raw Three.js buffer arrays. Orbit controls run at 60 FPS with adaptive shadow mapping and anti-aliasing.
             </p>
           </div>
-          <div className="p-3 bg-slate-950 rounded-xl border border-slate-800/80 font-mono text-[11px] text-teal-300 space-y-1">
+          <div className="p-3 bg-slate-950 rounded-xl border border-slate-800/80 font-mono text-[11px] text-emerald-300 space-y-1">
             <div>✓ WebGL 2.0 Context Verified</div>
             <div>✓ Raycaster Interaction Enabled</div>
             <div>✓ WebSocket Sync Stream: ACTIVE</div>

@@ -52,7 +52,7 @@ export const ThreeDControls: React.FC<ThreeDControlsProps> = ({
       {/* View Matrix Selector */}
       <div>
         <label className="block text-[10px] font-mono uppercase text-slate-400 mb-2 flex items-center gap-1.5">
-          <Layers className="w-3.5 h-3.5 text-teal-400" />
+          <Layers className="w-3.5 h-3.5 text-emerald-400" />
           <span>3D Projection Matrix View</span>
         </label>
         <div className="grid grid-cols-2 gap-2">
@@ -60,7 +60,7 @@ export const ThreeDControls: React.FC<ThreeDControlsProps> = ({
             onClick={() => onSelectView('BRANCH_FLOOR')}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-bold transition-all border ${
               currentView === 'BRANCH_FLOOR'
-                ? 'bg-teal-500/20 text-teal-300 border-teal-500/50 shadow-md shadow-teal-500/10'
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-md shadow-emerald-500/10'
                 : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
             }`}
           >
@@ -111,7 +111,7 @@ export const ThreeDControls: React.FC<ThreeDControlsProps> = ({
         <div>
           <div className="flex justify-between items-center text-[11px] mb-1">
             <span className="text-slate-400">Orbit Rotation Velocity:</span>
-            <span className="font-mono text-teal-400 font-bold">{Math.round(rotationSpeed * 100)}%</span>
+            <span className="font-mono text-emerald-400 font-bold">{Math.round(rotationSpeed * 100)}%</span>
           </div>
           <input
             type="range"
@@ -120,7 +120,7 @@ export const ThreeDControls: React.FC<ThreeDControlsProps> = ({
             step="0.05"
             value={rotationSpeed}
             onChange={e => onRotationSpeedChange(parseFloat(e.target.value))}
-            className="w-full accent-teal-400 bg-slate-950 rounded-lg h-1.5 cursor-pointer"
+            className="w-full accent-emerald-400 bg-slate-950 rounded-lg h-1.5 cursor-pointer"
           />
         </div>
 
@@ -150,7 +150,7 @@ export const ThreeDControls: React.FC<ThreeDControlsProps> = ({
         <button
           onClick={onToggleLabels}
           className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl font-bold border transition-all ${
-            showLabels ? 'bg-teal-500/10 text-teal-300 border-teal-500/30' : 'bg-slate-950 text-slate-500 border-slate-800'
+            showLabels ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' : 'bg-slate-950 text-slate-500 border-slate-800'
           }`}
         >
           {showLabels ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}

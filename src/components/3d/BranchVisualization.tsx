@@ -89,7 +89,7 @@ export const BranchVisualization: React.FC<BranchVisualizationProps> = ({
 
   return (
     <div className="absolute top-4 left-4 z-10 bg-slate-900/90 border border-slate-800 p-4 rounded-2xl text-xs backdrop-blur-md shadow-2xl max-w-sm space-y-3">
-      <div className="flex items-center gap-2 text-teal-400 border-b border-slate-800 pb-2">
+      <div className="flex items-center gap-2 text-emerald-400 border-b border-slate-800 pb-2">
         <Building2 className="w-4 h-4" />
         <h4 className="font-bold text-white text-sm">3D Floor Plan: {branch.name}</h4>
       </div>

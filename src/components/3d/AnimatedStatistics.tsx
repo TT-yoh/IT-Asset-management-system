@@ -38,7 +38,7 @@ export const AnimatedStatistics: React.FC<AnimatedStatisticsProps> = ({
         
         {/* Metric 1 */}
         <div className="flex items-center gap-3 bg-slate-950/80 px-4 py-2.5 rounded-xl border border-slate-800/80 flex-1 min-w-[180px]">
-          <div className="p-2.5 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20"><DollarSign className="w-5 h-5" /></div>
+          <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"><DollarSign className="w-5 h-5" /></div>
           <div>
             <span className="text-[10px] font-mono text-slate-500 block uppercase tracking-wider">Total Hardware Value</span>
             <span className="text-lg font-mono font-bold text-white">${Math.round(displayVal).toLocaleString()}</span>

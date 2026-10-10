@@ -143,7 +143,7 @@ export const MaintenanceForm: React.FC<MaintenanceFormProps> = ({
 
         <div>
           <label className="block text-slate-300 font-semibold mb-1 flex items-center gap-1.5">
-            <UserCheck className="w-3.5 h-3.5 text-teal-400" />
+            <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
             <span>Assign Technician / Team</span>
           </label>
           <select

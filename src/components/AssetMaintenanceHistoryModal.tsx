@@ -96,7 +96,7 @@ export const AssetMaintenanceHistoryModal: React.FC<AssetMaintenanceHistoryModal
           {/* Table */}
           <div className="space-y-2">
             <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-              <History className="w-4 h-4 text-teal-400" />
+              <History className="w-4 h-4 text-emerald-400" />
               <span>Work Order Log</span>
             </h4>
 
@@ -128,7 +128,7 @@ export const AssetMaintenanceHistoryModal: React.FC<AssetMaintenanceHistoryModal
                             {r.status}
                           </span>
                         </td>
-                        <td className="p-3 font-sans text-teal-400 truncate max-w-[150px]">{r.assignedTechnician}</td>
+                        <td className="p-3 font-sans text-emerald-400 truncate max-w-[150px]">{r.assignedTechnician}</td>
                         <td className="p-3 text-right font-bold text-white">${(r.cost || 0).toLocaleString()}</td>
                       </tr>
                     ))}

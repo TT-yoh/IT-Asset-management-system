@@ -32,7 +32,7 @@ export const MaintenanceCard: React.FC<MaintenanceCardProps> = ({
   const getStatusColor = () => {
     switch (record.status) {
       case 'COMPLETED': return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
-      case 'IN_PROGRESS': return isOverdue ? 'bg-rose-500/20 text-rose-300 border-rose-500/30 animate-pulse' : 'bg-amber-500/20 text-amber-300 border-amber-500/30';
+      case 'IN_PROGRESS': return isOverdue ? 'bg-rose-500/20 text-rose-300 border-rose-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30';
       case 'PENDING': return 'bg-blue-500/20 text-blue-300 border-blue-500/30';
       default: return 'bg-slate-500/20 text-slate-300 border-slate-500/30';
     }
@@ -41,7 +41,7 @@ export const MaintenanceCard: React.FC<MaintenanceCardProps> = ({
   const getTypeBadgeColor = () => {
     switch (record.type) {
       case 'REPAIR': return 'bg-rose-500/10 text-rose-400 border-rose-500/20';
-      case 'PREVENTIVE': return 'bg-teal-500/10 text-teal-400 border-teal-500/20';
+      case 'PREVENTIVE': return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
       case 'UPGRADE': return 'bg-purple-500/10 text-purple-400 border-purple-500/20';
       case 'INSPECTION': return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
     }
@@ -61,30 +61,34 @@ export const MaintenanceCard: React.FC<MaintenanceCardProps> = ({
       {/* Side status bar indicator */}
       <div className={`absolute top-0 left-0 bottom-0 w-1.5 ${
         record.status === 'COMPLETED' ? 'bg-emerald-500' :
-        isOverdue ? 'bg-rose-500 animate-pulse' : 'bg-amber-500'
+        isOverdue ? 'bg-rose-500' : 'bg-amber-500'
       }`} />
 
       <div>
         {/* Header with image thumbnail & code */}
         <div className="flex items-start justify-between gap-3 pl-2">
-          <div className="flex items-center gap-3">
-            {asset?.image ? (
-              <img src={asset.image} alt={asset.name} className="w-10 h-10 rounded-xl object-cover border border-slate-700 bg-slate-950 shrink-0" />
+          <div className="flex items-center gap-3 min-w-0">
+            {(asset?.imageUrl || (asset as any)?.image) ? (
+              <img
+                src={asset?.imageUrl || (asset as any)?.image}
+                alt={asset?.name || record.assetName}
+                className="w-10 h-10 rounded-xl object-cover border border-slate-700 bg-slate-950 shrink-0"
+              />
             ) : (
               <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-rose-400 shrink-0">
                 <Wrench className="w-5 h-5" />
               </div>
             )}
-            <div>
-              <div className="flex items-center gap-1.5">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-[10px] font-mono font-bold bg-slate-800 px-1.5 py-0.5 rounded text-slate-300 border border-slate-700">{record.assetCode}</span>
                 <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${getTypeBadgeColor()}`}>{record.type}</span>
               </div>
-              <h4 className="text-sm font-bold text-white mt-1 line-clamp-1">{record.assetName}</h4>
+              <h4 className="text-sm font-bold text-white mt-1 line-clamp-1" title={record.assetName}>{record.assetName}</h4>
             </div>
           </div>
 
-          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${getStatusColor()}`}>
+          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border whitespace-nowrap shrink-0 ${getStatusColor()}`}>
             {record.status.replace('_', ' ')}
           </span>
         </div>
@@ -100,7 +104,7 @@ export const MaintenanceCard: React.FC<MaintenanceCardProps> = ({
         <div className="grid grid-cols-2 gap-2 mt-4 pl-2 text-[11px]">
           <div>
             <span className="text-slate-500 block text-[10px]">Assigned Tech</span>
-            <span className="text-teal-400 font-medium truncate block">{record.assignedTechnician}</span>
+            <span className="text-emerald-400 font-medium truncate block">{record.assignedTechnician}</span>
           </div>
           <div>
             <span className="text-slate-500 block text-[10px]">Priority</span>

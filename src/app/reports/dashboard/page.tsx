@@ -7,10 +7,10 @@ import {
   DollarSign, Box, ShieldAlert, Clock, Filter, 
   ArrowLeft, RefreshCw, AlertCircle, CheckCircle
 } from 'lucide-react';
-import { INITIAL_ASSETS, INITIAL_MAINTENANCE, MINEAZY_BRANCHES, DEPARTMENTS } from '../../../mockData';
+import { INITIAL_ASSETS, INITIAL_MAINTENANCE, INITIAL_BRANCHES, DEPARTMENTS } from '../../../mockData';
 import { calculateTotalAssetValue, getAssetsByCondition, getAssetsByAge } from '../../../lib/report-service';
 
-const COLORS = ['#0f766e', '#4f46e5', '#f59e0b', '#ef4444', '#10b981', '#8b5cf6', '#ec4899', '#6366f1'];
+const COLORS = ['#10b981', '#6366f1', '#f59e0b', '#f43f5e', '#06b6d4', '#8b5cf6', '#ec4899', '#3b82f6'];
 
 interface ReportsDashboardProps {
   onBack: () => void;
@@ -49,11 +49,13 @@ export default function ReportsDashboardPage({
   // Alerts
   const [alerts, setAlerts] = useState<any[]>([]);
 
+  const availableBranches = Array.from(new Set(assets.map(a => a.branchName))).filter(Boolean);
+
   // Run data updates when filters or asset inputs change
   useEffect(() => {
     // 1. Filter original assets
     const filteredAssets = assets.filter(a => {
-      const matchBranch = selectedBranch === 'ALL' || a.branchId === selectedBranch;
+      const matchBranch = selectedBranch === 'ALL' || a.branchId === selectedBranch || a.branchName === selectedBranch;
       const matchDept = selectedDept === 'ALL' || (a as any).departmentId === selectedDept;
       return matchBranch && matchDept;
     });
@@ -162,11 +164,11 @@ export default function ReportsDashboardPage({
 
     // Budget vs spending
     setBudgetVsSpending([
-      { category: 'Heavy Mach.', Budget: 350000, Spent: 220000 },
-      { category: 'IT Servers', Budget: 280000, Spent: 255000 },
-      { category: 'Vehicles', Budget: 180000, Spent: 140000 },
-      { category: 'Excavation', Budget: 150000, Spent: 95000 },
-      { category: 'Auxiliary', Budget: 90000, Spent: 88000 },
+      { category: 'Laptops & PCs', Budget: 350000, Spent: 220000 },
+      { category: 'Datacenter', Budget: 280000, Spent: 255000 },
+      { category: 'Network Infra', Budget: 180000, Spent: 140000 },
+      { category: 'Mobile & Sat', Budget: 150000, Spent: 95000 },
+      { category: 'Security Ops', Budget: 90000, Spent: 88000 },
     ]);
 
     // Build alerts list
@@ -186,7 +188,7 @@ export default function ReportsDashboardPage({
     // Budget alert
     newAlerts.push({
       type: 'INFO',
-      msg: 'IT Servers category budget has reached 91% capacity. Restrict new orders.'
+      msg: 'Datacenter category budget has reached 91% capacity. Restrict new hardware orders.'
     });
 
     setAlerts(newAlerts);
@@ -208,25 +210,25 @@ export default function ReportsDashboardPage({
         {/* Dynamic filter panel */}
         <div className="flex flex-wrap gap-2 items-center bg-slate-900/60 p-2 rounded-2xl border border-slate-800/80">
           <div className="flex items-center text-xs text-slate-400 font-bold px-2">
-            <Filter className="w-3.5 h-3.5 mr-1.5 text-teal-400" />
+            <Filter className="w-3.5 h-3.5 mr-1.5 text-emerald-400" />
             <span>Scope Filters:</span>
           </div>
 
           <select
             value={selectedBranch}
             onChange={(e) => setSelectedBranch(e.target.value)}
-            className="bg-slate-950 border border-slate-800 text-slate-300 text-xs font-medium rounded-xl px-2.5 py-1.5 focus:border-teal-500 focus:outline-none"
+            className="bg-slate-950 border border-slate-800 text-slate-300 text-xs font-medium rounded-xl px-2.5 py-1.5 focus:border-emerald-500 focus:outline-none"
           >
             <option value="ALL">All Branches</option>
-            {MINEAZY_BRANCHES.map(b => (
-              <option key={b.id} value={b.id}>{b.name}</option>
+            {availableBranches.map(bName => (
+              <option key={bName} value={bName}>{bName}</option>
             ))}
           </select>
 
           <select
             value={selectedDept}
             onChange={(e) => setSelectedDept(e.target.value)}
-            className="bg-slate-950 border border-slate-800 text-slate-300 text-xs font-medium rounded-xl px-2.5 py-1.5 focus:border-teal-500 focus:outline-none"
+            className="bg-slate-950 border border-slate-800 text-slate-300 text-xs font-medium rounded-xl px-2.5 py-1.5 focus:border-emerald-500 focus:outline-none"
           >
             <option value="ALL">All Departments</option>
             {DEPARTMENTS.map(d => (
@@ -239,7 +241,7 @@ export default function ReportsDashboardPage({
       {/* KPI Card Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* KPI 1 */}
-        <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-teal-500/20 transition-all flex items-center justify-between">
+        <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-emerald-500/20 transition-all flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
               Total Value Managed
@@ -247,12 +249,12 @@ export default function ReportsDashboardPage({
             <div className="text-xl font-bold text-slate-100 font-mono">
               ${kpis.totalValue.toLocaleString()}
             </div>
-            <p className="text-[10px] text-teal-400 flex items-center font-semibold">
-              <span className="w-1.5 h-1.5 rounded-full bg-teal-400 mr-1" />
+            <p className="text-[10px] text-emerald-400 flex items-center font-semibold">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1" />
               Active Capital Values
             </p>
           </div>
-          <div className="p-3 bg-teal-500/10 rounded-xl text-teal-400 border border-teal-500/20">
+          <div className="p-3 bg-emerald-500/10 rounded-xl text-emerald-400 border border-emerald-500/20">
             <DollarSign className="w-5 h-5" />
           </div>
         </div>
@@ -351,15 +353,15 @@ export default function ReportsDashboardPage({
           </h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={branchChartData.slice(0, 5)}>
+              <BarChart data={branchChartData.slice(0, 6)}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="name" stroke="#64748b" fontSize={10} tickLine={false} />
-                <YAxis stroke="#64748b" fontSize={10} tickLine={false} />
+                <XAxis dataKey="name" stroke="#64748b" fontSize={10} tickLine={false} interval={0} />
+                <YAxis stroke="#64748b" fontSize={10} tickLine={false} allowDecimals={false} />
                 <Tooltip 
                   contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px' }}
                   labelStyle={{ color: '#94a3b8', fontWeight: 'bold', fontSize: 11 }}
                 />
-                <Bar dataKey="Assets" fill="#0f766e" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Assets" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -412,20 +414,21 @@ export default function ReportsDashboardPage({
                 <Pie
                   data={statusChartData}
                   cx="50%"
-                  cy="50%"
-                  outerRadius={80}
-                  fill="#8884d8"
+                  cy="45%"
+                  outerRadius={75}
                   dataKey="value"
                   label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
                   labelLine={{ stroke: '#334155' }}
                 >
-                  {statusChartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[(index + 3) % COLORS.length]} />
-                  ))}
+                  {statusChartData.map((entry, index) => {
+                    const color = entry.name === 'ACTIVE' ? '#10b981' : entry.name === 'REPAIR' ? '#f59e0b' : '#f43f5e';
+                    return <Cell key={`cell-${index}`} fill={color} />;
+                  })}
                 </Pie>
                 <Tooltip 
                   contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px' }}
                 />
+                <Legend verticalAlign="bottom" height={28} />
               </ReChartsPie>
             </ResponsiveContainer>
           </div>
@@ -493,9 +496,15 @@ export default function ReportsDashboardPage({
               <AreaChart data={budgetVsSpending}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                 <XAxis dataKey="category" stroke="#64748b" fontSize={10} tickLine={false} />
-                <YAxis stroke="#64748b" fontSize={10} tickLine={false} />
+                <YAxis 
+                  stroke="#64748b" 
+                  fontSize={10} 
+                  tickLine={false}
+                  tickFormatter={(v) => `$${v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}`}
+                />
                 <Tooltip 
                   contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px' }}
+                  formatter={(val: any) => [`$${Number(val).toLocaleString()}`, 'Amount']}
                 />
                 <Legend verticalAlign="top" height={36} />
                 <Area type="monotone" dataKey="Budget" stroke="#4f46e5" fill="#4f46e5" fillOpacity={0.05} strokeWidth={2} />

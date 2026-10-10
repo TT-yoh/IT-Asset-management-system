@@ -42,7 +42,7 @@ export const CheckinForm: React.FC<CheckinFormProps> = ({
   };
 
   return (
-    <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl relative animate-in fade-in zoom-in-95 duration-200 text-xs">
+    <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl relative animate-in fade-in zoom-in-95 duration-200 text-xs max-h-[92vh] overflow-y-auto">
       {/* Header */}
       <div className="flex items-center justify-between pb-4 border-b border-slate-800">
         <div className="flex items-center gap-3">
@@ -66,7 +66,7 @@ export const CheckinForm: React.FC<CheckinFormProps> = ({
         </div>
         <div className="flex justify-between text-slate-400">
           <span>Checked Out Date:</span>
-          <strong className="text-teal-400">{activeCheckout.checkedOutAt}</strong>
+          <strong className="text-emerald-400">{activeCheckout.checkedOutAt}</strong>
         </div>
         <div className="flex justify-between text-slate-400">
           <span>Checkout Purpose:</span>

@@ -23,6 +23,7 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const [activeTab3D, setActiveTab3D] = useState<'network' | 'server'>('network');
+  const [viewMode, setViewMode] = useState<'overview' | '3d'>('overview');
 
   // KPI calculations
   const orgAssets = assets.filter(a => a.orgId === currentOrg.id);
@@ -38,7 +39,7 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
     categoryMap[a.categoryName] = (categoryMap[a.categoryName] || 0) + 1;
   });
   const pieData = Object.keys(categoryMap).map(k => ({ name: k, value: categoryMap[k] }));
-  const COLORS = ['#2dd4bf', '#6366f1', '#3b82f6', '#f59e0b', '#ec4899', '#10b981'];
+  const COLORS = ['#10b981', '#34d399', '#059669', '#6ee7b7', '#047857', '#a7f3d0'];
 
   // Chart data: Depreciation timeline forecast
   const areaData = [
@@ -59,7 +60,7 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
 
   // Three.js Animated 3D Scene
   useEffect(() => {
-    if (!mountRef.current) return;
+    if (!mountRef.current || viewMode !== '3d') return;
     const currentMount = mountRef.current;
     const width = currentMount.clientWidth;
     const height = currentMount.clientHeight;
@@ -76,10 +77,10 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
     // Lights
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     scene.add(ambientLight);
-    const pointLight = new THREE.PointLight(0x2dd4bf, 4, 50); // Teal point light
+    const pointLight = new THREE.PointLight(0x10b981, 4, 50); // Emerald point light
     pointLight.position.set(10, 10, 10);
     scene.add(pointLight);
-    const pointLight2 = new THREE.PointLight(0x818cf8, 4, 50); // Indigo light
+    const pointLight2 = new THREE.PointLight(0x34d399, 4, 50); // Mint light
     pointLight2.position.set(-10, -10, 10);
     scene.add(pointLight2);
 
@@ -89,7 +90,7 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
     // Create 3D Server Hub Center
     const centerGeo = new THREE.IcosahedronGeometry(2.2, 1);
     const centerMat = new THREE.MeshStandardMaterial({
-      color: 0x0f766e,
+      color: 0x065f46,
       wireframe: activeTab3D === 'network',
       roughness: 0.2,
       metalness: 0.8
@@ -103,7 +104,7 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
     group.add(linesGroup);
 
     const nodeGeo = new THREE.BoxGeometry(0.6, 0.6, 0.6);
-    const nodeMatWorking = new THREE.MeshStandardMaterial({ color: 0x2dd4bf, emissive: 0x0d9488, emissiveIntensity: 0.5 }); // Teal for working
+    const nodeMatWorking = new THREE.MeshStandardMaterial({ color: 0x10b981, emissive: 0x059669, emissiveIntensity: 0.5 }); // Emerald for working
     const nodeMatNonWorking = new THREE.MeshStandardMaterial({ color: 0xf43f5e, emissive: 0xe11d48, emissiveIntensity: 0.6 }); // Rose for non-working
 
     const totalAssets = orgAssets.length;
@@ -128,7 +129,7 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
         new THREE.Vector3(0, 0, 0),
         new THREE.Vector3(x, y, z)
       ]);
-      const lineMat = new THREE.LineBasicMaterial({ color: isWorking ? 0x2dd4bf : 0xf43f5e, transparent: true, opacity: 0.25 });
+      const lineMat = new THREE.LineBasicMaterial({ color: isWorking ? 0x10b981 : 0xf43f5e, transparent: true, opacity: 0.25 });
       const line = new THREE.Line(lineGeo, lineMat);
       linesGroup.add(line);
     });
@@ -194,160 +195,43 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
       }
       renderer.dispose();
     };
-  }, [orgAssets.length, activeTab3D]);
+  }, [orgAssets.length, activeTab3D, viewMode]);
 
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto animate-in fade-in duration-200">
-      {/* Top Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Simple Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-            <span>Executive IT Asset Analytics</span>
-            <span className="text-xs font-mono bg-teal-500/20 text-teal-300 px-2 py-0.5 rounded border border-teal-500/30">
-              {currentOrg.name}
-            </span>
+          <h2 className="text-xl md:text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+            <span>IT Asset Dashboard</span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Real-time multi-branch device valuations, remaining book values, and interactive 3D topology.
+            Real-time inventory overview and operational health for <strong className="text-emerald-400 font-semibold">{currentOrg.name}</strong>.
           </p>
         </div>
 
-        <div className="flex items-center space-x-2">
-          <button
-            onClick={() => setActiveTab3D(activeTab3D === 'network' ? 'server' : 'network')}
-            className="flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-lg border border-slate-700 transition-colors"
-          >
-            <RotateCw className="w-3.5 h-3.5 text-teal-400" />
-            <span>Toggle Wireframe Mode</span>
-          </button>
+        <div className="flex items-center gap-2.5">
+          {onNavigateToAssets && (
+            <button
+              onClick={() => onNavigateToAssets('ALL')}
+              className="px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-emerald-500/20 transition flex items-center gap-1.5"
+            >
+              <span>View Full Inventory</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Dynamic Role-Based Custom Views */}
-      {currentUser && (
-        <div className="animate-in slide-in-from-top-3 duration-300">
-          {currentUser.role === 'DIRECTOR' && (
-            <div className="bg-gradient-to-r from-purple-950/40 via-indigo-950/20 to-slate-900 border border-purple-500/30 rounded-2xl p-5 shadow-xl relative overflow-hidden">
-              <div className="absolute right-0 top-0 h-full w-1/3 bg-purple-500/5 blur-3xl rounded-full pointer-events-none" />
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1.5 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400">
-                      <Briefcase className="w-4 h-4" />
-                    </div>
-                    <span className="text-xs font-bold text-purple-300 uppercase tracking-widest">Director Strategic Management Board</span>
-                  </div>
-                  <h3 className="text-lg font-bold text-white">Welcome back, Director {currentUser.fullName}</h3>
-                  <p className="text-xs text-slate-300 max-w-2xl">
-                    Your executive permissions grant you complete financial visibility. Below is a strategic recommendation based on current asset distribution and straight-line lifecycle forecasts.
-                  </p>
-                </div>
-                <div className="flex flex-col gap-1 text-right border-l md:border-l border-slate-800 pl-4">
-                  <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Capex Efficiency</span>
-                  <span className="text-2xl font-bold text-emerald-400">94.2% Optimized</span>
-                  <span className="text-[10px] text-slate-500 font-mono">Tenant SLA: Active</span>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4 pt-4 border-t border-slate-800/60">
-                <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-xs">
-                  <div className="text-purple-400 font-bold mb-1 flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Asset Refresh Recommendation</span>
-                  </div>
-                  <p className="text-slate-400 leading-relaxed text-[11px]">
-                    23% of devices at <strong className="text-slate-200">Operations branch</strong> are nearing end-of-lifecycle. Recommend earmarking $45,000 for Q3 upgrades.
-                  </p>
-                </div>
-                <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-xs">
-                  <div className="text-teal-400 font-bold mb-1 flex items-center gap-1.5">
-                    <DollarSign className="w-3.5 h-3.5" />
-                    <span>Cost-Saving Highlight</span>
-                  </div>
-                  <p className="text-slate-400 leading-relaxed text-[11px]">
-                    Transitioning retired laptops to low-priority diagnostic terminals in <strong className="text-slate-200">Field Headquarters</strong> saved $12,400 in licensing.
-                  </p>
-                </div>
-                <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-xs">
-                  <div className="text-sky-400 font-bold mb-1 flex items-center gap-1.5">
-                    <ClipboardList className="w-3.5 h-3.5" />
-                    <span>Director Strategic Actions</span>
-                  </div>
-                  <div className="flex gap-2 mt-1">
-                    <button className="px-2 py-1 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 text-purple-300 rounded text-[10px] font-bold transition flex items-center gap-1">
-                      <span>Authorize Capex</span>
-                      <ArrowRight className="w-3 h-3" />
-                    </button>
-                    <button className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] transition font-bold">
-                      Export Report
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {currentUser.role === 'IT_SUPPORT' && (
-            <div className="bg-gradient-to-r from-sky-950/40 via-blue-950/20 to-slate-900 border border-sky-500/30 rounded-2xl p-5 shadow-xl relative overflow-hidden">
-              <div className="absolute right-0 top-0 h-full w-1/3 bg-sky-500/5 blur-3xl rounded-full pointer-events-none" />
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1.5 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400">
-                      <Terminal className="w-4 h-4" />
-                    </div>
-                    <span className="text-xs font-bold text-sky-300 uppercase tracking-widest">IT Operational Support Console</span>
-                  </div>
-                  <h3 className="text-lg font-bold text-white">Technician Portal: {currentUser.fullName}</h3>
-                  <p className="text-xs text-slate-300 max-w-2xl">
-                    Operational mode active. You have full edit/creation rights for maintenance tickets, hardware check-outs, and device diagnostic details.
-                  </p>
-                </div>
-                <div className="flex flex-col gap-1 text-right border-l md:border-l border-slate-800 pl-4">
-                  <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Active Dispatch Queue</span>
-                  <span className="text-2xl font-bold text-sky-400">3 Tickets Open</span>
-                  <span className="text-[10px] text-slate-500 font-mono">Assigned Branch: {currentUser.branchName}</span>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4 pt-4 border-t border-slate-800/60">
-                <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-xs flex items-start gap-2.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0 mt-1.5 animate-ping" />
-                  <div>
-                    <span className="font-semibold text-slate-200 block text-[11px]">Server Rack #4 Temp Warning</span>
-                    <p className="text-slate-400 text-[10px] mt-0.5">Ventilation failure logged at Operations Branch. Urgent triage advised.</p>
-                  </div>
-                </div>
-                <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-xs flex items-start gap-2.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 mt-1.5" />
-                  <div>
-                    <span className="font-semibold text-slate-200 block text-[11px]">Hardware End-of-Life Alert</span>
-                    <p className="text-slate-400 text-[10px] mt-0.5">Dell PowerEdge server has reached end-of-life value. Schedule swap.</p>
-                  </div>
-                </div>
-                <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-xs flex items-start gap-2.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0 mt-1.5" />
-                  <div>
-                    <span className="font-semibold text-slate-200 block text-[11px]">System Status - All Green</span>
-                    <p className="text-slate-400 text-[10px] mt-0.5">Database multi-branch endpoints synchronized with 0 pending errors.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Removed unneeded admin portal banner per user instructions */}
-        </div>
-      )}
-
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-xl relative overflow-hidden group hover:border-teal-500/40 transition-colors">
-          <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-teal-500/5 rounded-full blur-xl group-hover:bg-teal-500/10 transition-colors" />
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-xl relative overflow-hidden group hover:border-emerald-500/40 transition-colors">
           <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
-            <span>Total Asset Book Value</span>
-            <div className="p-2 rounded-xl bg-teal-500/10 text-teal-400"><DollarSign className="w-4 h-4" /></div>
+            <span>Total Fleet Value</span>
+            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400"><DollarSign className="w-4 h-4" /></div>
           </div>
           <div className="text-2xl font-bold text-white mt-2">${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-          <div className="flex items-center space-x-1 mt-2 text-[11px] text-teal-400">
+          <div className="flex items-center space-x-1 mt-2 text-[11px] text-emerald-400">
             <span>Original Cost: ${totalPurchase.toLocaleString()}</span>
           </div>
         </div>
@@ -357,11 +241,11 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
           className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-xl relative overflow-hidden group hover:border-emerald-500/40 transition-colors cursor-pointer"
         >
           <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
-            <span>Working Assets</span>
+            <span>Active & In Use</span>
             <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400"><CheckCircle2 className="w-4 h-4" /></div>
           </div>
           <div className="text-2xl font-bold text-white mt-2">{activeCount} <span className="text-sm font-normal text-slate-400">/ {orgAssets.length} units</span></div>
-          <div className="text-[11px] text-emerald-400 mt-2">● In active, healthy operation</div>
+          <div className="text-[11px] text-emerald-400 mt-2">● Healthy, operational equipment</div>
         </div>
 
         <div 
@@ -369,11 +253,11 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
           className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-xl relative overflow-hidden group hover:border-rose-500/40 transition-colors cursor-pointer"
         >
           <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
-            <span>Non-Working Assets</span>
+            <span>In Repair / Offline</span>
             <div className="p-2 rounded-xl bg-rose-500/10 text-rose-400"><AlertCircle className="w-4 h-4" /></div>
           </div>
           <div className="text-2xl font-bold text-white mt-2">{nonWorkingCount} <span className="text-sm font-normal text-slate-400">units</span></div>
-          <div className="text-[11px] text-rose-400 mt-2">● Damaged, repairing, or offline</div>
+          <div className="text-[11px] text-rose-400 mt-2">● Pending diagnostics or repair</div>
         </div>
 
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-xl relative overflow-hidden group hover:border-indigo-500/40 transition-colors">
@@ -384,38 +268,84 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
           <div className="text-2xl font-bold text-white mt-2">
             {Math.round((orgAssets.filter(a => a.assignedToUserName).length / (orgAssets.length || 1)) * 100)}%
           </div>
-          <div className="text-[11px] text-indigo-400 mt-2">● Handover checkouts verified</div>
+          <div className="text-[11px] text-indigo-400 mt-2">● Handover checkouts logged</div>
         </div>
       </div>
 
-      {/* Main Grid: 3D Canvas + Charts */}
+      {/* Main Grid: Overview Charts OR 3D Topology */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Interactive 3D Canvas Panel */}
-        <div className="lg:col-span-2 bg-slate-900/95 border border-slate-800 rounded-2xl p-5 shadow-2xl flex flex-col min-h-[420px] relative overflow-hidden">
-          <div className="flex items-center justify-between mb-3 z-10">
-            <div className="flex items-center space-x-2">
-              <Cpu className="w-4 h-4 text-teal-400 animate-spin" style={{ animationDuration: '8s' }} />
-              <span className="text-xs font-bold text-white uppercase tracking-wider">3D Real-Time Asset Topology Matrix</span>
+        <div className="lg:col-span-2 bg-slate-900/95 border border-slate-800 rounded-2xl p-5 shadow-2xl flex flex-col justify-between min-h-[400px]">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 border-b border-slate-800 pb-3">
+            <div>
+              <span className="text-xs font-bold text-white uppercase tracking-wider">
+                {viewMode === 'overview' ? 'Hardware Distribution by Branch' : '3D Real-Time Asset Topology'}
+              </span>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                {viewMode === 'overview' ? 'Physical assets allocated across operational facilities' : 'Interactive spatial representation of active devices'}
+              </p>
             </div>
-            <span className="text-[10px] text-slate-400 bg-slate-800 px-2 py-1 rounded border border-slate-700">
-              Interactive • Drag to Orbit
-            </span>
+
+            {/* Simple View Switcher */}
+            <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs shrink-0 self-start sm:self-auto">
+              <button
+                onClick={() => setViewMode('overview')}
+                className={`px-3 py-1.5 rounded-lg font-semibold transition ${
+                  viewMode === 'overview' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Overview
+              </button>
+              <button
+                onClick={() => setViewMode('3d')}
+                className={`px-3 py-1.5 rounded-lg font-semibold transition ${
+                  viewMode === '3d' ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                3D View
+              </button>
+            </div>
           </div>
 
-          <div ref={mountRef} className="flex-1 w-full relative cursor-grab active:cursor-grabbing min-h-[340px]" />
-
-          <div className="absolute bottom-4 left-5 bg-slate-950/80 backdrop-blur-md border border-slate-800 p-3 rounded-xl text-[11px] text-slate-300 space-y-1 z-10 pointer-events-none">
-            <div className="flex items-center space-x-2"><span className="w-2.5 h-2.5 rounded-sm bg-teal-400 block" /><span>Working Assets ({activeCount})</span></div>
-            <div className="flex items-center space-x-2"><span className="w-2.5 h-2.5 rounded-sm bg-rose-500 block" /><span>Non-Working Assets ({nonWorkingCount})</span></div>
-            <div className="text-[10px] text-slate-500 pt-1">Real-time status topology</div>
-          </div>
+          {viewMode === 'overview' ? (
+            <div className="h-72 w-full pt-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={barData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                  <XAxis dataKey="branch" stroke="#64748b" fontSize={10} interval={0} tickFormatter={(val: string) => val.length > 10 ? val.split(' ')[0] : val} />
+                  <YAxis stroke="#64748b" fontSize={10} tickFormatter={(val) => `$${(val / 1000).toFixed(0)}k`} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px', color: '#fff' }}
+                    formatter={(value: any) => [`$${value.toLocaleString()}`, 'Total Value']}
+                  />
+                  <Bar dataKey="value" fill="#10b981" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="relative flex-1 w-full min-h-[340px]">
+              <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing min-h-[340px]" />
+              <div className="absolute top-2 right-2 z-10">
+                <button
+                  onClick={() => setActiveTab3D(activeTab3D === 'network' ? 'server' : 'network')}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 text-[10px] font-mono border border-slate-700 flex items-center gap-1.5"
+                >
+                  <RotateCw className="w-3 h-3 text-emerald-400" />
+                  <span>Wireframe</span>
+                </button>
+              </div>
+              <div className="absolute bottom-2 left-2 bg-slate-950/80 backdrop-blur-md border border-slate-800 p-2.5 rounded-xl text-[11px] text-slate-300 space-y-1 pointer-events-none">
+                <div className="flex items-center space-x-2"><span className="w-2 h-2 rounded-sm bg-emerald-400 block" /><span>Working Assets ({activeCount})</span></div>
+                <div className="flex items-center space-x-2"><span className="w-2 h-2 rounded-sm bg-rose-500 block" /><span>Non-Working Assets ({nonWorkingCount})</span></div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Category Breakdown Pie Chart */}
         <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-5 shadow-2xl flex flex-col justify-between">
           <div>
             <div className="flex items-center space-x-2 mb-4">
-              <Layers className="w-4 h-4 text-indigo-400" />
+              <Layers className="w-4 h-4 text-emerald-400" />
               <span className="text-xs font-bold text-white uppercase tracking-wider">Device Categories</span>
             </div>
             <div className="h-60 w-full">
@@ -442,11 +372,16 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-slate-800">
+          <div className="space-y-1.5 mt-4 pt-4 border-t border-slate-800">
             {pieData.map((item, idx) => (
-              <div key={item.name} className="flex items-center space-x-2 text-[11px] text-slate-300 truncate">
-                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
-                <span className="truncate">{item.name} ({item.value})</span>
+              <div key={item.name} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-slate-800/40 transition">
+                <div className="flex items-center space-x-2 min-w-0">
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                  <span className="truncate text-slate-300 font-medium text-[11px]" title={item.name}>{item.name}</span>
+                </div>
+                <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 shrink-0 ml-2">
+                  {item.value} units
+                </span>
               </div>
             ))}
           </div>
@@ -459,25 +394,25 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
         <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-5 shadow-2xl">
           <div className="flex items-center justify-between mb-4">
             <span className="text-xs font-bold text-white uppercase tracking-wider">Device Valuation Lifecycle Forecast</span>
-            <span className="text-[10px] font-mono text-teal-400 bg-teal-500/10 px-2 py-0.5 rounded border border-teal-500/20">Datalink Live</span>
+            <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">Datalink Live</span>
           </div>
           <div className="h-64 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={areaData}>
                 <defs>
                   <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#2dd4bf" stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor="#2dd4bf" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.8}/>
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                 <XAxis dataKey="year" stroke="#64748b" fontSize={11} />
-                <YAxis stroke="#64748b" fontSize={11} />
+                <YAxis stroke="#64748b" fontSize={11} tickFormatter={(val) => `$${(val / 1000).toFixed(0)}k`} />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px', color: '#fff' }}
                   formatter={(value: any) => [`$${Math.round(value).toLocaleString()}`, 'Book Value']}
                 />
-                <Area type="monotone" dataKey="bookValue" stroke="#2dd4bf" strokeWidth={2} fillOpacity={1} fill="url(#colorVal)" />
+                <Area type="monotone" dataKey="bookValue" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorVal)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -493,8 +428,8 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={barData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="branch" stroke="#64748b" fontSize={10} />
-                <YAxis stroke="#64748b" fontSize={11} />
+                <XAxis dataKey="branch" stroke="#64748b" fontSize={10} interval={0} />
+                <YAxis stroke="#64748b" fontSize={11} tickFormatter={(val) => `$${(val / 1000).toFixed(0)}k`} />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px', color: '#fff' }}
                   formatter={(value: any) => [`$${value.toLocaleString()}`, 'Total Value']}

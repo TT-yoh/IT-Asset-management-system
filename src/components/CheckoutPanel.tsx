@@ -15,16 +15,12 @@ import {
   Filter,
   Search,
   HardDrive,
-  Code2,
-  Copy,
-  Check,
   UserCheck,
   UserX,
   UserPlus,
   FileText,
   Calendar,
   ShieldAlert,
-  FileCode,
   Layers,
   Wrench,
   RefreshCw,
@@ -56,10 +52,6 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
   onAssignCustody,
   onUnassignCustody
 }) => {
-  const [panelMode, setPanelMode] = useState<'WORKSPACE' | 'CODE_DELIVERABLES'>('WORKSPACE');
-  const [activeCodeFile, setActiveCodeFile] = useState('api_checkout');
-  const [copiedCode, setCopiedCode] = useState(false);
-
   // Modals state
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [showCheckinModal, setShowCheckinModal] = useState(false);
@@ -247,155 +239,6 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
     const a = document.createElement('a');
     a.href = url;
     a.download = `checkout_history_${Date.now()}.csv`;
-    a.click();
-  };
-
-  // Code Dictionary
-  const PHASE4_CODE: Record<string, { title: string; desc: string; code: string }> = {
-    api_checkout: {
-      title: 'File 1: src/app/api/assets/[id]/checkout/route.ts',
-      desc: 'POST endpoint validating employee assignment, verifying ACTIVE status, and logging checkout history.',
-      code: `// File 1: src/app/api/assets/[id]/checkout/route.ts
-import { NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
-
-export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const body = await req.json(); // { reason, expected_return_date, notes, user_id }
-  const assetId = params.id;
-
-  const asset = await prisma.asset.findUnique({ where: { id: assetId } });
-  if (!asset || asset.status !== 'ACTIVE') {
-    return NextResponse.json({ error: 'Asset unavailable or inactive' }, { status: 400 });
-  }
-
-  // Enforce assignment verify
-  const targetUserId = body.user_id || session.user.id;
-
-  const record = await prisma.assetCheckoutHistory.create({
-    data: {
-      assetId,
-      checkedOutToUserId: targetUserId,
-      checkedOutByAdminId: session.user.id,
-      checkedOutAt: new Date(),
-      expectedReturnDate: new Date(body.expected_return_date),
-      reason: body.reason,
-      status: 'ACTIVE',
-      notes: body.notes
-    }
-  });
-
-  await prisma.asset.update({
-    where: { id: assetId },
-    data: { assignedToUserId: targetUserId, assignedAt: new Date() }
-  });
-
-  await prisma.auditLog.create({
-    data: { orgId: session.user.org_id, userId: session.user.id, action: 'ASSET_CHECKOUT', entityType: 'Asset', entityName: asset.assetCode }
-  });
-
-  return NextResponse.json({ success: true, checkout_record: record });
-}`
-    },
-    api_checkin: {
-      title: 'File 2: src/app/api/assets/[id]/checkin/route.ts',
-      desc: 'POST endpoint marking return check-in, tracking return condition, & auto-dispatching repair tickets on damage.',
-      code: `// File 2: src/app/api/assets/[id]/checkin/route.ts
-import { NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
-
-export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const body = await req.json(); // { condition: "GOOD"|"FAIR"|"POOR", damage_reported: boolean, damage_description, notes }
-  const assetId = params.id;
-
-  const activeCheckout = await prisma.assetCheckoutHistory.findFirst({
-    where: { assetId, status: 'ACTIVE' }
-  });
-
-  if (activeCheckout) {
-    await prisma.assetCheckoutHistory.update({
-      where: { id: activeCheckout.id },
-      data: {
-        checkedInAt: new Date(),
-        returnCondition: body.condition,
-        damageReported: body.damage_reported,
-        damageDescription: body.damage_description,
-        status: 'RETURNED'
-      }
-    });
-  }
-
-  // Automatic Maintenance Creation on Damage Report
-  if (body.damage_reported) {
-    await prisma.maintenanceRecord.create({
-      data: {
-        assetId,
-        type: 'REPAIR',
-        status: 'PENDING',
-        description: \`[AUTO-TRIGGERED ON CHECKIN] \${body.damage_description}\`,
-        reportedBy: session.user.id,
-        startDate: new Date()
-      }
-    });
-    await prisma.asset.update({ where: { id: assetId }, data: { status: 'DAMAGED', condition: body.condition, assignedToUserId: null } });
-  } else {
-    await prisma.asset.update({ where: { id: assetId }, data: { condition: body.condition, assignedToUserId: null } });
-  }
-
-  await prisma.auditLog.create({
-    data: { orgId: session.user.org_id, userId: session.user.id, action: 'ASSET_CHECKIN', entityType: 'Asset', entityName: assetId }
-  });
-
-  return NextResponse.json({ success: true, condition_updated: body.condition });
-}`
-    },
-    api_assign_unassign: {
-      title: 'Files 3 & 4: Assign / Unassign Endpoints',
-      desc: 'Admin-only POST endpoints enforcing direct custody overrides and clearing assignment states.',
-      code: `// File 3: src/app/api/assets/[id]/assign/route.ts
-export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (session?.user.role !== 'ADMIN') return NextResponse.json({ error: 'Admin only' }, { status: 403 });
-  const { user_id } = await req.json();
-  await prisma.asset.update({ where: { id: params.id }, data: { assignedToUserId: user_id, assignedAt: new Date() } });
-  return NextResponse.json({ success: true });
-}
-
-// File 4: src/app/api/assets/[id]/unassign/route.ts
-export async function POST_UNASSIGN(req: Request, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (session?.user.role !== 'ADMIN') return NextResponse.json({ error: 'Admin only' }, { status: 403 });
-  await prisma.asset.update({ where: { id: params.id }, data: { assignedToUserId: null } });
-  return NextResponse.json({ success: true });
-}`
-    },
-    pages_forms: {
-      title: 'Files 5 - 9: Checkout / Checkin Pages & Forms',
-      desc: 'React views featuring purpose dropdowns, expected date pickers, condition selectors, & damage flag toggles.',
-      code: `// File 8: src/components/CheckoutForm.tsx & File 9: CheckinForm.tsx
-// Delivered fully interactive in workspace code! Supports custom reason inputs,
-// overdue warning banners, and auto repair ticket triggers.`
-    },
-    service_lib: {
-      title: 'File 10: src/lib/checkout-service.ts',
-      desc: 'Service layer class providing checkoutAsset(), checkinAsset(), getOverdueCheckouts(), & getUserCheckouts().',
-      code: `// File 10: src/lib/checkout-service.ts
-export class CheckoutService {
-  static getOverdueCheckouts(pool: CheckoutRecord[]) {
-    const today = new Date().toISOString().split('T')[0];
-    return pool.filter(c => c.status === 'ACTIVE' && c.expectedReturnDate < today);
-  }
-}`
-    }
   };
 
   return (
@@ -403,7 +246,7 @@ export class CheckoutService {
       {/* Custody Header Banner */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-8 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xl">
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400 shrink-0">
+          <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
             <ArrowLeftRight className="w-6 h-6" />
           </div>
           <div>
@@ -411,7 +254,7 @@ export class CheckoutService {
               <h1 className="text-xl md:text-2xl font-bold tracking-tight text-slate-100">
                 Custody Checkout & Check-in
               </h1>
-              <span className="bg-teal-500/20 text-teal-400 border border-teal-500/30 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+              <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
                 Secure Custody
               </span>
             </div>
@@ -422,16 +265,12 @@ export class CheckoutService {
         </div>
       </div>
 
-      {/* ====================================================================
-          MODE 1: LIVE INTERACTIVE CUSTODY LEDGER WORKSPACE
-         ==================================================================== */}
-      {panelMode === 'WORKSPACE' && (
-        <div className="space-y-6">
+      <div className="space-y-6">
           {/* Overdue Alert Banner */}
           {overdueCount > 0 && (
             <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-center justify-between gap-4 text-xs">
               <div className="flex items-center gap-3 text-amber-300">
-                <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 animate-bounce" />
+                <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0" />
                 <div>
                   <strong className="text-amber-200 block">Overdue Hardware Alert ({overdueCount} Devices)</strong>
                   <span>Devices have surpassed their expected return check-in date. Admins can force return check-in below.</span>
@@ -449,7 +288,7 @@ export class CheckoutService {
           {/* Action Toolbar */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 p-4 md:p-5 rounded-2xl shadow-xl">
             <div>
-              <span className="text-sm font-bold text-slate-100 block">Transaction Ledger Ledger</span>
+              <span className="text-sm font-bold text-slate-100 block">Transaction Ledger</span>
               <p className="text-[11px] text-slate-400">
                 {currentUser.role === 'USER'
                   ? 'Showing your personal custody records and assigned equipment.'
@@ -462,8 +301,8 @@ export class CheckoutService {
                 onClick={handleExportCSV}
                 className="px-3.5 py-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs font-semibold text-slate-300 transition flex items-center gap-1.5"
               >
-                <Download className="w-3.5 h-3.5 text-teal-400" />
-                <span>Export CSV (File 7)</span>
+                <Download className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Export CSV</span>
               </button>
 
               {isAdmin && (
@@ -472,7 +311,7 @@ export class CheckoutService {
                   className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-xs font-semibold text-slate-200 transition flex items-center gap-1.5"
                 >
                   <UserCheck className="w-3.5 h-3.5 text-sky-400" />
-                  <span>Assign Custody (File 3)</span>
+                  <span>Assign Custody</span>
                 </button>
               )}
 
@@ -482,17 +321,17 @@ export class CheckoutService {
                   className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-xs font-semibold text-slate-200 transition flex items-center gap-1.5"
                 >
                   <UserX className="w-3.5 h-3.5 text-rose-400" />
-                  <span>Unassign (File 4)</span>
+                  <span>Revoke Custody</span>
                 </button>
               )}
 
               {isAdminOrSupport && (
                 <button
                   onClick={() => setShowCheckoutModal(true)}
-                  className="px-4 py-2 bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-teal-500/20 transition flex items-center gap-1.5"
+                  className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-emerald-500/20 transition flex items-center gap-1.5"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>Checkout Hardware (File 5)</span>
+                  <span>New Checkout</span>
                 </button>
               )}
             </div>
@@ -507,13 +346,13 @@ export class CheckoutService {
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder="Filter by asset code, employee, or reason..."
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-slate-200 focus:outline-none focus:border-teal-500"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-slate-200 focus:outline-none focus:border-emerald-500"
               />
             </div>
 
             <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto">
               <div className="flex items-center gap-1 bg-slate-950 px-2 py-1.5 rounded-xl border border-slate-800">
-                <Filter className="w-3 h-3 text-teal-400" />
+                <Filter className="w-3 h-3 text-emerald-400" />
                 <span className="text-[10px] uppercase text-slate-400 font-bold">Status:</span>
                 <select
                   value={filterStatus}
@@ -570,7 +409,7 @@ export class CheckoutService {
                       return (
                         <tr key={rec.id} className="hover:bg-slate-850/60 transition">
                           <td className="p-4">
-                            <span className="font-mono text-teal-400 font-bold bg-teal-500/10 px-1.5 py-0.5 rounded text-[11px]">
+                            <span className="font-mono text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded text-[11px]">
                               {rec.assetCode}
                             </span>
                             <div className="text-white font-semibold mt-1 truncate max-w-[180px]">{rec.assetName}</div>
@@ -583,14 +422,19 @@ export class CheckoutService {
                               <span>{rec.checkedOutToUserName}</span>
                             </div>
                           </td>
-                          <td className="p-4 font-mono text-slate-400">{rec.checkedOutAt}</td>
-                          <td className="p-4 font-mono">
-                            <span className={isOverdue ? 'text-rose-400 font-bold animate-pulse' : 'text-slate-400'}>
-                              {rec.expectedReturnDate}
-                              {isOverdue && ' (OVERDUE)'}
-                            </span>
+                          <td className="p-4 font-mono text-slate-400 text-xs">{rec.checkedOutAt}</td>
+                          <td className="p-4 font-mono text-xs">
+                            {isOverdue ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30 whitespace-nowrap">
+                                {rec.expectedReturnDate} • Overdue
+                              </span>
+                            ) : (
+                              <span className="text-slate-300 font-medium">
+                                {rec.expectedReturnDate || 'Indefinite'}
+                              </span>
+                            )}
                           </td>
-                          <td className="p-4 truncate max-w-[180px] text-slate-400">
+                          <td className="p-4 truncate max-w-[180px] text-slate-400 text-xs">
                             {rec.reason || 'Daily production use'}
                           </td>
                           <td className="p-4">
@@ -603,10 +447,10 @@ export class CheckoutService {
                                     setShowCheckinModal(true);
                                   }
                                 }}
-                                className="px-3 py-1.5 bg-gradient-to-r from-sky-500/20 to-teal-500/20 hover:from-sky-500/30 hover:to-teal-500/30 text-sky-300 border border-sky-500/30 rounded-xl text-[11px] font-bold transition flex items-center gap-1.5 shadow-md"
+                                className="px-3 py-1.5 bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 rounded-xl text-[11px] font-bold transition flex items-center gap-1.5 shadow-sm whitespace-nowrap"
                               >
                                 <ArrowDownLeft className="w-3.5 h-3.5 text-sky-400" />
-                                <span>Check-in Return (File 6)</span>
+                                <span>Check-in Return</span>
                               </button>
                             ) : (
                               <div className="space-y-0.5 font-mono text-[10px]">
@@ -629,88 +473,6 @@ export class CheckoutService {
             </div>
           </div>
         </div>
-      )}
-
-      {/* ====================================================================
-          MODE 2: GENERATED PHASE 4 CODE DELIVERABLES (FILES 1-10)
-         ==================================================================== */}
-      {panelMode === 'CODE_DELIVERABLES' && (
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 animate-fadeIn">
-          <div className="lg:col-span-1 bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 px-2 flex items-center gap-2">
-              <FileCode className="w-4 h-4 text-teal-400" />
-              <span>Phase 4 Deliverables</span>
-            </h3>
-            {Object.entries(PHASE4_CODE).map(([key, item]) => (
-              <button
-                key={key}
-                onClick={() => {
-                  setActiveCodeFile(key);
-                  setCopiedCode(false);
-                }}
-                className={`w-full text-left p-3 rounded-xl text-xs transition block ${
-                  activeCodeFile === key
-                    ? 'bg-teal-500 text-slate-950 font-bold shadow-md'
-                    : 'text-slate-300 hover:bg-slate-800/80'
-                }`}
-              >
-                <p className="truncate font-mono font-bold">{item.title.split(':')[0]}</p>
-                <p className={`text-[10px] truncate mt-0.5 ${activeCodeFile === key ? 'text-slate-900' : 'text-slate-400'}`}>
-                  {item.title.split(':')[1] || item.title}
-                </p>
-              </button>
-            ))}
-          </div>
-
-          <div className="lg:col-span-3 bg-slate-950 border border-slate-800 rounded-2xl p-6 relative flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-800/80">
-              <div>
-                <h3 className="text-base font-bold text-slate-100 font-mono">
-                  {PHASE4_CODE[activeCodeFile]?.title}
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  {PHASE4_CODE[activeCodeFile]?.desc}
-                </p>
-              </div>
-              <button
-                onClick={async () => {
-                  const code = PHASE4_CODE[activeCodeFile]?.code || '';
-                  try {
-                    if (navigator?.clipboard?.writeText) {
-                      await navigator.clipboard.writeText(code);
-                    } else {
-                      throw new Error("Clipboard API unavailable");
-                    }
-                  } catch {
-                    try {
-                      const textArea = document.createElement("textarea");
-                      textArea.value = code;
-                      textArea.style.position = "fixed";
-                      textArea.style.opacity = "0";
-                      document.body.appendChild(textArea);
-                      textArea.focus();
-                      textArea.select();
-                      document.execCommand("copy");
-                      document.body.removeChild(textArea);
-                    } catch (err) {
-                      console.warn("Fallback copy failed", err);
-                    }
-                  }
-                  setCopiedCode(true);
-                  setTimeout(() => setCopiedCode(false), 3000);
-                }}
-                className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs font-semibold text-slate-200 transition flex items-center gap-2 shrink-0"
-              >
-                {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
-                <span>{copiedCode ? 'Copied Code!' : 'Copy Code'}</span>
-              </button>
-            </div>
-            <div className="flex-1 overflow-auto max-h-[600px] bg-slate-900/60 p-4 rounded-xl border border-slate-800 font-mono text-xs text-teal-300 selection:bg-teal-500 selection:text-slate-950 whitespace-pre">
-              {PHASE4_CODE[activeCodeFile]?.code}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ====================================================================
           MODAL A: HARDWARE CHECKOUT FORM (FILE 5 & FILE 8 REQUIREMENT)

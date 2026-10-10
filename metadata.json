@@ -1,6 +1,6 @@
 {
   "name": "IT Asset Management System",
-  "description": "Professional multi-tenant IT asset tracking, Supabase cloud database persistence, checkout history, maintenance panel, analytics, 3D interactive dashboard, and database schema design.",
+  "description": "Professional multi-tenant IT asset tracking, TiDB Cloud HTAP database persistence, checkout history, maintenance panel, analytics, 3D interactive dashboard, and database schema design.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

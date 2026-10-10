@@ -36,10 +36,10 @@ export const LoginForm: React.FC<LoginFormProps> = ({
   return (
     <div className="w-full max-w-md mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl relative overflow-hidden">
       {/* Background glow accent */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-1 bg-teal-500 rounded-full blur-sm" />
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-1 bg-emerald-500 rounded-full blur-sm" />
 
       <div className="text-center mb-8">
-        <div className="w-12 h-12 bg-teal-500/10 border border-teal-500/20 rounded-xl flex items-center justify-center mx-auto mb-4 text-teal-400">
+        <div className="w-12 h-12 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-center mx-auto mb-4 text-emerald-400">
           <ShieldCheck className="w-6 h-6" />
         </div>
         <h2 className="text-2xl font-bold tracking-tight text-slate-100">Tenant Access Portal</h2>
@@ -69,7 +69,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
                 if (e.target.value === 'org-mineazy') setEmail('jsmith@mineazy.com');
                 else setEmail('adavis@ebs-power.com');
               }}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500 transition font-medium appearance-none"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500 transition font-medium appearance-none"
             >
               {organizations.map(org => (
                 <option key={org.id} value={org.id}>
@@ -78,7 +78,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
               ))}
             </select>
           </div>
-          <p className="text-[10px] text-teal-400/80 mt-1 pl-1">
+          <p className="text-[10px] text-emerald-400/80 mt-1 pl-1">
             Active Tenant DB: <span className="font-mono">{currentOrg?.id}</span>
           </p>
         </div>
@@ -96,7 +96,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
               onChange={(e) => setEmail(e.target.value)}
               placeholder="name@company.com"
               required
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-teal-500 transition"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition"
             />
           </div>
         </div>
@@ -110,7 +110,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
             <button
               type="button"
               onClick={() => alert('Password reset links require admin verification in Phase 2.')}
-              className="text-[11px] text-teal-400 hover:text-teal-300 transition"
+              className="text-[11px] text-emerald-400 hover:text-emerald-300 transition"
             >
               Forgot password?
             </button>
@@ -123,7 +123,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••••••"
               required
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-teal-500 transition font-mono"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition font-mono"
             />
           </div>
         </div>
@@ -135,7 +135,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
               type="checkbox"
               checked={rememberMe}
               onChange={(e) => setRememberMe(e.target.checked)}
-              className="rounded bg-slate-950 border-slate-800 text-teal-500 focus:ring-teal-500 w-4 h-4"
+              className="rounded bg-slate-950 border-slate-800 text-emerald-500 focus:ring-emerald-500 w-4 h-4"
             />
             <span>Remember session on this device</span>
           </label>
@@ -145,7 +145,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
         <button
           type="submit"
           disabled={isLoading}
-          className="w-full bg-teal-500 hover:bg-teal-400 disabled:opacity-50 text-slate-950 font-bold py-3 px-4 rounded-xl shadow-lg shadow-teal-500/20 transition flex items-center justify-center gap-2 mt-6 text-sm"
+          className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold py-3 px-4 rounded-xl shadow-lg shadow-emerald-500/20 transition flex items-center justify-center gap-2 mt-6 text-sm"
         >
           {isLoading ? (
             <>
@@ -168,7 +168,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
           <button
             type="button"
             onClick={onRequestAccessClick}
-            className="text-teal-400 hover:text-teal-300 font-semibold underline underline-offset-2 transition"
+            className="text-emerald-400 hover:text-emerald-300 font-semibold underline underline-offset-2 transition"
           >
             Request IT Access
           </button>

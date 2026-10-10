@@ -252,12 +252,12 @@ export default function ReportsDepreciationPage({
         </div>
 
         {/* Card 3 */}
-        <div className="p-4 rounded-xl bg-gradient-to-br from-slate-900 to-teal-950/20 border border-teal-500/20 flex flex-col justify-between">
-          <span className="text-[10px] font-bold text-teal-400 uppercase tracking-tight">Current Asset Net Book Value</span>
-          <span className="text-base font-bold text-teal-300 font-mono mt-1">
+        <div className="p-4 rounded-xl bg-gradient-to-br from-slate-900 to-emerald-950/20 border border-emerald-500/20 flex flex-col justify-between">
+          <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-tight">Current Asset Net Book Value</span>
+          <span className="text-base font-bold text-emerald-300 font-mono mt-1">
             ${reportData.totalBookValue.toLocaleString()}
           </span>
-          <span className="text-[9px] text-teal-500 mt-1">Combined balance-sheet value</span>
+          <span className="text-[9px] text-emerald-500 mt-1">Combined balance-sheet value</span>
         </div>
 
         {/* Card 4 */}
@@ -273,7 +273,7 @@ export default function ReportsDepreciationPage({
       {/* Projection Trend Graph */}
       <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80">
         <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-4 flex items-center">
-          <TrendingDown className="w-4 h-4 text-teal-400 mr-2" />
+          <TrendingDown className="w-4 h-4 text-emerald-400 mr-2" />
           Projected Capital Depreciation Trend (5-Year Forecast Window)
         </h3>
         <div className="h-64">
@@ -325,7 +325,7 @@ export default function ReportsDepreciationPage({
                 <div className="flex items-center space-x-6 text-[11px] font-mono font-bold text-slate-400">
                   <div>Cost: <span className="text-slate-100">${catPurchaseTotal.toLocaleString()}</span></div>
                   <div>Accum Depr: <span className="text-rose-400">-${catDepTotal.toLocaleString()}</span></div>
-                  <div>Book Value: <span className="text-teal-400">${catBookTotal.toLocaleString()}</span></div>
+                  <div>Book Value: <span className="text-emerald-400">${catBookTotal.toLocaleString()}</span></div>
                 </div>
               </div>
 
@@ -348,14 +348,14 @@ export default function ReportsDepreciationPage({
                     <tbody className="divide-y divide-slate-900">
                       {items.map(item => (
                         <tr key={item.id} className="hover:bg-slate-900/20 transition-colors">
-                          <td className="p-3 font-mono text-teal-400 font-bold">{item.assetCode}</td>
+                          <td className="p-3 font-mono text-emerald-400 font-bold">{item.assetCode}</td>
                           <td className="p-3 text-slate-200 font-medium">{item.name}</td>
                           <td className="p-3 text-slate-400">{item.purchaseDate}</td>
                           <td className="p-3 text-right text-slate-300">{item.ageYears}</td>
                           <td className="p-3 text-right font-mono text-slate-300">${item.purchaseCost.toLocaleString()}</td>
                           <td className="p-3 text-right font-mono text-rose-400/80">${item.calculated.annualDepreciation.toLocaleString()}</td>
                           <td className="p-3 text-right font-mono text-rose-400">-${item.calculated.accumulatedDepreciation.toLocaleString()}</td>
-                          <td className="p-3 text-right font-mono text-teal-300 font-bold">${item.calculated.bookValue.toLocaleString()}</td>
+                          <td className="p-3 text-right font-mono text-emerald-300 font-bold">${item.calculated.bookValue.toLocaleString()}</td>
                         </tr>
                       ))}
                     </tbody>

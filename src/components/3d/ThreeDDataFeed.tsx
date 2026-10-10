@@ -96,7 +96,7 @@ export const ThreeDDataFeed: React.FC<ThreeDDataFeedProps> = ({
     switch (type) {
       case 'ASSET_ADDED': return <PlusCircle className="w-4 h-4 text-emerald-400" />;
       case 'CHECKED_OUT': return <ArrowRightLeft className="w-4 h-4 text-blue-400" />;
-      case 'REPAIR_COMPLETED': return <CheckCircle2 className="w-4 h-4 text-teal-400" />;
+      case 'REPAIR_COMPLETED': return <CheckCircle2 className="w-4 h-4 text-emerald-400" />;
       case 'STATUS_CHANGED': return <AlertTriangle className="w-4 h-4 text-rose-400" />;
     }
   };
@@ -127,7 +127,7 @@ export const ThreeDDataFeed: React.FC<ThreeDDataFeedProps> = ({
                 {getIcon(ev.type)}
               </div>
               <div className="min-w-0">
-                <span className="font-bold text-slate-200 text-xs block group-hover:text-teal-300 transition-colors">{ev.title}</span>
+                <span className="font-bold text-slate-200 text-xs block group-hover:text-emerald-300 transition-colors">{ev.title}</span>
                 <span className="text-[11px] text-slate-400 truncate block">{ev.subtitle}</span>
               </div>
             </div>

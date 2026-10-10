@@ -1,0 +1,266 @@
+import { Router, Request, Response } from 'express';
+import { query, withTransaction } from '../db';
+import { authenticate, requirePermission } from '../middleware';
+import { generateSecureToken } from '../auth';
+import { recordAuditEvent } from '../audit';
+
+export const userRouter = Router();
+userRouter.use(authenticate);
+
+/**
+ * GET /api/users
+ * Returns sanitized users ONLY for the authenticated org. Never leaks other tenants or password fields!
+ */
+userRouter.get('/', requirePermission('users:read'), async (req: Request, res: Response) => {
+  const { orgId } = req.auth!;
+
+  const rows = await query<any>(`
+    SELECT \`id\`, \`org_id\`, \`email\`, \`full_name\`, \`role\`, \`department_id\`,
+           \`department_name\`, \`branch_id\`, \`branch_name\`, \`two_factor_enabled\`,
+           \`avatar\`, \`status\`, \`created_at\`
+    FROM \`users\`
+    WHERE \`org_id\` = ?
+    ORDER BY \`full_name\` ASC;
+  `, [orgId]);
+
+  const sanitized = rows.map(u => ({
+    id: u.id,
+    orgId: u.org_id,
+    email: u.email,
+    fullName: u.full_name,
+    role: u.role,
+    departmentId: u.department_id,
+    departmentName: u.department_name,
+    branchId: u.branch_id,
+    branchName: u.branch_name,
+    twoFactorEnabled: Boolean(u.two_factor_enabled),
+    avatar: u.avatar || '',
+    status: u.status || 'ACTIVE'
+  }));
+
+  res.json({ users: sanitized });
+});
+
+/**
+ * POST /api/users/invite
+ * Administrator invites a new corporate user, recorded in audit transaction!
+ */
+userRouter.post('/invite', requirePermission('users:invite'), async (req: Request, res: Response) => {
+  const { orgId, userId: actorId, fullName: actorName, role: actorRole } = req.auth!;
+  const data = req.body;
+  const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
+
+  if (!data.email || !data.fullName) {
+    res.status(400).json({ error: 'Email and full name are required.' });
+    return;
+  }
+
+  const cleanEmail = String(data.email).trim().toLowerCase();
+
+  // Check duplicate email
+  const existing = await query<any>('SELECT `id` FROM `users` WHERE LOWER(`email`) = ? LIMIT 1;', [cleanEmail]);
+  if (existing.length > 0) {
+    res.status(409).json({ error: 'An account with this email address already exists.' });
+    return;
+  }
+
+  const userId = data.id || `usr-${Date.now()}`;
+  const inviteToken = generateSecureToken('inv');
+  const invitedAt = new Date().toISOString();
+
+  try {
+    await withTransaction(async (tx) => {
+      await tx(`
+        INSERT INTO \`users\` (
+          \`id\`, \`org_id\`, \`email\`, \`full_name\`, \`role\`, \`department_id\`,
+          \`department_name\`, \`branch_id\`, \`branch_name\`, \`status\`, \`invite_token\`, \`invited_at\`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'INVITED', ?, ?);
+      `, [
+        userId,
+        orgId, // Derived strictly from session!
+        cleanEmail,
+        data.fullName.trim(),
+        data.role || 'USER',
+        data.departmentId || 'dept-gen',
+        data.departmentName || 'General Operations',
+        data.branchId || 'br-main',
+        data.branchName || 'Main Campus',
+        inviteToken,
+        invitedAt
+      ]);
+
+      await recordAuditEvent(tx, {
+        orgId,
+        actorId,
+        userName: actorName,
+        role: actorRole,
+        action: 'INVITE_USER',
+        entityType: 'User',
+        entityId: userId,
+        entityName: data.fullName.trim(),
+        changes: {
+          email: cleanEmail,
+          assignedRole: data.role || 'USER',
+          branchId: data.branchId
+        },
+        ipAddress
+      });
+    });
+
+    res.status(201).json({
+      success: true,
+      userId,
+      inviteToken,
+      message: 'User successfully invited with onboarding token.'
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: `User invitation transaction failed: ${err.message}` });
+  }
+});
+
+/**
+ * PUT /api/users/:id
+ * Update user details with strict role escalation guard, recorded in audit transaction!
+ */
+userRouter.put('/:id', requirePermission('users:update'), async (req: Request, res: Response) => {
+  const { orgId, role: actorRole, userId: actorId, fullName: actorName } = req.auth!;
+  const targetUserId = req.params.id;
+  const data = req.body;
+  const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
+
+  const users = await query<any>('SELECT * FROM `users` WHERE `id` = ? AND `org_id` = ?;', [targetUserId, orgId]);
+  if (users.length === 0) {
+    res.status(404).json({ error: 'User not found in organization.' });
+    return;
+  }
+
+  const existing = users[0]!;
+  const currentVersion = Number(existing.version || 1);
+
+  const rawExpected = data.baseVersion ?? data.version ?? (req.headers['if-match'] ? parseInt(String(req.headers['if-match']).replace(/["w/]/gi, ''), 10) : undefined);
+  if (rawExpected !== undefined) {
+    const expectedVersion = Number(rawExpected);
+    if (!isNaN(expectedVersion) && expectedVersion !== currentVersion) {
+      res.status(409).json({
+        error: `Conflict: User record version mismatch. Server is at version ${currentVersion}, but update was based on version ${expectedVersion}.`,
+        currentVersion,
+        expectedVersion
+      });
+      return;
+    }
+  }
+
+  // Role Escalation Defense:
+  // Non-admins cannot alter roles. Users cannot escalate their own role.
+  let targetRole = existing.role;
+  if (actorRole === 'ADMIN' && data.role) {
+    targetRole = data.role;
+  }
+
+  // Status changes (e.g. SUSPENDED/ACTIVE) can only be executed by ADMIN
+  const targetStatus = actorRole === 'ADMIN' && data.status ? data.status : existing.status;
+
+  try {
+    await withTransaction(async (tx) => {
+      await tx(`
+        UPDATE \`users\` SET
+          \`full_name\` = ?, \`role\` = ?, \`status\` = ?, \`department_id\` = ?, \`department_name\` = ?,
+          \`branch_id\` = ?, \`branch_name\` = ?, \`version\` = \`version\` + 1
+        WHERE \`id\` = ? AND \`org_id\` = ?;
+      `, [
+        data.fullName || existing.full_name,
+        targetRole,
+        targetStatus,
+        data.departmentId || existing.department_id,
+        data.departmentName || existing.department_name,
+        data.branchId || existing.branch_id,
+        data.branchName || existing.branch_name,
+        targetUserId,
+        orgId
+      ]);
+
+      await recordAuditEvent(tx, {
+        orgId,
+        actorId,
+        userName: actorName,
+        role: actorRole,
+        action: 'UPDATE_USER',
+        entityType: 'User',
+        entityId: targetUserId,
+        entityName: data.fullName || existing.full_name,
+        changes: {
+          previousRole: existing.role,
+          updatedRole: targetRole,
+          previousStatus: existing.status,
+          updatedStatus: targetStatus,
+          departmentId: data.departmentId
+        },
+        ipAddress
+      });
+    });
+
+    res.json({ success: true, message: 'User updated successfully.' });
+  } catch (err: any) {
+    res.status(500).json({ error: `User update transaction failed: ${err.message}` });
+  }
+});
+
+/**
+ * DELETE /api/users/:id
+ * Allows ADMIN to suspend or remove user provided they have no active asset checkouts.
+ */
+userRouter.delete('/:id', requirePermission('users:delete'), async (req: Request, res: Response) => {
+  const { orgId, userId: actorId, fullName: actorName, role: actorRole } = req.auth!;
+  const targetUserId = req.params.id;
+  const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
+
+  if (targetUserId === actorId) {
+    res.status(400).json({ error: 'You cannot delete or suspend your own active administrator account.' });
+    return;
+  }
+
+  const users = await query<any>('SELECT * FROM \`users\` WHERE \`id\` = ? AND \`org_id\` = ? LIMIT 1;', [targetUserId, orgId]);
+  if (users.length === 0) {
+    res.status(404).json({ error: 'User not found in organization.' });
+    return;
+  }
+
+  const existing = users[0]!;
+
+  // Check if user has active checkouts
+  const activeCheckouts = await query<any>(
+    'SELECT COUNT(*) as cnt FROM \`checkouts\` WHERE \`checked_out_to_user_id\` = ? AND \`status\` = "ACTIVE";',
+    [targetUserId]
+  );
+
+  if (activeCheckouts[0]?.cnt > 0) {
+    res.status(409).json({
+      error: `Cannot remove user who currently holds custody of ${activeCheckouts[0].cnt} checked-out asset(s). Return items first.`
+    });
+    return;
+  }
+
+  try {
+    await withTransaction(async (tx) => {
+      // Soft-delete by setting status to SUSPENDED
+      await tx('UPDATE \`users\` SET \`status\` = "SUSPENDED" WHERE \`id\` = ? AND \`org_id\` = ?;', [targetUserId, orgId]);
+
+      await recordAuditEvent(tx, {
+        orgId,
+        actorId,
+        userName: actorName,
+        role: actorRole,
+        action: 'DELETE_USER',
+        entityType: 'User',
+        entityId: targetUserId,
+        entityName: existing.full_name,
+        changes: { previousStatus: existing.status, updatedStatus: 'SUSPENDED' },
+        ipAddress
+      });
+    });
+
+    res.json({ success: true, message: 'User suspended and access revoked.' });
+  } catch (err: any) {
+    res.status(500).json({ error: `User deletion transaction failed: ${err.message}` });
+  }
+});

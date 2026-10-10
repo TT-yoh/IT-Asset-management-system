@@ -78,7 +78,7 @@ export const MaintenanceDetailModal: React.FC<MaintenanceDetailModalProps> = ({
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex border-b border-slate-800 bg-slate-900 px-4 pt-2 gap-2">
+        <div className="flex border-b border-slate-800 bg-slate-900 px-4 pt-2 gap-2 overflow-x-auto">
           {[
             { id: 'DETAILS', label: '📋 Overview & Timeline' },
             { id: 'UPDATE', label: '⚙️ Technician Update Form' },
@@ -115,7 +115,7 @@ export const MaintenanceDetailModal: React.FC<MaintenanceDetailModalProps> = ({
                 <div><span className="text-slate-500 block text-[10px]">Status</span><span className="text-amber-300 font-bold">{record.status}</span></div>
                 <div><span className="text-slate-500 block text-[10px]">Priority</span><span className="text-rose-400 font-bold">{record.priority || 'MEDIUM'}</span></div>
                 <div><span className="text-slate-500 block text-[10px]">Reported By</span><span className="text-slate-200">{record.reportedBy}</span></div>
-                <div><span className="text-slate-500 block text-[10px]">Assigned Tech</span><span className="text-teal-400">{record.assignedTechnician}</span></div>
+                <div><span className="text-slate-500 block text-[10px]">Assigned Tech</span><span className="text-emerald-400">{record.assignedTechnician}</span></div>
               </div>
 
               {/* Description */}
@@ -138,7 +138,7 @@ export const MaintenanceDetailModal: React.FC<MaintenanceDetailModalProps> = ({
                   </div>
 
                   <div className="relative">
-                    <div className="absolute -left-[29px] top-1 w-3.5 h-3.5 rounded-full bg-amber-500 border-2 border-slate-900 animate-pulse" />
+                    <div className="absolute -left-[29px] top-1 w-3.5 h-3.5 rounded-full bg-amber-500 border-2 border-slate-900" />
                     <span className="text-[10px] font-mono text-slate-500">In Progress</span>
                     <p className="font-bold text-amber-300">Hardware Under Repair / Diagnostics</p>
                     <p className="text-slate-400 text-[11px]">Assigned to {record.assignedTechnician}</p>
@@ -160,7 +160,7 @@ export const MaintenanceDetailModal: React.FC<MaintenanceDetailModalProps> = ({
 
           {activeTab === 'UPDATE' && (
             <form onSubmit={handleSaveChanges} className="space-y-4">
-              <div className="p-3 bg-teal-500/10 border border-teal-500/20 rounded-xl text-teal-300 mb-2">
+              <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-300 mb-2">
                 Update work order status, log replacement parts inventory, and bill hardware repair expenses.
               </div>
 

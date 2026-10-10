@@ -214,7 +214,7 @@ export default function ReportsInventoryPage({
       <div className="rounded-2xl border border-slate-800 bg-slate-950/60 overflow-hidden shadow-xl">
         <div className="px-5 py-3.5 border-b border-slate-800/80 bg-slate-900/40 flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center space-x-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-pulse" />
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
             <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
               Asset Records Registry List ({filteredAssets.length} matching)
             </span>
@@ -243,7 +243,7 @@ export default function ReportsInventoryPage({
               {filteredAssets.length > 0 ? (
                 filteredAssets.map(asset => {
                   let condColor = 'text-emerald-400 bg-emerald-400/10 border-emerald-500/20';
-                  if (asset.condition === 'GOOD') condColor = 'text-teal-400 bg-teal-400/10 border-teal-500/20';
+                  if (asset.condition === 'GOOD') condColor = 'text-emerald-400 bg-emerald-400/10 border-emerald-500/20';
                   if (asset.condition === 'FAIR') condColor = 'text-amber-400 bg-amber-400/10 border-amber-500/20';
                   if (asset.condition === 'POOR') condColor = 'text-rose-400 bg-rose-400/10 border-rose-500/20';
 
@@ -253,7 +253,7 @@ export default function ReportsInventoryPage({
 
                   return (
                     <tr key={asset.id} className="hover:bg-slate-900/40 transition-colors">
-                      <td className="p-3.5 font-mono text-teal-400 font-bold">{asset.assetCode}</td>
+                      <td className="p-3.5 font-mono text-emerald-400 font-bold">{asset.assetCode}</td>
                       <td className="p-3.5 font-bold text-slate-100">
                         <div>{asset.name}</div>
                         {asset.model && <div className="text-[10px] text-slate-500 font-normal">{asset.model}</div>}
@@ -271,7 +271,7 @@ export default function ReportsInventoryPage({
                         </span>
                       </td>
                       <td className="p-3.5 text-right font-mono text-slate-300">${(asset.purchaseCost || 0).toLocaleString()}</td>
-                      <td className="p-3.5 text-right font-mono text-teal-300 font-bold">${(asset.currentValue || asset.purchaseCost || 0).toLocaleString()}</td>
+                      <td className="p-3.5 text-right font-mono text-emerald-300 font-bold">${(asset.currentValue || asset.purchaseCost || 0).toLocaleString()}</td>
                       <td className="p-3.5 text-slate-400">{asset.assignedToUserName || <span className="text-slate-600 font-normal italic">In Storage</span>}</td>
                     </tr>
                   );
@@ -292,7 +292,7 @@ export default function ReportsInventoryPage({
       {categorySubtotals.length > 0 && (
         <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 space-y-3.5">
           <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center">
-            <ListFilter className="w-4 h-4 text-teal-400 mr-1.5" />
+            <ListFilter className="w-4 h-4 text-emerald-400 mr-1.5" />
             Operational Subtotals grouped by Category
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
@@ -303,14 +303,14 @@ export default function ReportsInventoryPage({
                 </span>
                 <div className="mt-2 flex items-baseline justify-between">
                   <span className="text-slate-500 text-[10px]">Units: {sub.count}</span>
-                  <span className="text-xs font-mono font-bold text-teal-300">
+                  <span className="text-xs font-mono font-bold text-emerald-300">
                     ${sub.currentValue.toLocaleString()}
                   </span>
                 </div>
                 {/* Horizontal simple progress */}
                 <div className="w-full bg-slate-850 h-1 rounded-full mt-2 overflow-hidden">
                   <div 
-                    className="bg-teal-500 h-full rounded-full" 
+                    className="bg-emerald-500 h-full rounded-full" 
                     style={{ width: `${Math.min(100, (sub.currentValue / Math.max(1, grandTotals.value)) * 100)}%` }}
                   />
                 </div>
@@ -319,7 +319,7 @@ export default function ReportsInventoryPage({
           </div>
 
           {/* Grand Totals */}
-          <div className="p-4 rounded-xl bg-gradient-to-r from-slate-950 to-teal-950 border border-teal-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="p-4 rounded-xl bg-gradient-to-r from-slate-950 to-emerald-950 border border-emerald-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <span className="text-xs font-bold text-slate-300 uppercase">
               Grand Total Calculated Ledger
             </span>
@@ -333,8 +333,8 @@ export default function ReportsInventoryPage({
                 <div className="text-sm font-bold text-slate-200">${grandTotals.cost.toLocaleString()}</div>
               </div>
               <div className="space-y-0.5">
-                <div className="text-[10px] text-teal-500 font-bold uppercase">Aggregate Book Value</div>
-                <div className="text-sm font-bold text-teal-300">${grandTotals.value.toLocaleString()}</div>
+                <div className="text-[10px] text-emerald-500 font-bold uppercase">Aggregate Book Value</div>
+                <div className="text-sm font-bold text-emerald-300">${grandTotals.value.toLocaleString()}</div>
               </div>
             </div>
           </div>

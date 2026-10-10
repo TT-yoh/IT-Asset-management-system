@@ -5,12 +5,8 @@ import {
   INITIAL_ASSETS, 
   INITIAL_MAINTENANCE, 
   INITIAL_BUDGETS, 
-  MINEAZY_BRANCHES, 
-  EBS_BRANCHES 
+  INITIAL_BRANCHES
 } from '../mockData';
-
-// Combine branches
-const ALL_BRANCHES = [...MINEAZY_BRANCHES, ...EBS_BRANCHES];
 
 /**
  * Filter assets by branch and org_id
@@ -293,7 +289,7 @@ export function exportToPDF(data: any[], filename: string, title = 'REPORTS AND 
   // Header
   doc.setFont('Helvetica', 'bold');
   doc.setFontSize(18);
-  doc.setTextColor(15, 118, 110); // Teal-700
+  doc.setTextColor(15, 118, 110); // emerald-700
   doc.text(title, 14, 22);
 
   doc.setFontSize(10);

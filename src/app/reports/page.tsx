@@ -12,7 +12,8 @@ import {
   Sparkles,
   FileSpreadsheet,
   FileText,
-  Activity
+  Activity,
+  Zap
 } from 'lucide-react';
 import { INITIAL_ASSETS } from '../../mockData';
 import { exportToExcel, exportToPDF } from '../../lib/report-service';
@@ -28,11 +29,19 @@ export default function ReportsLandingPage({
 }: ReportsLandingProps) {
   const reportCards = [
     {
+      id: 'tiflash',
+      title: 'TiFlash HTAP Real-Time Analytics',
+      desc: 'Sub-second columnar query execution: multi-branch depreciation rollups, live CBO optimizer plan, and zero OLTP lock contention.',
+      icon: <Zap className="w-5 h-5 text-amber-400" />,
+      color: 'from-amber-500/15 via-slate-900 to-emerald-500/10 border-amber-500/40 text-amber-300',
+      badge: 'TiDB Cloud HTAP'
+    },
+    {
       id: 'dashboard',
       title: 'Dashboard Overview',
       desc: 'High-level KPIs, branch asset counts, category spreads, status breakdown, and overall health charts.',
-      icon: <BarChart3 className="w-5 h-5 text-teal-400" />,
-      color: 'from-teal-500/10 to-emerald-500/10 border-teal-500/20 text-teal-300',
+      icon: <BarChart3 className="w-5 h-5 text-emerald-400" />,
+      color: 'from-emerald-500/10 to-emerald-500/10 border-emerald-500/20 text-emerald-300',
       badge: 'Interactive'
     },
     {
@@ -49,7 +58,7 @@ export default function ReportsLandingPage({
       desc: 'Calculate annual depreciation, accumulated depreciation, book value projections, STRAIGHT_LINE vs DDB.',
       icon: <TrendingDown className="w-5 h-5 text-rose-400" />,
       color: 'from-rose-500/10 to-orange-500/10 border-rose-500/20 text-rose-300',
-      badge: 'Prisma-Ready'
+      badge: 'Valuation'
     },
     {
       id: 'maintenance',
@@ -72,7 +81,7 @@ export default function ReportsLandingPage({
       title: 'Asset Age & Condition',
       desc: 'Sort assets into operational age brackets, view replacements advice, and track hardware end-of-life limits.',
       icon: <Clock className="w-5 h-5 text-emerald-400" />,
-      color: 'from-emerald-500/10 to-teal-500/10 border-emerald-500/20 text-emerald-300',
+      color: 'from-emerald-500/10 to-emerald-500/10 border-emerald-500/20 text-emerald-300',
       badge: 'Recommendations'
     },
     {
@@ -115,11 +124,11 @@ export default function ReportsLandingPage({
   return (
     <div className="space-y-6">
       {/* Hero Header */}
-      <div className="p-6 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-teal-950/40 border border-slate-800/80 relative overflow-hidden">
-        <div className="absolute right-0 top-0 w-80 h-80 bg-teal-500/5 rounded-full blur-3xl -z-10" />
+      <div className="p-6 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-emerald-950/40 border border-slate-800/80 relative overflow-hidden">
+        <div className="absolute right-0 top-0 w-80 h-80 bg-emerald-500/5 rounded-full blur-3xl -z-10" />
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center space-x-2 text-[10px] font-bold text-teal-400 uppercase tracking-widest bg-teal-500/10 px-2.5 py-1 rounded-full w-fit">
+            <div className="flex items-center space-x-2 text-[10px] font-bold text-emerald-400 uppercase tracking-widest bg-emerald-500/10 px-2.5 py-1 rounded-full w-fit">
               <Sparkles className="w-3 h-3 animate-pulse" />
               <span>Phase 6: Reporting System Active</span>
             </div>
@@ -127,7 +136,7 @@ export default function ReportsLandingPage({
               Reports & Advanced Analytics
             </h1>
             <p className="text-slate-400 text-xs mt-1.5 max-w-xl leading-relaxed">
-              Fully modularized reporting engines integrated with Supabase Realtime subscriptions and PostgreSQL. Generate rich visual trend graphs, depreciation models, and exports.
+              Fully modularized reporting engines integrated with TiDB Cloud HTAP & TiFlash columnar acceleration. Generate rich visual trend graphs, depreciation models, and exports.
             </p>
           </div>
 
@@ -156,11 +165,11 @@ export default function ReportsLandingPage({
           <div
             key={card.id}
             onClick={() => onSelectReport(card.id)}
-            className={`group rounded-2xl bg-gradient-to-b ${card.color} p-5 border hover:border-teal-500/40 hover:shadow-lg hover:shadow-teal-950/10 transition-all cursor-pointer flex flex-col justify-between`}
+            className={`group rounded-2xl bg-gradient-to-b ${card.color} p-5 border hover:border-emerald-500/40 hover:shadow-lg hover:shadow-emerald-950/10 transition-all cursor-pointer flex flex-col justify-between`}
           >
             <div>
               <div className="flex items-center justify-between">
-                <div className="p-2.5 rounded-xl bg-slate-950/50 border border-slate-800 group-hover:border-teal-500/30 transition-all">
+                <div className="p-2.5 rounded-xl bg-slate-950/50 border border-slate-800 group-hover:border-emerald-500/30 transition-all">
                   {card.icon}
                 </div>
                 <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-950/40 text-slate-400 border border-slate-800">
@@ -168,7 +177,7 @@ export default function ReportsLandingPage({
                 </span>
               </div>
 
-              <h2 className="text-sm font-bold text-slate-200 mt-4 group-hover:text-teal-300 transition-colors">
+              <h2 className="text-sm font-bold text-slate-200 mt-4 group-hover:text-emerald-300 transition-colors">
                 {card.title}
               </h2>
               <p className="text-slate-400 text-[11px] leading-relaxed mt-2">
@@ -176,7 +185,7 @@ export default function ReportsLandingPage({
               </p>
             </div>
 
-            <div className="flex items-center text-teal-400 text-xs font-bold mt-5 group-hover:translate-x-1 transition-transform">
+            <div className="flex items-center text-emerald-400 text-xs font-bold mt-5 group-hover:translate-x-1 transition-transform">
               <span>View Report</span>
               <ArrowRight className="w-3 h-3 ml-1.5" />
             </div>
@@ -184,15 +193,15 @@ export default function ReportsLandingPage({
         ))}
       </div>
 
-      {/* Supabase connection status footer */}
+      {/* TiDB Cloud connection status footer */}
       <div className="flex items-center justify-between p-4 rounded-xl bg-slate-950/40 border border-slate-900">
         <div className="flex items-center space-x-2.5">
           <Activity className="w-4 h-4 text-emerald-400 animate-pulse" />
           <span className="text-xs font-semibold text-slate-400">
-            Supabase Connection Pooling:
+            TiDB Cloud Serverless Engine:
           </span>
           <span className="text-[10px] font-mono text-slate-500">
-            DATABASE_URL via pooler on public schema
+            Port 4000 Distributed SQL + TiFlash Columnar Analytics
           </span>
         </div>
         <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
