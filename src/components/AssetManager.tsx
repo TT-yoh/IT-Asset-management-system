@@ -26,7 +26,8 @@ import {
   Printer,
   Sparkles,
   Layers,
-  X
+  X,
+  FileSpreadsheet
 } from 'lucide-react';
 import { QuickScannerModal } from './QuickScannerModal';
 
@@ -213,6 +214,34 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
     exportToExcel(filteredAssets, `${currentOrg.name.replace(/\s+/g, '_')}_Fleet_Assets.xlsx`);
   };
 
+  // Download Blank / Sample CSV Import Template
+  const handleDownloadCSVTemplate = () => {
+    const csvRows = [
+      "name,model,serial_number,category,purchase_cost,purchase_date,condition,current_value,phone_number,registered_email",
+      "MacBook Pro 16 M3 Max,A2991,C02G1234MD6R,Laptops,3499.00,2024-01-15,NEW,3150.00,,it.device01@company.com",
+      "Dell Latitude 5540,Latitude 5540,8F3K9Z2,Laptops,1350.00,2023-11-20,GOOD,1100.00,,it.device02@company.com",
+      "Lenovo ThinkPad X1 Carbon Gen 11,21HM002HUS,PF48J9KL,Laptops,1850.00,2023-09-10,GOOD,1450.00,,it.device03@company.com",
+      "iPhone 15 Pro 256GB,A3102,F17L9876QW,Mobile Phones,1199.00,2024-02-10,NEW,1080.00,+263771234567,mobile.sales01@company.com",
+      "Samsung Galaxy S24 Ultra,SM-S928B,R5CW1234XYZ,Mobile Phones,1299.00,2024-03-01,NEW,1200.00,+263772345678,mobile.exec01@company.com",
+      "Dell PowerEdge R750 Server,PowerEdge R750,SERVER-R750-01,Servers,6800.00,2023-06-12,GOOD,5200.00,,sysadmin@company.com",
+      "HP ProLiant DL380 Gen10,DL380-G10,HPE-DL380-99,Servers,5400.00,2022-10-05,FAIR,3800.00,,sysadmin@company.com",
+      "Cisco Catalyst 9300 Switch,C9300-48P,NET-SW-9300-A,Networking,3200.00,2023-08-05,GOOD,2600.00,,netops@company.com",
+      "Ubiquiti UniFi Dream Machine Pro,UDM-Pro,UBI-UDM-01,Networking,499.00,2024-01-08,NEW,450.00,,netops@company.com",
+      "HP LaserJet Enterprise M608,M608dn,PRN-M608-01,Printers,850.00,2023-04-18,FAIR,550.00,,printers@company.com",
+      "Dell UltraSharp U2723QE 27 4K,U2723QE,CN-0Y3K2M-12,Monitors,580.00,2023-12-01,GOOD,490.00,,it.peripherals@company.com"
+    ].join('\n');
+
+    const blob = new Blob([csvRows], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", "IT_Asset_Import_Template.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   // Import Legacy / Preexisting Assets via CSV
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -328,6 +357,16 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
             <span className="hidden sm:inline">Print Labels</span>
           </button>
 
+          {/* Download CSV Template */}
+          <button
+            onClick={handleDownloadCSVTemplate}
+            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 rounded-xl text-xs font-semibold transition-all border border-emerald-500/30 shadow-sm cursor-pointer"
+            title="Download blank / sample CSV template for bulk asset import"
+          >
+            <Download className="w-4 h-4 text-emerald-400" />
+            <span>Download Template</span>
+          </button>
+
           {/* Import CSV */}
           <input
             type="file"
@@ -342,13 +381,13 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
             title="Import preexisting or historical assets via CSV spreadsheet"
           >
             <Upload className="w-4 h-4 text-emerald-400" />
-            <span className="hidden sm:inline">Import CSV</span>
+            <span>Import CSV</span>
           </button>
 
           {/* Export Excel */}
           <button
             onClick={handleExportExcel}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition-colors border border-slate-700"
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition-colors border border-slate-700 cursor-pointer"
           >
             <Download className="w-4 h-4 text-emerald-400" />
             <span className="hidden sm:inline">Export Excel</span>
@@ -367,6 +406,39 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Getting Started / Empty State Quick Actions */}
+      {assets.length === 0 && (
+        <div className="bg-gradient-to-r from-emerald-500/10 via-slate-900 to-slate-900 border border-emerald-500/30 rounded-2xl p-5 shadow-xl">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <FileSpreadsheet className="w-5 h-5 text-emerald-400" />
+                <h3 className="text-sm font-bold text-white">Getting Started: Add Your Hardware Inventory</h3>
+              </div>
+              <p className="text-xs text-slate-300 max-w-xl">
+                Your fleet ledger currently has 0 assets. Download our standard CSV template, fill in your devices, and import them all in one click — or enroll devices manually.
+              </p>
+            </div>
+            <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+              <button
+                onClick={handleDownloadCSVTemplate}
+                className="flex items-center gap-2 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs shadow-md shadow-emerald-500/20 transition-all cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>Download CSV Template</span>
+              </button>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-semibold rounded-xl text-xs border border-slate-700 transition-colors cursor-pointer"
+              >
+                <Upload className="w-4 h-4 text-emerald-400" />
+                <span>Import CSV File</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Filter Bar */}
       <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center gap-3">
