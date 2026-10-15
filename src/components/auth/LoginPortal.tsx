@@ -202,15 +202,12 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
       
       const normalizedInput = email.trim().toLowerCase();
       const isSuperAdmin = normalizedInput === 'ishmaelt42@gmail.com';
-      const isMineazyAdmin = normalizedInput === 'admin@mineazy.com';
-      const isDemoMineazyPassword = isMineazyAdmin && (password === 'Mineazy123!' || password === 'Mineazy2026!' || password === 'admin1234' || password === 'Tatenda3@4' || password === 'password123');
 
       // Look up user across company tenants strictly by matching corporate email / identity
       const targetUser = users.find(
         u => u.email.toLowerCase() === normalizedInput || 
              u.email.toLowerCase().split('@')[0] === normalizedInput ||
-             (isSuperAdmin && (u.id === 'usr-super-admin-ishmael' || u.email.toLowerCase() === 'ishmaelt42@gmail.com')) ||
-             (isMineazyAdmin && (u.id === 'usr-admin-mineazy' || u.email.toLowerCase() === 'admin@mineazy.com'))
+             (isSuperAdmin && (u.id === 'usr-super-admin-ishmael' || u.email.toLowerCase() === 'ishmaelt42@gmail.com'))
       );
       
       if (!targetUser) {
@@ -226,7 +223,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
       // Automatically determine user's isolated company tenant
       const userOrg = organizations.find(o => o.id === targetUser.orgId) || organizations[0]!;
 
-      if (!isDemoMineazyPassword && targetUser.password && password !== targetUser.password) {
+      if (targetUser.password && password !== targetUser.password) {
         setError(`Invalid credentials for ${targetUser.fullName}. Please check your password.`);
         return;
       }
@@ -352,35 +349,6 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
                 <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
                   <Building className="w-4 h-4" />
                 </div>
-              </div>
-
-              <div className="mb-5 p-3.5 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-indigo-500/10 border border-emerald-500/30 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner">
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-400">
-                    <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>App Test &amp; Demo Account</span>
-                  </div>
-                  <div className="text-[11px] text-slate-300">
-                    <span>Email: </span>
-                    <button
-                      type="button"
-                      onClick={() => handleQuickFill('admin@mineazy.com', 'Mineazy123!')}
-                      className="font-mono text-emerald-300 font-semibold hover:underline cursor-pointer"
-                    >
-                      admin@mineazy.com
-                    </button>
-                    <span className="mx-1.5 text-slate-500">&bull;</span>
-                    <span>Pass: </span>
-                    <span className="font-mono text-emerald-300 font-semibold">Mineazy123!</span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleQuickFill('admin@mineazy.com', 'Mineazy123!')}
-                  className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs transition shadow-sm cursor-pointer shrink-0 text-center"
-                >
-                  Quick Fill
-                </button>
               </div>
 
               <form onSubmit={handleLoginSubmit} className="space-y-4">
