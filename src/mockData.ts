@@ -17,6 +17,14 @@ import {
 // ============================================================================
 export const ORGANIZATIONS: Organization[] = [
   {
+    id: 'org-mineazy',
+    name: 'Mineazy Mining Solutions',
+    type: 'Mining & Enterprise',
+    logo: '⛏️',
+    brandingColor: '#0f766e', // Teal 700
+    branchesCount: 1
+  },
+  {
     id: 'org-omnitech',
     name: 'OmniTech Enterprise Systems',
     type: 'Enterprise',
@@ -30,6 +38,16 @@ export const ORGANIZATIONS: Organization[] = [
 // PRODUCTION BRANCHES & HUBS
 // ============================================================================
 export const INITIAL_BRANCHES: Branch[] = [
+  {
+    id: 'branch-mineazy-hq',
+    orgId: 'org-mineazy',
+    name: 'Mineazy Operations HQ',
+    code: 'MZ-HQ-01',
+    location: 'Mineral Innovation Park, Wing A',
+    city: 'Harare',
+    country: 'Zimbabwe',
+    managerName: 'Mineazy Admin'
+  },
   {
     id: 'branch-main',
     orgId: 'org-omnitech',
@@ -49,6 +67,7 @@ export const EBS_BRANCHES: Branch[] = [];
 // PRODUCTION DEPARTMENTS
 // ============================================================================
 export const DEPARTMENTS: Department[] = [
+  { id: 'dept-it-mineazy', orgId: 'org-mineazy', name: 'IT Infrastructure & Telemetry', headCount: 5, budgetAllocated: 150000 },
   { id: 'dept-it', orgId: 'org-omnitech', name: 'Information Technology & Cloud Ops', headCount: 1, budgetAllocated: 200000 },
   { id: 'dept-eng', orgId: 'org-omnitech', name: 'Software Engineering & AI', headCount: 0, budgetAllocated: 350000 },
   { id: 'dept-sec', orgId: 'org-omnitech', name: 'Cybersecurity & InfoSec', headCount: 1, budgetAllocated: 150000 },
@@ -57,9 +76,24 @@ export const DEPARTMENTS: Department[] = [
 ];
 
 // ============================================================================
-// PRODUCTION ACTIVE SUPER ADMIN USER
+// PRODUCTION ACTIVE SUPER ADMIN & DEMO USERS
 // ============================================================================
 export const USERS: User[] = [
+  {
+    id: 'usr-admin-mineazy',
+    orgId: 'org-mineazy',
+    email: 'admin@mineazy.com',
+    fullName: 'Mineazy Admin',
+    role: 'ADMIN',
+    departmentId: 'dept-it-mineazy',
+    departmentName: 'IT Infrastructure & Telemetry',
+    branchId: 'branch-mineazy-hq',
+    branchName: 'Mineazy Operations HQ',
+    twoFactorEnabled: false,
+    password: 'Mineazy123!',
+    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+    status: 'ACTIVE'
+  },
   {
     id: 'usr-super-admin-ishmael',
     orgId: 'org-omnitech',
