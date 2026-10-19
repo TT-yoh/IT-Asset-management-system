@@ -31,8 +31,10 @@ User roles, tenant IDs (`orgId`), and branch boundaries (`branchId`) supplied in
 | **Check-in Asset** | ✅ | ❌ | Own Branch | ✅ | ❌ | ❌ |
 | **Create Repair Ticket** | ✅ | ❌ | Own Branch | ✅ | ❌ | Request Only |
 | **Complete Repair** | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| **Manage Budgets** | ✅ | ✅ (Read) | ❌ | ❌ | ✅ | ❌ |
-| **Invite / Approve Users** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Invite & Onboard Staff** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Modify User Roles & Facilities** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Suspend / Reactivate Staff** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Delete / Remove User Accounts** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **View Audit Logs** | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ |
 
 ---

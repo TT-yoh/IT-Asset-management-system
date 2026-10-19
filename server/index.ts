@@ -7,6 +7,7 @@ import { checkoutRouter } from './routes/checkoutRoutes';
 import { maintenanceRouter } from './routes/maintenanceRoutes';
 import { budgetRouter } from './routes/budgetRoutes';
 import { branchRouter } from './routes/branchRoutes';
+import { departmentRouter } from './routes/departmentRoutes';
 import { userRouter } from './routes/userRoutes';
 import { auditRouter } from './routes/auditRoutes';
 import { query } from './db';
@@ -35,6 +36,7 @@ app.use('/api/maintenance', maintenanceRouter);
 app.use('/api/maintenances', maintenanceRouter);
 app.use('/api/budgets', budgetRouter);
 app.use('/api/branches', branchRouter);
+app.use('/api/departments', departmentRouter);
 app.use('/api/users', userRouter);
 app.use('/api/audit-logs', auditRouter);
 
@@ -54,13 +56,14 @@ app.get('/api/init', authenticate, async (req: Request, res: Response) => {
     }
     assetSql += ' ORDER BY `created_at` DESC;';
 
-    const [assets, checkouts, maintenances, budgets, branches, rawUsers] = await Promise.all([
+    const [assets, checkouts, maintenances, budgets, branches, rawUsers, departments] = await Promise.all([
       query(assetSql, assetParams),
       query('SELECT c.* FROM `checkouts` c INNER JOIN `assets` a ON c.asset_id = a.id WHERE a.org_id = ? ORDER BY c.checked_out_at DESC;', [orgId]),
       query('SELECT m.* FROM `maintenances` m INNER JOIN `assets` a ON m.asset_id = a.id WHERE a.org_id = ? ORDER BY m.created_at DESC;', [orgId]),
       query('SELECT * FROM `budgets` WHERE `org_id` = ?;', [orgId]),
       query('SELECT * FROM `branches` WHERE `org_id` = ?;', [orgId]),
-      query('SELECT `id`, `org_id`, `email`, `full_name`, `role`, `department_id`, `department_name`, `branch_id`, `branch_name`, `two_factor_enabled`, `avatar`, `status` FROM `users` WHERE `org_id` = ?;', [orgId])
+      query('SELECT `id`, `org_id`, `email`, `full_name`, `role`, `department_id`, `department_name`, `branch_id`, `branch_name`, `two_factor_enabled`, `avatar`, `status` FROM `users` WHERE `org_id` = ?;', [orgId]),
+      query('SELECT * FROM `departments` WHERE `org_id` = ? ORDER BY `name` ASC;', [orgId])
     ]);
 
     let auditLogs: any[] = [];
@@ -89,6 +92,7 @@ app.get('/api/init', authenticate, async (req: Request, res: Response) => {
       maintenances,
       budgets,
       branches,
+      departments,
       users: sanitizedUsers,
       auditLogs,
       currentUser: req.auth

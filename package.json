@@ -14,8 +14,9 @@
     "test:security": "tsx tests/security-scoping.test.ts",
     "test:audit": "tsx tests/audit-integrity.test.ts",
     "test:concurrency": "tsx tests/offline-concurrency.test.ts",
+    "test:facilities": "tsx tests/facilities-departments.test.ts",
     "test:e2e": "tsx tests/e2e-system-functionality.test.ts",
-    "test": "tsx tests/security-scoping.test.ts && tsx tests/audit-integrity.test.ts && tsx tests/offline-concurrency.test.ts && tsx tests/e2e-system-functionality.test.ts",
+    "test": "tsx tests/security-scoping.test.ts && tsx tests/audit-integrity.test.ts && tsx tests/offline-concurrency.test.ts && tsx tests/facilities-departments.test.ts && tsx tests/e2e-system-functionality.test.ts",
     "db:migrate:tidb": "node scripts/execute-tidb-schema.mjs",
     "db:clean": "node scripts/cleanup-dummy-data.mjs"
   },

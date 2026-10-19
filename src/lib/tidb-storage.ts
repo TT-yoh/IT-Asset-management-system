@@ -13,7 +13,8 @@ import {
   AuditLogItem,
   SystemNotification,
   User,
-  Branch
+  Branch,
+  Department
 } from '../types';
 import {
   INITIAL_ASSETS,
@@ -23,7 +24,8 @@ import {
   INITIAL_AUDIT_LOGS,
   INITIAL_NOTIFICATIONS,
   USERS,
-  INITIAL_BRANCHES
+  INITIAL_BRANCHES,
+  DEPARTMENTS
 } from '../mockData';
 import {
   isTiDBConfigured,
@@ -42,6 +44,7 @@ export const STORAGE_KEYS = {
   NOTIFICATIONS: 'omni_it_notifications_tidb',
   USERS: 'omni_it_users_tidb',
   BRANCHES: 'omni_it_branches_tidb',
+  DEPARTMENTS: 'omni_it_departments_tidb',
   LAST_SYNC: 'omni_it_last_sync_tidb'
 };
 
@@ -490,21 +493,57 @@ export async function persistUser(user: User, allUsers?: User[]): Promise<boolea
   saveToStorage(STORAGE_KEYS.USERS, updated);
 
   try {
-    await fetch('/api/auth/profile', {
+    const res = await fetch(`/api/users/${user.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({
         fullName: user.fullName,
-        avatar: user.avatar,
+        role: user.role,
+        status: user.status,
         departmentId: user.departmentId,
-        departmentName: user.departmentName
+        departmentName: user.departmentName,
+        branchId: user.branchId,
+        branchName: user.branchName,
+        avatar: user.avatar
       })
     });
+    if (!res.ok) {
+      await fetch('/api/auth/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          fullName: user.fullName,
+          avatar: user.avatar,
+          departmentId: user.departmentId,
+          departmentName: user.departmentName
+        })
+      });
+    }
   } catch {
     // Offline resilient
   }
 
+  return true;
+}
+
+/**
+ * Delete User from storage and backend
+ */
+export async function deleteUserFromStorage(userId: string, allUsers?: User[]): Promise<boolean> {
+  const current = allUsers || loadFromStorage<User[]>(STORAGE_KEYS.USERS, USERS);
+  const updated = current.filter(u => u.id !== userId);
+  saveToStorage(STORAGE_KEYS.USERS, updated);
+
+  try {
+    await fetch(`/api/users/${userId}`, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+  } catch {
+    // Offline resilient
+  }
   return true;
 }
 
@@ -531,6 +570,62 @@ export async function persistBranch(branch: Branch, allBranches?: Branch[]): Pro
         country: branch.country,
         manager_name: branch.managerName
       })
+    });
+  } catch {
+    // Offline
+  }
+  return true;
+}
+
+export async function deleteBranchFromStorage(branchId: string, allBranches?: Branch[]): Promise<boolean> {
+  const current = allBranches || loadFromStorage<Branch[]>(STORAGE_KEYS.BRANCHES, INITIAL_BRANCHES);
+  const updated = current.filter(b => b.id !== branchId);
+  saveToStorage(STORAGE_KEYS.BRANCHES, updated);
+
+  try {
+    await fetch(`/api/branches/${branchId}`, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+  } catch {
+    // Offline
+  }
+  return true;
+}
+
+export async function persistDepartment(dept: Department, allDepts?: Department[]): Promise<boolean> {
+  const current = allDepts || loadFromStorage<Department[]>(STORAGE_KEYS.DEPARTMENTS, DEPARTMENTS);
+  const exists = current.some(d => d.id === dept.id);
+  const updated = exists ? current.map(d => (d.id === dept.id ? dept : d)) : [...current, dept];
+  saveToStorage(STORAGE_KEYS.DEPARTMENTS, updated);
+
+  try {
+    await fetch('/api/departments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        id: dept.id,
+        name: dept.name,
+        headCount: dept.headCount,
+        budgetAllocated: dept.budgetAllocated
+      })
+    });
+  } catch {
+    // Offline
+  }
+  return true;
+}
+
+export async function deleteDepartmentFromStorage(deptId: string, allDepts?: Department[]): Promise<boolean> {
+  const current = allDepts || loadFromStorage<Department[]>(STORAGE_KEYS.DEPARTMENTS, DEPARTMENTS);
+  const updated = current.filter(d => d.id !== deptId);
+  saveToStorage(STORAGE_KEYS.DEPARTMENTS, updated);
+
+  try {
+    await fetch(`/api/departments/${deptId}`, {
+      method: 'DELETE',
+      credentials: 'include'
     });
   } catch {
     // Offline

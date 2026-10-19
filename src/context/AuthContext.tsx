@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react';
-import { User, Organization, Branch, UserRole } from '../types';
-import { ORGANIZATIONS, INITIAL_BRANCHES, USERS } from '../mockData';
-import { persistBranch, persistUser } from '../lib/tidb-storage';
+import { User, Organization, Branch, Department, UserRole } from '../types';
+import { ORGANIZATIONS, INITIAL_BRANCHES, USERS, DEPARTMENTS } from '../mockData';
+import { persistBranch, deleteBranchFromStorage, persistUser, deleteUserFromStorage, persistDepartment, deleteDepartmentFromStorage } from '../lib/tidb-storage';
 import { clearOfflineStoreOnLogout } from '../lib/offline-sync';
 import { RegisterCompanyData } from '../components/RegisterCompanyModal';
 
@@ -29,6 +29,8 @@ interface AuthContextType {
   systemUsers: User[];
   systemBranches: Branch[];
   currentOrgBranches: Branch[];
+  systemDepartments: Department[];
+  currentOrgDepartments: Department[];
   isBranchRestricted: boolean;
   handleSwitchUser: (user: User | null) => void;
   setCurrentOrg: (org: Organization) => void;
@@ -41,8 +43,13 @@ interface AuthContextType {
   handleActivateUser: (inviteToken: string, newPassword: string, twoFactorEnabled: boolean) => boolean;
   handleRegisterUser: (newUser: User) => void;
   handleUpdateUser: (updatedUser: User) => void;
+  handleDeleteUser: (userId: string) => Promise<{ success: boolean; error?: string }>;
   handleRegisterBranch: (newBranch: Branch) => void;
   handleUpdateBranch: (branchId: string, updatedFields: Partial<Branch>) => void;
+  handleDeleteBranch: (branchId: string) => Promise<{ success: boolean; error?: string }>;
+  handleRegisterDepartment: (newDept: Department) => void;
+  handleUpdateDepartment: (deptId: string, updatedFields: Partial<Department>) => void;
+  handleDeleteDepartment: (deptId: string) => Promise<{ success: boolean; error?: string }>;
   handleClearDummyUsers: () => void;
   hasRole: (roles: UserRole | UserRole[]) => boolean;
 }
@@ -53,6 +60,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [systemOrgs, setSystemOrgs] = useState<Organization[]>(ORGANIZATIONS);
   const [systemUsers, setSystemUsers] = useState<User[]>(USERS);
   const [systemBranches, setSystemBranches] = useState<Branch[]>(INITIAL_BRANCHES);
+  const [systemDepartments, setSystemDepartments] = useState<Department[]>(DEPARTMENTS);
   const [currentOrg, setCurrentOrg] = useState<Organization>(
     ORGANIZATIONS[0] || {
       id: 'org-omnitech',
@@ -69,6 +77,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   );
 
   const currentOrgBranches = systemBranches.filter(b => b.orgId === currentOrg.id);
+  const currentOrgDepartments = systemDepartments.filter(d => d.orgId === currentOrg.id);
 
   const handleLoginSuccess = (user: User, org: Organization) => {
     setCurrentOrg(org);
@@ -325,6 +334,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const handleDeleteUser = async (userId: string): Promise<{ success: boolean; error?: string }> => {
+    if (currentUser?.id === userId) {
+      return { success: false, error: 'You cannot delete or suspend your own active administrator account.' };
+    }
+    setSystemUsers(prevUsers => {
+      const updatedUsers = prevUsers.filter(u => u.id !== userId);
+      deleteUserFromStorage(userId, updatedUsers);
+      return updatedUsers;
+    });
+    return { success: true };
+  };
+
   const handleRegisterBranch = (newBranch: Branch) => {
     setSystemBranches(prevBranches => {
       const updatedBranches = [...prevBranches, newBranch];
@@ -358,6 +379,88 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const handleDeleteBranch = async (branchId: string): Promise<{ success: boolean; error?: string }> => {
+    // Check if branch exists
+    const target = systemBranches.find(b => b.id === branchId);
+    if (!target) return { success: false, error: 'Branch not found.' };
+
+    // Prevent deleting only remaining branch
+    const orgBranches = systemBranches.filter(b => b.orgId === currentOrg.id);
+    if (orgBranches.length <= 1) {
+      return { success: false, error: 'Cannot delete the organization\'s only operating facility.' };
+    }
+
+    // Check if users are assigned to branch
+    const assignedUsers = systemUsers.filter(u => u.branchId === branchId && u.orgId === currentOrg.id);
+    if (assignedUsers.length > 0) {
+      return { success: false, error: `Cannot delete branch with ${assignedUsers.length} stationed staff member(s). Reassign staff first.` };
+    }
+
+    setSystemBranches(prevBranches => {
+      const updated = prevBranches.filter(b => b.id !== branchId);
+      deleteBranchFromStorage(branchId, updated);
+      return updated;
+    });
+
+    return { success: true };
+  };
+
+  const handleRegisterDepartment = (newDept: Department) => {
+    setSystemDepartments(prevDepts => {
+      const updated = [...prevDepts, newDept];
+      persistDepartment(newDept, updated);
+      return updated;
+    });
+  };
+
+  const handleUpdateDepartment = (deptId: string, updatedFields: Partial<Department>) => {
+    setSystemDepartments(prevDepts => {
+      let targetUpdatedDept: Department | undefined;
+      const updated = prevDepts.map(d => {
+        if (d.id === deptId) {
+          targetUpdatedDept = { ...d, ...updatedFields };
+          return targetUpdatedDept;
+        }
+        return d;
+      });
+      if (targetUpdatedDept) {
+        persistDepartment(targetUpdatedDept, updated);
+      }
+      return updated;
+    });
+
+    if (updatedFields.name) {
+      const newName = updatedFields.name;
+      setSystemUsers(prev => prev.map(u => u.departmentId === deptId ? { ...u, departmentName: newName } : u));
+      if (currentUser?.departmentId === deptId) {
+        setCurrentUser(prev => prev ? { ...prev, departmentName: newName } : null);
+      }
+    }
+  };
+
+  const handleDeleteDepartment = async (deptId: string): Promise<{ success: boolean; error?: string }> => {
+    const target = systemDepartments.find(d => d.id === deptId);
+    if (!target) return { success: false, error: 'Department not found.' };
+
+    const orgDepts = systemDepartments.filter(d => d.orgId === currentOrg.id);
+    if (orgDepts.length <= 1) {
+      return { success: false, error: 'Cannot delete the organization\'s only operating department.' };
+    }
+
+    const assignedUsers = systemUsers.filter(u => u.departmentId === deptId && u.orgId === currentOrg.id);
+    if (assignedUsers.length > 0) {
+      return { success: false, error: `Cannot delete department with ${assignedUsers.length} assigned staff member(s). Reassign staff first.` };
+    }
+
+    setSystemDepartments(prevDepts => {
+      const updated = prevDepts.filter(d => d.id !== deptId);
+      deleteDepartmentFromStorage(deptId, updated);
+      return updated;
+    });
+
+    return { success: true };
+  };
+
   const handleClearDummyUsers = () => {
     // Only allowed in DEV mode, never in production builds
     if (!import.meta.env.DEV) {
@@ -383,6 +486,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         systemUsers,
         systemBranches,
         currentOrgBranches,
+        systemDepartments,
+        currentOrgDepartments,
         isBranchRestricted,
         handleSwitchUser,
         setCurrentOrg,
@@ -395,8 +500,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         handleActivateUser,
         handleRegisterUser,
         handleUpdateUser,
+        handleDeleteUser,
         handleRegisterBranch,
         handleUpdateBranch,
+        handleDeleteBranch,
+        handleRegisterDepartment,
+        handleUpdateDepartment,
+        handleDeleteDepartment,
         handleClearDummyUsers,
         hasRole
       }}
@@ -413,3 +523,4 @@ export const useAuth = () => {
   }
   return context;
 };
+

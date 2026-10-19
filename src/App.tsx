@@ -9,6 +9,7 @@ import { BudgetPanel } from './components/BudgetPanel';
 import { AuditPanel } from './components/AuditPanel';
 import { ReportsPanel } from './components/ReportsPanel';
 import { UsersPanel } from './components/UsersPanel';
+import { FacilitiesPanel } from './components/FacilitiesPanel';
 import { LoginPortal } from './components/auth/LoginPortal';
 import { TiDBSyncModal } from './components/TiDBSyncModal';
 import { QuickScannerModal } from './components/QuickScannerModal';
@@ -23,7 +24,7 @@ import {
 } from './context';
 import { Asset } from './types';
 
-const VALID_TABS: NavTab[] = ['dashboard', 'assets', 'checkout', 'repair', 'users', 'reports', 'budget', 'audit'];
+const VALID_TABS: NavTab[] = ['dashboard', 'assets', 'checkout', 'repair', 'branches', 'users', 'reports', 'budget', 'audit'];
 
 const getTabFromHash = (): NavTab => {
   if (typeof window === 'undefined') return 'dashboard';
@@ -38,14 +39,21 @@ function AppShell() {
     systemOrgs,
     systemUsers,
     currentOrgBranches,
+    systemDepartments,
+    currentOrgDepartments,
     handleLoginSuccess,
     handleRegisterOrganization,
     handleActivateUser,
     handleRegisterUser,
     handleUpdateUser,
+    handleDeleteUser,
     handleClearDummyUsers,
     handleUpdateBranch,
     handleRegisterBranch,
+    handleDeleteBranch,
+    handleRegisterDepartment,
+    handleUpdateDepartment,
+    handleDeleteDepartment,
     handleSwitchUser,
     handleLogout
   } = useAuth();
@@ -174,6 +182,7 @@ function AppShell() {
           assetCount={orgAssetsCount}
           repairCount={orgRepairsCount}
           userCount={systemUsers.filter(u => u.orgId === currentOrg.id).length}
+          branchesCount={currentOrgBranches.length}
           currentUser={currentUser}
           isMobileDrawerOpen={isMobileMenuOpen}
           onToggleMobileDrawer={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -284,15 +293,36 @@ function AppShell() {
             />
           )}
 
+          {activeTab === 'branches' && (
+            <FacilitiesPanel
+              currentOrg={currentOrg}
+              currentUser={currentUser}
+              branches={currentOrgBranches}
+              departments={currentOrgDepartments}
+              users={systemUsers.filter(u => u.orgId === currentOrg.id)}
+              assets={filteredAssets}
+              onRegisterBranch={handleRegisterBranch}
+              onUpdateBranch={handleUpdateBranch}
+              onDeleteBranch={handleDeleteBranch}
+              onRegisterDepartment={handleRegisterDepartment}
+              onUpdateDepartment={handleUpdateDepartment}
+              onDeleteDepartment={handleDeleteDepartment}
+              onNavigateToTab={navigateToTab}
+            />
+          )}
+
           {activeTab === 'users' && (
             <UsersPanel
               currentOrg={currentOrg}
               users={systemUsers}
               currentUser={currentUser}
               branches={currentOrgBranches}
+              departments={currentOrgDepartments}
               assets={filteredAssets}
               auditLogs={filteredAuditLogs}
               onRegisterUser={handleRegisterUser}
+              onUpdateUser={handleUpdateUser}
+              onDeleteUser={handleDeleteUser}
               onClearDummyUsers={handleClearDummyUsers}
             />
           )}

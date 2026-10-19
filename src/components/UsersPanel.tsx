@@ -1,5 +1,4 @@
-import React, { useState } from 'react';
-import { User, Organization, Branch, Asset, AuditLogItem } from '../types';
+import { User, Organization, Branch, Asset, AuditLogItem, Department } from '../types';
 import { 
   Users, 
   UserPlus, 
@@ -19,7 +18,14 @@ import {
   Building,
   Sparkles,
   ShieldAlert,
-  ChevronRight
+  ChevronRight,
+  Edit2,
+  Trash2,
+  Ban,
+  UserCheck,
+  AlertTriangle,
+  X,
+  Shield
 } from 'lucide-react';
 import { DEPARTMENTS } from '../mockData';
 
@@ -28,9 +34,12 @@ interface UsersPanelProps {
   users: User[];
   currentUser: User | null;
   branches: Branch[];
+  departments?: Department[];
   assets: Asset[];
   auditLogs: AuditLogItem[];
   onRegisterUser?: (newUser: User) => void;
+  onUpdateUser?: (updatedUser: User) => void;
+  onDeleteUser?: (userId: string) => Promise<{ success: boolean; error?: string }>;
   onClearDummyUsers?: () => void;
 }
 
@@ -39,15 +48,30 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
   users,
   currentUser,
   branches = [],
+  departments = [],
   assets = [],
   auditLogs = [],
   onRegisterUser,
+  onUpdateUser,
+  onDeleteUser,
   onClearDummyUsers
 }) => {
+  const activeDepts = departments && departments.length > 0 ? departments : DEPARTMENTS;
+
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('ALL');
   const [branchFilter, setBranchFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+
+  // Feedback Toast state
+  const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const showToast = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToastMsg({ text, type });
+    setTimeout(() => {
+      setToastMsg(current => current?.text === text ? null : current);
+    }, 4500);
+  };
 
   // Invitation Modal State
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -55,9 +79,23 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
   const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState<User['role']>('USER');
   const [selectedBranchId, setSelectedBranchId] = useState(branches[0]?.id || '');
-  const [selectedDeptId, setSelectedDeptId] = useState(DEPARTMENTS[0]?.id || '');
+  const [selectedDeptId, setSelectedDeptId] = useState(activeDepts[0]?.id || '');
 
-  // Success Modal
+  // Edit Staff Modal State
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editFullName, setEditFullName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editRole, setEditRole] = useState<User['role']>('USER');
+  const [editBranchId, setEditBranchId] = useState('');
+  const [editDeptId, setEditDeptId] = useState('');
+  const [editStatus, setEditStatus] = useState<'ACTIVE' | 'INVITED' | 'SUSPENDED'>('ACTIVE');
+
+  // Delete User Confirmation State
+  const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Success Invite Modal
   const [showInviteSuccessModal, setShowInviteSuccessModal] = useState(false);
   const [latestInviteToken, setLatestInviteToken] = useState('');
   const [latestInvitedUser, setLatestInvitedUser] = useState<User | null>(null);
@@ -89,6 +127,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
   // Calculate statistics
   const activeCount = orgUsers.filter(u => (u.status || 'ACTIVE') === 'ACTIVE').length;
   const invitedCount = orgUsers.filter(u => u.status === 'INVITED').length;
+  const suspendedCount = orgUsers.filter(u => u.status === 'SUSPENDED').length;
   const adminsCount = orgUsers.filter(u => u.role === 'ADMIN' || u.role === 'DIRECTOR').length;
   const itSupportCount = orgUsers.filter(u => u.role === 'IT_SUPPORT').length;
 
@@ -117,12 +156,114 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
     return log ? `${log.action} • ${log.timestamp}` : 'Active session';
   };
 
+  // Initiate Edit User Modal
+  const handleStartEdit = (u: User) => {
+    setEditingUser(u);
+    setEditFullName(u.fullName);
+    setEditEmail(u.email);
+    setEditRole(u.role);
+    setEditBranchId(u.branchId);
+    setEditDeptId(u.departmentId);
+    setEditStatus(u.status || 'ACTIVE');
+  };
+
+  // Save Edit User
+  const handleEditSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser || !onUpdateUser) return;
+
+    const targetBranch = branches.find(b => b.id === editBranchId) || branches[0];
+    const targetDept = activeDepts.find(d => d.id === editDeptId) || activeDepts[0];
+
+    // Separation of Duties / Role Escalation Defense:
+    // If editing self, role cannot be changed away from ADMIN, and status cannot be SUSPENDED
+    const isEditingSelf = currentUser?.id === editingUser.id;
+    const finalRole = isEditingSelf ? 'ADMIN' : editRole;
+    const finalStatus = isEditingSelf ? 'ACTIVE' : editStatus;
+
+    const updated: User = {
+      ...editingUser,
+      fullName: editFullName.trim(),
+      email: editEmail.trim().toLowerCase(),
+      role: finalRole,
+      status: finalStatus,
+      branchId: targetBranch ? targetBranch.id : editingUser.branchId,
+      branchName: targetBranch ? targetBranch.name : editingUser.branchName,
+      departmentId: targetDept ? targetDept.id : editingUser.departmentId,
+      departmentName: targetDept ? targetDept.name : editingUser.departmentName,
+    };
+
+    onUpdateUser(updated);
+    setEditingUser(null);
+    showToast(`Staff member "${updated.fullName}" was updated successfully.`);
+  };
+
+  // Quick Toggle Account Suspension
+  const handleToggleSuspend = (u: User) => {
+    if (!onUpdateUser) return;
+    if (currentUser?.id === u.id) {
+      showToast('Separation of Duties: You cannot suspend your own active administrator account.', 'error');
+      return;
+    }
+
+    const isCurrentlySuspended = u.status === 'SUSPENDED';
+    const newStatus: User['status'] = isCurrentlySuspended ? 'ACTIVE' : 'SUSPENDED';
+    const updatedUser: User = { ...u, status: newStatus };
+
+    onUpdateUser(updatedUser);
+    showToast(
+      isCurrentlySuspended
+        ? `Account for ${u.fullName} has been reactivated.`
+        : `Account for ${u.fullName} has been suspended and access revoked.`,
+      isCurrentlySuspended ? 'success' : 'info'
+    );
+  };
+
+  // Request Delete User
+  const handleRequestDelete = (u: User) => {
+    if (currentUser?.id === u.id) {
+      showToast('Separation of Duties: You cannot delete your own active administrator account.', 'error');
+      return;
+    }
+
+    const userAssets = getUserAssets(u.id);
+    if (userAssets.length > 0) {
+      showToast(
+        `Cannot remove ${u.fullName}: user currently holds custody of ${userAssets.length} asset(s). Return or reassign equipment first.`,
+        'error'
+      );
+      return;
+    }
+
+    setUserToDelete(u);
+    setDeleteError(null);
+  };
+
+  // Confirm Delete User
+  const handleConfirmDelete = async () => {
+    if (!userToDelete || !onDeleteUser) return;
+
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    const res = await onDeleteUser(userToDelete.id);
+    setIsDeleting(false);
+
+    if (!res.success) {
+      setDeleteError(res.error || 'Failed to remove user account.');
+      return;
+    }
+
+    showToast(`Staff account for ${userToDelete.fullName} has been removed.`, 'success');
+    setUserToDelete(null);
+  };
+
   const handleInviteSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFullName.trim() || !newEmail.trim() || !onRegisterUser) return;
 
     const branch = branches.find(b => b.id === selectedBranchId) || branches[0];
-    const dept = DEPARTMENTS.find(d => d.id === selectedDeptId) || DEPARTMENTS[0];
+    const dept = activeDepts.find(d => d.id === selectedDeptId) || activeDepts[0];
     const token = 'inv-' + Math.random().toString(36).substring(2, 8) + Date.now().toString(36);
 
     const newUser: User = {
@@ -151,17 +292,48 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
     setNewFullName('');
     setNewEmail('');
     setNewRole('USER');
+    showToast(`Invitation created for ${newUser.fullName}.`);
   };
 
   const copyInviteLink = (token: string) => {
     const url = `${window.location.origin}/?invite=${token}`;
     navigator.clipboard.writeText(url);
     setCopiedLink(true);
+    showToast('Invitation activation link copied to clipboard.');
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
   return (
     <div className="space-y-6">
+      {/* Toast Notification Banner */}
+      {toastMsg && (
+        <div className={`p-3.5 rounded-2xl text-xs font-semibold flex items-center justify-between border shadow-lg animate-in fade-in slide-in-from-top-2 duration-200 ${
+          toastMsg.type === 'error'
+            ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+            : toastMsg.type === 'info'
+            ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+            : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+        }`}>
+          <div className="flex items-center gap-2.5">
+            {toastMsg.type === 'error' ? (
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            ) : toastMsg.type === 'info' ? (
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            )}
+            <span>{toastMsg.text}</span>
+          </div>
+          <button 
+            onClick={() => setToastMsg(null)} 
+            className="text-slate-400 hover:text-white p-1 rounded-lg transition"
+            aria-label="Dismiss message"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Top Banner & KPI Stat Cards */}
       <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 shadow-xl">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
@@ -184,9 +356,10 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                 onClick={() => {
                   if (window.confirm("Purge demo staff accounts for this organization?")) {
                     onClearDummyUsers();
+                    showToast('Demo accounts cleared.');
                   }
                 }}
-                className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-semibold transition"
+                className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-semibold transition cursor-pointer"
               >
                 Purge Demo Accounts
               </button>
@@ -204,8 +377,8 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
           </div>
         </div>
 
-        {/* 4 Stat Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {/* 5 KPI Stat Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Active Accounts</span>
             <div className="text-2xl font-black text-emerald-400 mt-1">{activeCount}</div>
@@ -219,15 +392,21 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
           </div>
 
           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Admins & Leadership</span>
-            <div className="text-2xl font-black text-rose-400 mt-1">{adminsCount}</div>
-            <span className="text-[10px] text-slate-500">Full system governance</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Suspended</span>
+            <div className="text-2xl font-black text-rose-400 mt-1">{suspendedCount}</div>
+            <span className="text-[10px] text-slate-500">Access revoked</span>
+          </div>
+
+          <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Admins & Governance</span>
+            <div className="text-2xl font-black text-purple-400 mt-1">{adminsCount}</div>
+            <span className="text-[10px] text-slate-500">Full control & policy</span>
           </div>
 
           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">IT & Field Techs</span>
             <div className="text-2xl font-black text-cyan-400 mt-1">{itSupportCount}</div>
-            <span className="text-[10px] text-slate-500">Repair & checkout operators</span>
+            <span className="text-[10px] text-slate-500">Repair & diagnostics desk</span>
           </div>
         </div>
       </div>
@@ -274,6 +453,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
             <option value="ALL">All Statuses</option>
             <option value="ACTIVE">ACTIVE</option>
             <option value="INVITED">INVITED</option>
+            <option value="SUSPENDED">SUSPENDED</option>
           </select>
         </div>
 
@@ -318,7 +498,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                 <th className="py-3 px-4">Custody Assets</th>
                 <th className="py-3 px-4">Security / 2FA</th>
                 <th className="py-3 px-4">Status</th>
-                <th className="py-3 px-4 text-right">Actions</th>
+                <th className="py-3 px-4 text-right">Admin Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
@@ -332,21 +512,31 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                 filteredUsers.map(user => {
                   const userAssets = getUserAssets(user.id);
                   const isInvited = user.status === 'INVITED';
+                  const isSuspended = user.status === 'SUSPENDED';
                   const isCurrentUser = currentUser?.id === user.id;
 
                   return (
-                    <tr key={user.id} className="hover:bg-slate-800/40 transition-colors">
+                    <tr 
+                      key={user.id} 
+                      className={`transition-colors ${
+                        isSuspended ? 'bg-rose-950/15 hover:bg-rose-950/25' : 'hover:bg-slate-800/40'
+                      }`}
+                    >
                       {/* Name & Avatar */}
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-3">
                           <img
                             src={user.avatar}
                             alt={user.fullName}
-                            className="w-9 h-9 rounded-full object-cover border border-slate-700 shrink-0"
+                            className={`w-9 h-9 rounded-full object-cover border shrink-0 ${
+                              isSuspended ? 'border-rose-500/40 grayscale' : 'border-slate-700'
+                            }`}
                           />
                           <div>
                             <div className="font-bold text-slate-100 flex items-center gap-1.5">
-                              <span>{user.fullName}</span>
+                              <span className={isSuspended ? 'line-through text-slate-400' : ''}>
+                                {user.fullName}
+                              </span>
                               {isCurrentUser && (
                                 <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                                   YOU
@@ -409,6 +599,11 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                             <Clock className="w-3 h-3" />
                             <span>INVITED</span>
                           </span>
+                        ) : isSuspended ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30 flex items-center gap-1 w-fit">
+                            <Ban className="w-3 h-3" />
+                            <span>SUSPENDED</span>
+                          </span>
                         ) : (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 w-fit">
                             <CheckCircle2 className="w-3 h-3" />
@@ -419,21 +614,61 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
 
                       {/* Actions */}
                       <td className="py-3 px-4 text-right">
-                        {isInvited && user.inviteToken ? (
-                          <button
-                            type="button"
-                            onClick={() => copyInviteLink(user.inviteToken!)}
-                            className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg text-[10px] font-bold flex items-center gap-1 ml-auto cursor-pointer"
-                            title="Copy Invitation Link"
-                          >
-                            <Copy className="w-3 h-3" />
-                            <span>Copy Link</span>
-                          </button>
-                        ) : (
-                          <span className="text-[10px] text-slate-500 font-mono">
-                            Verified
-                          </span>
-                        )}
+                        <div className="flex items-center justify-end gap-1.5">
+                          {isInvited && user.inviteToken && (
+                            <button
+                              type="button"
+                              onClick={() => copyInviteLink(user.inviteToken!)}
+                              className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg text-[10px] font-bold flex items-center gap-1 transition cursor-pointer"
+                              title="Copy Invitation Link"
+                            >
+                              <Copy className="w-3 h-3" />
+                              <span className="hidden sm:inline">Copy Link</span>
+                            </button>
+                          )}
+
+                          {isAdmin && (
+                            <>
+                              {/* Edit Staff Details & Role */}
+                              <button
+                                type="button"
+                                onClick={() => handleStartEdit(user)}
+                                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs transition cursor-pointer"
+                                title="Edit Staff Profile, Role & Branch"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+
+                              {/* Quick Suspend / Reactivate (Cannot suspend self or invited) */}
+                              {!isCurrentUser && !isInvited && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleSuspend(user)}
+                                  className={`p-1.5 rounded-lg text-xs transition cursor-pointer ${
+                                    isSuspended
+                                      ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                      : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                  }`}
+                                  title={isSuspended ? 'Reactivate Account' : 'Suspend Account'}
+                                >
+                                  {isSuspended ? <UserCheck className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
+                                </button>
+                              )}
+
+                              {/* Remove / Delete Staff */}
+                              {!isCurrentUser && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRequestDelete(user)}
+                                  className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-lg text-xs transition cursor-pointer"
+                                  title="Delete Staff Account"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -443,6 +678,207 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
           </table>
         </div>
       </div>
+
+      {/* Edit Staff Modal */}
+      {editingUser && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Edit2 className="w-5 h-5 text-emerald-400" />
+                <div>
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                    Modify Staff Account
+                  </h3>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    {editingUser.email}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingUser(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleEditSubmit} className="space-y-4 mt-4">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1">
+                  Full Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editFullName}
+                  onChange={(e) => setEditFullName(e.target.value)}
+                  placeholder="e.g. Rachel Adams"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1">
+                  Email Address
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1">
+                    System Role *
+                  </label>
+                  <select
+                    value={editRole}
+                    disabled={currentUser?.id === editingUser.id}
+                    onChange={(e) => setEditRole(e.target.value as any)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    <option value="USER">USER (Standard)</option>
+                    <option value="IT_SUPPORT">IT_SUPPORT</option>
+                    <option value="BRANCH_MANAGER">BRANCH_MANAGER</option>
+                    <option value="FINANCE">FINANCE</option>
+                    <option value="DIRECTOR">DIRECTOR</option>
+                    <option value="ADMIN">ADMIN</option>
+                  </select>
+                  {currentUser?.id === editingUser.id && (
+                    <span className="text-[10px] text-amber-400 mt-1 block">
+                      Protected: Admin self-demotion prevented.
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1">
+                    Account Status *
+                  </label>
+                  <select
+                    value={editStatus}
+                    disabled={currentUser?.id === editingUser.id}
+                    onChange={(e) => setEditStatus(e.target.value as any)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    <option value="ACTIVE">ACTIVE</option>
+                    <option value="SUSPENDED">SUSPENDED</option>
+                    <option value="INVITED">INVITED</option>
+                  </select>
+                  {currentUser?.id === editingUser.id && (
+                    <span className="text-[10px] text-amber-400 mt-1 block">
+                      Active session cannot be suspended.
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1">
+                    Facility Branch *
+                  </label>
+                  <select
+                    value={editBranchId}
+                    onChange={(e) => setEditBranchId(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    {branches.map(b => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1">
+                    Department *
+                  </label>
+                  <select
+                    value={editDeptId}
+                    onChange={(e) => setEditDeptId(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    {activeDepts.map(d => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingUser(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 cursor-pointer"
+                >
+                  Save Modifications
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete User Confirmation Modal */}
+      {userToDelete && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-150 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <div className="text-center">
+              <h3 className="text-base font-bold text-white">Remove Staff Account?</h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Are you sure you want to permanently delete <strong className="text-white">{userToDelete.fullName}</strong> ({userToDelete.email}) from {currentOrg.name}?
+              </p>
+            </div>
+
+            {deleteError && (
+              <div className="p-3 bg-rose-500/15 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{deleteError}</span>
+              </div>
+            )}
+
+            <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-[11px] text-slate-400 space-y-1">
+              <div><strong className="text-slate-300">Role:</strong> {userToDelete.role}</div>
+              <div><strong className="text-slate-300">Facility:</strong> {userToDelete.branchName}</div>
+              <div><strong className="text-slate-300">Department:</strong> {userToDelete.departmentName}</div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setUserToDelete(null)}
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleConfirmDelete}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-rose-600/20"
+              >
+                {isDeleting ? 'Removing...' : 'Confirm Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Invite Modal */}
       {showInviteModal && (
@@ -536,7 +972,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                   onChange={(e) => setSelectedDeptId(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500 cursor-pointer"
                 >
-                  {DEPARTMENTS.map(d => (
+                  {activeDepts.map(d => (
                     <option key={d.id} value={d.id}>{d.name}</option>
                   ))}
                 </select>
@@ -546,13 +982,13 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowInviteModal(false)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold"
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 cursor-pointer"
                 >
                   Generate Invitation
                 </button>
@@ -596,7 +1032,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
               <button
                 type="button"
                 onClick={() => setShowInviteSuccessModal(false)}
-                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold"
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
               >
                 Done
               </button>

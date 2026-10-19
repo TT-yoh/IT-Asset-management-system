@@ -34,6 +34,8 @@ export type PermissionAction =
   | 'users:delete'
   | 'branches:read'
   | 'branches:manage'
+  | 'departments:read'
+  | 'departments:manage'
   | 'audit:read';
 
 export const ROLE_PERMISSIONS: Record<UserRole, readonly PermissionAction[]> = {
@@ -57,6 +59,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly PermissionAction[]> = {
     'users:delete',
     'branches:read',
     'branches:manage',
+    'departments:read',
+    'departments:manage',
     'audit:read'
   ],
   DIRECTOR: [
@@ -66,6 +70,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly PermissionAction[]> = {
     'budgets:read',
     'users:read',
     'branches:read',
+    'departments:read',
     'audit:read'
   ],
   BRANCH_MANAGER: [
@@ -78,7 +83,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly PermissionAction[]> = {
     'maintenance:read',
     'maintenance:create',
     'users:read',
-    'branches:read'
+    'branches:read',
+    'departments:read'
   ],
   IT_SUPPORT: [
     'assets:read',
@@ -91,7 +97,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly PermissionAction[]> = {
     'maintenance:create',
     'maintenance:update',
     'users:read',
-    'branches:read'
+    'branches:read',
+    'departments:read'
   ],
   FINANCE: [
     'assets:read',
@@ -102,6 +109,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly PermissionAction[]> = {
     'budgets:manage',
     'users:read',
     'branches:read',
+    'departments:read',
     'audit:read'
   ],
   USER: [
@@ -110,7 +118,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly PermissionAction[]> = {
     'checkouts:create', // Self checkout requests
     'maintenance:read',
     'maintenance:create', // Report hardware issue
-    'branches:read'
+    'branches:read',
+    'departments:read'
   ]
 } as const;
 
