@@ -128,14 +128,14 @@ export const AssetTable: React.FC<AssetTableProps> = ({
                   </td>
 
                   <td className="p-3">
-                    <div className="font-semibold text-slate-100">{asset.name}</div>
+                    <div className="font-semibold text-slate-100">{asset.name || 'Hardware Asset'}</div>
                     <div className="text-[11px] text-slate-400 font-mono">
-                      {asset.model} • S/N: {asset.serialNumber}
+                      {asset.model || 'N/A'} • S/N: {asset.serialNumber || 'N/A'}
                     </div>
                   </td>
 
                   <td className="p-3 text-slate-300">
-                    <div className="font-medium">{asset.branchName}</div>
+                    <div className="font-medium">{asset.branchName || 'Unassigned'}</div>
                     <div className="text-[10px] text-slate-500">{asset.categoryName || 'Hardware'}</div>
                   </td>
 
@@ -143,7 +143,7 @@ export const AssetTable: React.FC<AssetTableProps> = ({
                     {asset.assignedToUserName ? (
                       <div className="flex items-center gap-1.5 text-slate-200">
                         <div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-[10px] font-bold">
-                          {asset.assignedToUserName.charAt(0)}
+                          {(asset.assignedToUserName || 'U').charAt(0)}
                         </div>
                         <span className="truncate max-w-[120px]">{asset.assignedToUserName}</span>
                       </div>
@@ -156,14 +156,14 @@ export const AssetTable: React.FC<AssetTableProps> = ({
 
                   <td className="p-3">
                     <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700">
-                      {asset.condition}
+                      {asset.condition || 'GOOD'}
                     </span>
                   </td>
 
                   <td className="p-3 text-right font-mono text-slate-200">
-                    <div>${(asset.currentValue ?? asset.purchaseCost ?? 0).toLocaleString()}</div>
+                    <div>${Number(asset.currentValue ?? asset.purchaseCost ?? 0).toLocaleString()}</div>
                     <div className="text-[10px] text-slate-500">
-                      Cost: ${(asset.purchaseCost ?? 0).toLocaleString()}
+                      Cost: ${Number(asset.purchaseCost ?? 0).toLocaleString()}
                     </div>
                   </td>
 

@@ -17,9 +17,9 @@ export const BudgetPanel: React.FC<BudgetPanelProps> = ({
   const [method, setMethod] = useState<'STRAIGHT_LINE' | 'DECLINING_BALANCE'>('STRAIGHT_LINE');
 
   const orgBudgets = budgets.filter(b => b.orgId === currentOrg.id);
-  const totalAllocated = orgBudgets.reduce((a, b) => a + b.allocated, 0);
-  const totalSpent = orgBudgets.reduce((a, b) => a + b.spent, 0);
-  const remaining = totalAllocated - totalSpent;
+  const totalAllocated = orgBudgets.reduce((a, b) => a + (b.allocated || 0), 0);
+  const totalSpent = orgBudgets.reduce((a, b) => a + (b.spent || 0), 0);
+  const remaining = Math.max(0, totalAllocated - totalSpent);
 
   // Depreciation calculation formula
   const annualStraight = (calcCost - calcSalvage) / Math.max(calcYears, 1);
@@ -64,24 +64,32 @@ export const BudgetPanel: React.FC<BudgetPanelProps> = ({
             </div>
 
             <div className="space-y-4">
-              {orgBudgets.map(b => {
-                const pct = Math.min(Math.round((b.spent / b.allocated) * 100), 100);
-                return (
-                  <div key={b.id} className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/80">
-                    <div className="flex items-center justify-between text-xs font-bold text-white mb-1">
-                      <span>{b.departmentName}</span>
-                      <span className="font-mono text-emerald-400">${b.spent.toLocaleString()} / ${b.allocated.toLocaleString()}</span>
+              {orgBudgets.length === 0 ? (
+                <div className="p-8 text-center text-slate-500 text-xs bg-slate-950/60 rounded-xl border border-dashed border-slate-800">
+                  No departmental budgets configured yet for this organization.
+                </div>
+              ) : (
+                orgBudgets.map(b => {
+                  const allocated = b.allocated || 0;
+                  const spent = b.spent || 0;
+                  const pct = allocated > 0 ? Math.min(Math.round((spent / allocated) * 100), 100) : 0;
+                  return (
+                    <div key={b.id} className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/80">
+                      <div className="flex items-center justify-between text-xs font-bold text-white mb-1">
+                        <span>{b.departmentName || 'General Department'}</span>
+                        <span className="font-mono text-emerald-400">${spent.toLocaleString()} / ${allocated.toLocaleString()}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-slate-400 mb-2">
+                        <span>Branch: {b.branchName || 'All Branches'}</span>
+                        <span>{pct}% Utilized</span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                        <div className={`h-full transition-all duration-500 ${pct > 85 ? 'bg-rose-500' : pct > 65 ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${pct}%` }} />
+                      </div>
                     </div>
-                    <div className="flex items-center justify-between text-[10px] text-slate-400 mb-2">
-                      <span>Branch: {b.branchName}</span>
-                      <span>{pct}% Utilized</span>
-                    </div>
-                    <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                      <div className={`h-full transition-all duration-500 ${pct > 85 ? 'bg-rose-500' : pct > 65 ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${pct}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </div>
 

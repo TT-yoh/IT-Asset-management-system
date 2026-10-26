@@ -16,13 +16,15 @@ export const MaintenanceCard: React.FC<MaintenanceCardProps> = ({
   onQuickComplete
 }) => {
   const today = new Date().toISOString().split('T')[0]!;
-  const isOverdue = record.status === 'IN_PROGRESS' && record.expectedCompletion < today;
+  const isOverdue = record.status === 'IN_PROGRESS' && !!record.expectedCompletion && record.expectedCompletion < today;
 
   // Calculate days difference
   const getDaysText = () => {
     if (record.status === 'COMPLETED') return 'Completed on time';
+    if (!record.expectedCompletion) return 'Date pending';
     const d1 = new Date().getTime();
     const d2 = new Date(record.expectedCompletion).getTime();
+    if (isNaN(d2)) return 'Date pending';
     const diffDays = Math.ceil((d2 - d1) / (1000 * 3600 * 24));
     if (diffDays < 0) return `${Math.abs(diffDays)} days overdue!`;
     if (diffDays === 0) return `Due today`;

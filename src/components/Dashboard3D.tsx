@@ -27,16 +27,17 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
 
   // KPI calculations
   const orgAssets = assets.filter(a => a.orgId === currentOrg.id);
-  const totalValue = orgAssets.reduce((acc, a) => acc + a.currentValue, 0);
-  const totalPurchase = orgAssets.reduce((acc, a) => acc + a.purchaseCost, 0);
-  const totalDepreciation = totalPurchase - totalValue;
+  const totalValue = orgAssets.reduce((acc, a) => acc + (a.currentValue ?? a.purchaseCost ?? 0), 0);
+  const totalPurchase = orgAssets.reduce((acc, a) => acc + (a.purchaseCost ?? 0), 0);
+  const totalDepreciation = Math.max(0, totalPurchase - totalValue);
   const activeCount = orgAssets.filter(a => a.status === 'ACTIVE').length;
   const nonWorkingCount = orgAssets.length - activeCount;
 
   // Chart data: Category breakdown
   const categoryMap: { [k: string]: number } = {};
   orgAssets.forEach(a => {
-    categoryMap[a.categoryName] = (categoryMap[a.categoryName] || 0) + 1;
+    const cat = a.categoryName || 'General';
+    categoryMap[cat] = (categoryMap[cat] || 0) + 1;
   });
   const pieData = Object.keys(categoryMap).map(k => ({ name: k, value: categoryMap[k] }));
   const COLORS = ['#10b981', '#34d399', '#059669', '#6ee7b7', '#047857', '#a7f3d0'];
@@ -44,17 +45,19 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
   // Chart data: Depreciation timeline forecast
   const areaData = [
     { year: '2024 (Base)', bookValue: totalPurchase },
-    { year: '2025', bookValue: totalPurchase * 0.82 },
-    { year: '2026 (Now)', bookValue: totalValue },
-    { year: '2027 (Est)', bookValue: totalValue * 0.75 },
-    { year: '2028 (Est)', bookValue: totalValue * 0.55 },
+    { year: '2025', bookValue: Math.round(totalPurchase * 0.82) },
+    { year: '2026 (Now)', bookValue: Math.round(totalValue) },
+    { year: '2027 (Est)', bookValue: Math.round(totalValue * 0.75) },
+    { year: '2028 (Est)', bookValue: Math.round(totalValue * 0.55) },
   ];
 
   // Branch asset distribution
   const branchMap: { [k: string]: number } = {};
   orgAssets.forEach(a => {
-    const bName = a.branchName.split(' ')[0] + ' ' + (a.branchName.split(' ')[1] || '');
-    branchMap[bName] = (branchMap[bName] || 0) + a.currentValue;
+    const rawBranch = a.branchName || 'Unassigned';
+    const parts = rawBranch.split(' ');
+    const bName = (parts[0] || 'Facility') + ' ' + (parts[1] || '');
+    branchMap[bName] = (branchMap[bName] || 0) + (a.currentValue ?? a.purchaseCost ?? 0);
   });
   const barData = Object.keys(branchMap).map(k => ({ branch: k, value: Math.round(branchMap[k]) }));
 
@@ -190,7 +193,7 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
-      if (currentMount && renderer.domElement) {
+      if (currentMount && renderer.domElement && currentMount.contains(renderer.domElement)) {
         currentMount.removeChild(renderer.domElement);
       }
       renderer.dispose();

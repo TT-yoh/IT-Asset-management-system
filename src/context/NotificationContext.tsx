@@ -80,9 +80,10 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
 
     // 2. Check for overdue checkouts
     checkouts
-      .filter(c => c.status === 'ACTIVE' && c.expectedReturnDate)
+      .filter(c => (c.status === 'ACTIVE' || (!c.checkedInAt && c.status !== 'RETURNED')) && c.expectedReturnDate)
       .forEach(chk => {
         const returnDate = new Date(chk.expectedReturnDate!);
+        if (isNaN(returnDate.getTime())) return;
         const isOverdue = returnDate.getTime() < now.getTime();
         const diffDays = Math.ceil((now.getTime() - returnDate.getTime()) / (1000 * 60 * 60 * 24));
 
@@ -92,7 +93,7 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
             orgId: orgId,
             type: 'ALERT',
             title: 'Overdue Asset Checkout',
-            message: `Asset ${chk.assetCode} checked out by ${chk.checkedOutToUserName} is ${diffDays} day(s) overdue (Expected: ${chk.expectedReturnDate}).`,
+            message: `Asset ${chk.assetCode || 'Asset'} checked out by ${chk.checkedOutToUserName || 'User'} is ${diffDays} day(s) overdue (Expected: ${chk.expectedReturnDate}).`,
             timestamp: 'Automated Fleet Guard',
             read: false
           });

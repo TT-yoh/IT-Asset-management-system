@@ -165,14 +165,14 @@ export const MaintenanceService = {
       if (filters.status && filters.status !== 'ALL' && rec.status !== filters.status) return false;
       if (filters.type && filters.type !== 'ALL' && rec.type !== filters.type) return false;
       if (filters.priority && filters.priority !== 'ALL' && (rec.priority || 'MEDIUM') !== filters.priority) return false;
-      if (filters.assignedTechnician && filters.assignedTechnician !== 'ALL' && !rec.assignedTechnician.includes(filters.assignedTechnician)) return false;
+      if (filters.assignedTechnician && filters.assignedTechnician !== 'ALL' && !(rec.assignedTechnician || '').includes(filters.assignedTechnician)) return false;
       if (filters.searchQuery) {
         const q = filters.searchQuery.toLowerCase();
         const match =
-          rec.assetCode.toLowerCase().includes(q) ||
-          rec.assetName.toLowerCase().includes(q) ||
-          rec.description.toLowerCase().includes(q) ||
-          rec.assignedTechnician.toLowerCase().includes(q);
+          (rec.assetCode || '').toLowerCase().includes(q) ||
+          (rec.assetName || '').toLowerCase().includes(q) ||
+          (rec.description || '').toLowerCase().includes(q) ||
+          (rec.assignedTechnician || '').toLowerCase().includes(q);
         if (!match) return false;
       }
       return true;

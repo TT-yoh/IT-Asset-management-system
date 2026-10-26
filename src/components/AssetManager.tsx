@@ -79,8 +79,8 @@ export function generateSketchGraph(categoryName: string, name: string): string 
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="400" height="400">
       <rect width="200" height="200" fill="#090d16" />
       <text x="12" y="20" font-family="monospace" font-size="7" fill="#64748b" font-weight="bold">REF: ASSET-CAD-v2.1</text>
-      <text x="12" y="181" font-family="monospace" font-size="7" fill="#2dd4bf" font-weight="bold">SPEC: ${name.slice(0, 20)}</text>
-      <text x="12" y="189" font-family="monospace" font-size="6" fill="#64748b">CLASS: ${categoryName.toUpperCase()}</text>
+      <text x="12" y="181" font-family="monospace" font-size="7" fill="#2dd4bf" font-weight="bold">SPEC: ${(name || 'Device').slice(0, 20)}</text>
+      <text x="12" y="189" font-family="monospace" font-size="6" fill="#64748b">CLASS: ${(categoryName || 'ASSET').toUpperCase()}</text>
       ${paths}
       <rect x="6" y="6" width="188" height="188" fill="none" stroke="#334155" stroke-width="1" />
     </svg>
@@ -157,9 +157,9 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       return (
-        asset.name.toLowerCase().includes(q) ||
-        asset.assetCode.toLowerCase().includes(q) ||
-        asset.serialNumber.toLowerCase().includes(q) ||
+        (asset.name || '').toLowerCase().includes(q) ||
+        (asset.assetCode || '').toLowerCase().includes(q) ||
+        (asset.serialNumber || '').toLowerCase().includes(q) ||
         (asset.model && asset.model.toLowerCase().includes(q)) ||
         (asset.assignedToUserName && asset.assignedToUserName.toLowerCase().includes(q))
       );

@@ -13,6 +13,7 @@ import { FacilitiesPanel } from './components/FacilitiesPanel';
 import { LoginPortal } from './components/auth/LoginPortal';
 import { TiDBSyncModal } from './components/TiDBSyncModal';
 import { QuickScannerModal } from './components/QuickScannerModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { CATEGORIES } from './mockData';
 import {
   AuthProvider,
@@ -230,6 +231,11 @@ function AppShell() {
           className="flex-1 overflow-y-auto bg-slate-950 p-2 sm:p-4 md:p-6 pb-24 md:pb-8"
         >
           <div key={activeTab} className="animate-fadeIn">
+            <ErrorBoundary
+              key={activeTab}
+              fallbackTitle={`Error Loading ${activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} View`}
+              onReset={() => navigateToTab('assets')}
+            >
           {activeTab === 'dashboard' && (
             <Dashboard3D
               currentOrg={currentOrg}
@@ -366,6 +372,7 @@ function AppShell() {
               onClearDummyUsers={handleClearDummyUsers}
             />
           )}
+            </ErrorBoundary>
           </div>
         </main>
       </div>

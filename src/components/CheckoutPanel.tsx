@@ -101,18 +101,24 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
   const activeAssetsPool = assets.filter(a => a.status === 'ACTIVE' || a.status === 'REPAIR');
   const checkedOutAssetsPool = assets.filter(a => !!a.assignedToUserId);
 
+  // Status helper
+  const isRecordActive = (c: CheckoutRecord) => (c.status === 'ACTIVE' || (!c.checkedInAt && c.status !== 'RETURNED'));
+
   // Filter Checkouts
   const filteredCheckouts = checkouts.filter(c => {
-    if (currentUser.role === 'USER' && c.checkedOutToUserId !== currentUser.id) return false;
+    if (currentUser?.role === 'USER' && c.checkedOutToUserId !== currentUser.id) return false;
     if (filterAsset !== 'ALL' && c.assetId !== filterAsset) return false;
     if (filterUser !== 'ALL' && c.checkedOutToUserId !== filterUser) return false;
-    if (filterStatus !== 'ALL' && c.status !== filterStatus) return false;
+    const active = isRecordActive(c);
+    if (filterStatus === 'ACTIVE' && !active) return false;
+    if (filterStatus === 'RETURNED' && active) return false;
+    if (filterStatus !== 'ALL' && filterStatus !== 'ACTIVE' && filterStatus !== 'RETURNED' && c.status !== filterStatus) return false;
     if (searchQuery.trim() !== '') {
       const q = searchQuery.toLowerCase();
       return (
-        c.assetCode.toLowerCase().includes(q) ||
-        c.assetName.toLowerCase().includes(q) ||
-        c.checkedOutToUserName.toLowerCase().includes(q) ||
+        (c.assetCode || '').toLowerCase().includes(q) ||
+        (c.assetName || '').toLowerCase().includes(q) ||
+        (c.checkedOutToUserName || '').toLowerCase().includes(q) ||
         (c.reason && c.reason.toLowerCase().includes(q))
       );
     }
@@ -121,7 +127,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
 
   // Overdue count
   const today = new Date().toISOString().split('T')[0]!;
-  const overdueCount = checkouts.filter(c => c.status === 'ACTIVE' && c.expectedReturnDate && c.expectedReturnDate < today).length;
+  const overdueCount = checkouts.filter(c => isRecordActive(c) && c.expectedReturnDate && c.expectedReturnDate < today).length;
 
   // Handle Checkout Execution
   const handleExecuteCheckout = (
@@ -406,7 +412,8 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
                     </tr>
                   ) : (
                     filteredCheckouts.map(rec => {
-                      const isOverdue = rec.status === 'ACTIVE' && rec.expectedReturnDate && rec.expectedReturnDate < today;
+                      const active = isRecordActive(rec);
+                      const isOverdue = active && rec.expectedReturnDate && rec.expectedReturnDate < today;
                       return (
                         <tr key={rec.id} className="hover:bg-slate-850/60 transition">
                           <td className="p-4">
@@ -418,9 +425,9 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
                           <td className="p-4 font-medium text-slate-200">
                             <div className="flex items-center gap-2">
                               <span className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-bold text-sky-400">
-                                {rec.checkedOutToUserName.slice(0, 2).toUpperCase()}
+                                {(rec.checkedOutToUserName || 'User').slice(0, 2).toUpperCase()}
                               </span>
-                              <span>{rec.checkedOutToUserName}</span>
+                              <span>{rec.checkedOutToUserName || 'User'}</span>
                             </div>
                           </td>
                           <td className="p-4 font-mono text-slate-400 text-xs">{rec.checkedOutAt}</td>
@@ -439,7 +446,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
                             {rec.reason || 'Daily production use'}
                           </td>
                           <td className="p-4">
-                            {rec.status === 'ACTIVE' ? (
+                            {active ? (
                               <button
                                 onClick={() => {
                                   const targetAst = assets.find(a => a.id === rec.assetId);

@@ -94,7 +94,7 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
 
     // Chart dataset (top categories/branches)
     const chartData = metrics.slice(0, 8).map(m => ({
-      name: `${m.branchName.slice(0, 10)} - ${m.categoryName.slice(0, 8)}`,
+      name: `${(m.branchName || 'Facility').slice(0, 10)} - ${(m.categoryName || 'General').slice(0, 8)}`,
       cost: m.totalPurchaseCost,
       value: m.currentBookValue,
       depreciation: m.totalDepreciated

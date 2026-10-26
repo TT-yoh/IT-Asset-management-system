@@ -115,10 +115,10 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       return (
-        u.fullName.toLowerCase().includes(q) ||
-        u.email.toLowerCase().includes(q) ||
-        u.departmentName.toLowerCase().includes(q) ||
-        u.branchName.toLowerCase().includes(q)
+        (u.fullName || '').toLowerCase().includes(q) ||
+        (u.email || '').toLowerCase().includes(q) ||
+        (u.departmentName && u.departmentName.toLowerCase().includes(q)) ||
+        (u.branchName && u.branchName.toLowerCase().includes(q))
       );
     }
     return true;
@@ -151,7 +151,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
   const getUserLastActivity = (userEmail: string, userName: string) => {
     const log = auditLogs.find(l => 
       l.orgId === currentOrg.id && 
-      (l.userName === userName || (l.changes && l.changes.toLowerCase().includes(userEmail.toLowerCase())))
+      (l.userName === userName || (userEmail && l.changes && l.changes.toLowerCase().includes(userEmail.toLowerCase())))
     );
     return log ? `${log.action} • ${log.timestamp}` : 'Active session';
   };

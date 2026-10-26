@@ -214,9 +214,9 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       if (!searchQuery.trim()) return true;
       const q = searchQuery.toLowerCase();
       return (
-        a.name.toLowerCase().includes(q) ||
-        a.assetCode.toLowerCase().includes(q) ||
-        a.serialNumber.toLowerCase().includes(q) ||
+        (a.name || '').toLowerCase().includes(q) ||
+        (a.assetCode || '').toLowerCase().includes(q) ||
+        (a.serialNumber || '').toLowerCase().includes(q) ||
         (a.categoryName && a.categoryName.toLowerCase().includes(q)) ||
         (a.model && a.model.toLowerCase().includes(q)) ||
         (a.assignedToUserName && a.assignedToUserName.toLowerCase().includes(q))
@@ -250,7 +250,9 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return budgets.filter(b => {
       if (b.orgId !== currentOrg.id) return false;
       if (isBranchRestricted && currentUser) {
-        return b.branchName.toLowerCase() === currentUser.branchName.toLowerCase() || b.branchName.includes(currentUser.branchName);
+        const userBranch = (currentUser.branchName || '').toLowerCase();
+        const bBranch = (b.branchName || '').toLowerCase();
+        return userBranch ? (bBranch === userBranch || bBranch.includes(userBranch)) : true;
       }
       return true;
     });
@@ -260,9 +262,10 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return auditLogs.filter(log => {
       if (log.orgId !== currentOrg.id) return false;
       if (isBranchRestricted && currentUser) {
+        const userBranch = currentUser.branchName || '';
         return (
-          log.entityName.includes(currentUser.branchName) ||
-          log.changes.includes(currentUser.branchName) ||
+          (userBranch && (log.entityName || '').includes(userBranch)) ||
+          (userBranch && (log.changes || '').includes(userBranch)) ||
           log.userName === currentUser.fullName
         );
       }

@@ -102,18 +102,18 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
-      b.name.toLowerCase().includes(q) ||
-      b.code.toLowerCase().includes(q) ||
-      b.city.toLowerCase().includes(q) ||
-      b.country.toLowerCase().includes(q) ||
-      b.managerName.toLowerCase().includes(q)
+      (b.name || '').toLowerCase().includes(q) ||
+      (b.code || '').toLowerCase().includes(q) ||
+      (b.city && b.city.toLowerCase().includes(q)) ||
+      (b.country && b.country.toLowerCase().includes(q)) ||
+      (b.managerName && b.managerName.toLowerCase().includes(q))
     );
   });
 
   const filteredDepartments = orgDepartments.filter(d => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
-    return d.name.toLowerCase().includes(q);
+    return (d.name || '').toLowerCase().includes(q);
   });
 
   // Calculate metrics

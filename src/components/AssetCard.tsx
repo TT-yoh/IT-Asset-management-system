@@ -88,7 +88,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   };
 
   const statusInfo = getStatusDisplay(asset.status);
-  const imageSrc = asset.imageUrl || generateSketchGraph(asset.categoryName || '', asset.name);
+  const imageSrc = asset.imageUrl || generateSketchGraph(asset.categoryName || '', asset.name || 'Hardware');
 
   return (
     <div className="group bg-slate-900/90 border border-slate-800 rounded-3xl overflow-hidden shadow-lg transition hover:border-emerald-500/50 hover:shadow-emerald-500/10 flex flex-col justify-between">
@@ -96,7 +96,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
       <div className="relative h-44 w-full bg-slate-950 overflow-hidden cursor-pointer" onClick={handleSelect}>
         <img
           src={imageSrc}
-          alt={asset.name}
+          alt={asset.name || 'Hardware Asset'}
           className="w-full h-full object-cover group-hover:scale-105 transition duration-500 opacity-90 group-hover:opacity-100"
           referrerPolicy="no-referrer"
         />

@@ -35,7 +35,7 @@ export const AssetFilter: React.FC<AssetFilterProps> = ({
   onSearchChange,
   onResetFilters
 }) => {
-  const isBranchRestricted = currentUser.role === 'BRANCH_MANAGER' || currentUser.role === 'USER';
+  const isBranchRestricted = currentUser?.role === 'BRANCH_MANAGER' || currentUser?.role === 'USER';
 
   const activeCount = [
     selectedBranch !== 'ALL' ? 1 : 0,
