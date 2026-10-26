@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Asset, Branch, AssetCategory, Organization } from '../../types';
 import { 
   X, 

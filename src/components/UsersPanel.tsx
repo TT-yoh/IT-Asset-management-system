@@ -1,3 +1,4 @@
+import React, { useState, useEffect, useMemo } from 'react';
 import { User, Organization, Branch, Asset, AuditLogItem, Department } from '../types';
 import { 
   Users, 

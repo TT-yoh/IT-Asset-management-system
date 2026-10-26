@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CheckoutRecord, Asset, User, AssetCondition, Branch } from '../types';
 import { CheckoutForm } from './CheckoutForm';
 import { CheckinForm } from './CheckinForm';
