@@ -91,7 +91,7 @@ const KNOWN_HARDWARE_SPECS: Record<string, Partial<HardwareSpecsResult>> = {
   },
   'ipad pro': {
     manufacturer: 'Apple',
-    suggestedCategory: 'Mobile / Tablet',
+    suggestedCategory: 'Smartphones & Mobile Fleet',
     cpu: 'Apple M4 Chip (9-core CPU)',
     ram: '8GB Unified RAM',
     storage: '256GB NVMe',
@@ -100,6 +100,90 @@ const KNOWN_HARDWARE_SPECS: Record<string, Partial<HardwareSpecsResult>> = {
     estimatedCostUSD: 999,
     ports: 'Thunderbolt / USB 4 (Type-C)',
     notes: 'Field engineering & mobile inspection tablet.'
+  },
+  'mx master': {
+    manufacturer: 'Logitech',
+    suggestedCategory: 'Docks, Keyboards & Accessories',
+    cpu: 'Darkfield High-Precision Optical Sensor (8000 DPI)',
+    ram: 'N/A (Input Peripheral)',
+    storage: 'Internal Rechargeable Li-Po (500 mAh)',
+    gpu: 'N/A',
+    depreciationMonths: 24,
+    estimatedCostUSD: 99,
+    ports: 'Bluetooth Low Energy / Logi Bolt USB Receiver, USB-C Fast Charge',
+    notes: 'Flagship ergonomic wireless mouse with MagSpeed electromagnetic scrolling.'
+  },
+  'mx keys': {
+    manufacturer: 'Logitech',
+    suggestedCategory: 'Docks, Keyboards & Accessories',
+    cpu: 'Spherically Dished Scissor Key Switches',
+    ram: 'N/A (Input Peripheral)',
+    storage: 'Internal Rechargeable Li-Po',
+    gpu: 'N/A',
+    depreciationMonths: 24,
+    estimatedCostUSD: 119,
+    ports: 'Bluetooth Low Energy / Logi Bolt USB Receiver, USB-C Charge',
+    notes: 'Master series wireless keyboard with smart ambient proximity backlighting.'
+  },
+  'dell premier': {
+    manufacturer: 'Dell',
+    suggestedCategory: 'Docks, Keyboards & Accessories',
+    cpu: 'Multi-Device 2.4GHz RF & Dual Bluetooth 5.0 Sensor',
+    ram: 'N/A',
+    storage: 'N/A',
+    gpu: 'N/A',
+    depreciationMonths: 24,
+    estimatedCostUSD: 99,
+    ports: 'USB Wireless Dongle / Dual Bluetooth 5.0 Channels',
+    notes: 'Enterprise executive multi-device wireless keyboard and precision mouse combo.'
+  },
+  'dell pro wireless': {
+    manufacturer: 'Dell',
+    suggestedCategory: 'Docks, Keyboards & Accessories',
+    cpu: '2.4GHz RF Optical Sensor (4000 DPI)',
+    ram: 'N/A',
+    storage: 'N/A',
+    gpu: 'N/A',
+    depreciationMonths: 24,
+    estimatedCostUSD: 55,
+    ports: '2.4GHz USB Dongle',
+    notes: 'Standard office desktop wireless keyboard and optical mouse bundle.'
+  },
+  'magic keyboard': {
+    manufacturer: 'Apple',
+    suggestedCategory: 'Docks, Keyboards & Accessories',
+    cpu: 'Touch ID Biometric Sensor & Scissor Mechanism',
+    ram: 'N/A',
+    storage: 'N/A',
+    gpu: 'N/A',
+    depreciationMonths: 24,
+    estimatedCostUSD: 149,
+    ports: 'Bluetooth, USB-C / Lightning Port',
+    notes: 'Apple Magic Keyboard with Touch ID for Mac workstations.'
+  },
+  'magic mouse': {
+    manufacturer: 'Apple',
+    suggestedCategory: 'Docks, Keyboards & Accessories',
+    cpu: 'Multi-Touch Surface Laser Tracking',
+    ram: 'N/A',
+    storage: 'N/A',
+    gpu: 'N/A',
+    depreciationMonths: 24,
+    estimatedCostUSD: 79,
+    ports: 'Bluetooth, Lightning / USB-C Port',
+    notes: 'Wireless rechargeable multi-touch gesture mouse.'
+  },
+  'thunderbolt dock': {
+    manufacturer: 'Dell',
+    suggestedCategory: 'Docks, Keyboards & Accessories',
+    cpu: 'Intel Thunderbolt 4 Controller',
+    ram: 'N/A',
+    storage: 'N/A',
+    gpu: 'N/A',
+    depreciationMonths: 36,
+    estimatedCostUSD: 280,
+    ports: '2x Thunderbolt 4, 3x USB-A 3.2, 2x DisplayPort 1.4, 1x HDMI 2.0, Gigabit Ethernet RJ45, 130W Power Delivery',
+    notes: 'Enterprise high-speed modular Thunderbolt 4 docking station.'
   }
 };
 
@@ -116,7 +200,7 @@ export async function fetchHardwareSpecs(modelName: string): Promise<HardwareSpe
       return {
         manufacturer: spec.manufacturer || 'Enterprise Vendor',
         model: cleanQuery,
-        suggestedCategory: spec.suggestedCategory || 'Laptop',
+        suggestedCategory: spec.suggestedCategory || 'Laptops & Ultrabooks',
         cpu: spec.cpu || 'Intel Core i7 / AMD Ryzen 7',
         ram: spec.ram || '16GB RAM',
         storage: spec.storage || '512GB NVMe SSD',
@@ -130,19 +214,32 @@ export async function fetchHardwareSpecs(modelName: string): Promise<HardwareSpe
     }
   }
 
+  // Is this an accessory / peripheral device?
+  const isPeripheral = lower.includes('mouse') || lower.includes('keyboard') || lower.includes('dock') || lower.includes('headset') || lower.includes('accessory') || lower.includes('peripheral') || lower.includes('combo') || lower.includes('dongle');
+
   // Generic fallback if unknown
   return {
     manufacturer: cleanQuery.split(' ')[0] || 'IT Vendor',
     model: cleanQuery,
-    suggestedCategory: lower.includes('monitor') ? 'Monitor' : lower.includes('server') ? 'Server' : lower.includes('switch') ? 'Networking' : 'Laptop',
-    cpu: 'Intel Core i5/i7 or AMD Ryzen Enterprise',
-    ram: '16GB DDR4/DDR5',
-    storage: '512GB NVMe SSD',
-    gpu: 'Integrated Graphics',
-    depreciationMonths: 36,
-    estimatedCostUSD: 1100,
-    ports: 'USB-C, USB-A, HDMI, DisplayPort',
-    notes: 'Auto-profiled hardware record.',
+    suggestedCategory: isPeripheral
+      ? 'Docks, Keyboards & Accessories'
+      : lower.includes('monitor') || lower.includes('display')
+      ? 'Monitors & AV Conferencing'
+      : lower.includes('server')
+      ? 'Enterprise Servers & Compute'
+      : lower.includes('switch') || lower.includes('router') || lower.includes('firewall')
+      ? 'Networking & Security Gear'
+      : lower.includes('printer')
+      ? 'Printers & Fleet Scanners'
+      : 'Laptops & Ultrabooks',
+    cpu: isPeripheral ? 'Input / Peripheral Device' : 'Intel Core i5/i7 or AMD Ryzen Enterprise',
+    ram: isPeripheral ? 'N/A' : '16GB DDR4/DDR5',
+    storage: isPeripheral ? 'N/A' : '512GB NVMe SSD',
+    gpu: 'N/A',
+    depreciationMonths: isPeripheral ? 24 : 36,
+    estimatedCostUSD: lower.includes('mouse') ? 60 : lower.includes('keyboard') ? 80 : lower.includes('combo') ? 65 : lower.includes('dock') ? 220 : 1100,
+    ports: isPeripheral ? 'USB-C / Bluetooth Wireless' : 'USB-C, USB-A, HDMI, DisplayPort',
+    notes: isPeripheral ? 'Enterprise input peripheral / workstation accessory.' : 'Auto-profiled hardware record.',
     isAiGenerated: false
   };
 }

@@ -55,6 +55,18 @@ export function generateSketchGraph(categoryName: string, name: string): string 
       <path d="M 90 125 L 110 125 L 115 150 L 85 150 Z" fill="none" stroke="#2dd4bf" stroke-width="2" />
       <line x1="70" y1="150" x2="130" y2="150" stroke="#f43f5e" stroke-width="2" />
     `;
+  } else if (normCat.includes('key') || normCat.includes('mouse') || normCat.includes('mice') || normCat.includes('dock') || normCat.includes('periph') || normCat.includes('access') || normCat.includes('combo')) {
+    paths = `
+      <!-- Keyboard Chassis & Keybed -->
+      <rect x="25" y="80" width="105" height="48" rx="4" fill="none" stroke="#2dd4bf" stroke-width="2" />
+      <rect x="30" y="86" width="95" height="8" rx="1" fill="none" stroke="#2dd4bf" stroke-width="1" stroke-dasharray="2,2" />
+      <rect x="30" y="97" width="95" height="8" rx="1" fill="none" stroke="#2dd4bf" stroke-width="1" stroke-dasharray="2,2" />
+      <rect x="52" y="111" width="50" height="7" rx="1" fill="none" stroke="#f43f5e" stroke-width="1.5" />
+      <!-- Precision Ergonomic Mouse -->
+      <rect x="142" y="76" width="34" height="54" rx="14" fill="none" stroke="#2dd4bf" stroke-width="2" />
+      <line x1="142" y1="98" x2="176" y2="98" stroke="#2dd4bf" stroke-width="1" stroke-dasharray="2,2" />
+      <rect x="156" y="82" width="6" height="12" rx="2" fill="none" stroke="#f43f5e" stroke-width="1.5" />
+    `;
   } else {
     paths = `
       <path d="M 100 45 L 150 70 L 100 95 L 50 70 Z" fill="none" stroke="#2dd4bf" stroke-width="2" />
@@ -228,7 +240,11 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
       "Cisco Catalyst 9300 Switch,C9300-48P,NET-SW-9300-A,Networking,3200.00,2023-08-05,GOOD,2600.00,,netops@company.com",
       "Ubiquiti UniFi Dream Machine Pro,UDM-Pro,UBI-UDM-01,Networking,499.00,2024-01-08,NEW,450.00,,netops@company.com",
       "HP LaserJet Enterprise M608,M608dn,PRN-M608-01,Printers,850.00,2023-04-18,FAIR,550.00,,printers@company.com",
-      "Dell UltraSharp U2723QE 27 4K,U2723QE,CN-0Y3K2M-12,Monitors,580.00,2023-12-01,GOOD,490.00,,it.peripherals@company.com"
+      "Dell UltraSharp U2723QE 27 4K,U2723QE,CN-0Y3K2M-12,Monitors,580.00,2023-12-01,GOOD,490.00,,it.peripherals@company.com",
+      "Logitech MX Master 3S Wireless Mouse,MX Master 3S,SN-MOU-99214,Docks & Keyboards,99.00,2024-02-15,NEW,90.00,,it.peripherals@company.com",
+      "Logitech MX Keys S Wireless Keyboard,MX Keys S,SN-KB-88312,Docks & Keyboards,119.00,2024-02-15,NEW,110.00,,it.peripherals@company.com",
+      "Dell Pro Wireless Keyboard and Mouse Combo,KM5221W,SN-KM-55102,Docks & Keyboards,55.00,2024-01-20,NEW,50.00,,it.peripherals@company.com",
+      "Dell Thunderbolt 4 Modular Dock WD22TB4,WD22TB4,CN-0R8234-90,Docks & Keyboards,280.00,2023-11-10,GOOD,230.00,,it.peripherals@company.com"
     ].join('\n');
 
     const blob = new Blob([csvRows], { type: 'text/csv;charset=utf-8;' });

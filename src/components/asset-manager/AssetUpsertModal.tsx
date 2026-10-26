@@ -304,7 +304,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                       required
                       value={formData.model || formData.name || ''}
                       onChange={(e) => setFormData({ ...formData, model: e.target.value, name: e.target.value })}
-                      placeholder="e.g. MacBook Pro 16 M3 or Dell XPS 15 9530"
+                      placeholder="e.g. MacBook Pro 16, Dell XPS 15, Logitech MX Master 3S, or Dell KM5221W Combo"
                       className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 text-sm"
                     />
                   </div>

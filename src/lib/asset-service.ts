@@ -183,18 +183,46 @@ export class AssetService {
         continue;
       }
 
+      const lowerCat = cat.toLowerCase();
+      let categoryId = 'cat-lap';
+      let categoryName = cat || 'Laptops & Ultrabooks';
+
+      if (lowerCat.includes('key') || lowerCat.includes('mouse') || lowerCat.includes('mice') || lowerCat.includes('dock') || lowerCat.includes('periph') || lowerCat.includes('access') || lowerCat.includes('combo')) {
+        categoryId = 'cat-periph';
+        categoryName = 'Docks, Keyboards & Accessories';
+      } else if (lowerCat.includes('phone') || lowerCat.includes('mobile') || lowerCat.includes('tablet') || lowerCat.includes('ipad')) {
+        categoryId = 'cat-phone';
+        categoryName = 'Smartphones & Mobile Fleet';
+      } else if (lowerCat.includes('server') || lowerCat.includes('compute') || lowerCat.includes('blade') || lowerCat.includes('san') || lowerCat.includes('nas')) {
+        categoryId = 'cat-servers';
+        categoryName = 'Enterprise Servers & Compute';
+      } else if (lowerCat.includes('mon') || lowerCat.includes('disp') || lowerCat.includes('screen') || lowerCat.includes('av')) {
+        categoryId = 'cat-mon';
+        categoryName = 'Monitors & AV Conferencing';
+      } else if (lowerCat.includes('net') || lowerCat.includes('switch') || lowerCat.includes('router') || lowerCat.includes('firewall') || lowerCat.includes('wifi')) {
+        categoryId = 'cat-net';
+        categoryName = 'Networking & Security Gear';
+      } else if (lowerCat.includes('print') || lowerCat.includes('scan') || lowerCat.includes('laserjet')) {
+        categoryId = 'cat-print';
+        categoryName = 'Printers & Fleet Scanners';
+      } else if (lowerCat.includes('desk') || lowerCat.includes('workstation') || lowerCat.includes('imac') || lowerCat.includes('tower')) {
+        categoryId = 'cat-desk';
+        categoryName = 'Desktops & Workstations';
+      } else if (lowerCat.includes('lap') || lowerCat.includes('note') || lowerCat.includes('macbook') || lowerCat.includes('thinkpad')) {
+        categoryId = 'cat-lap';
+        categoryName = 'Laptops & Ultrabooks';
+      }
+
+      const tagPrefix = categoryId === 'cat-periph' ? 'PERIPH' : cat.slice(0, 3).toUpperCase();
+
       const newAst: Asset = {
         id: `ast-csv-${Date.now()}-${i}`,
         orgId,
         branchId: 'branch-1',
         branchName,
-        categoryId: cat.toLowerCase().includes('phone') || cat.toLowerCase().includes('mobile')
-          ? 'cat-phone'
-          : cat.toLowerCase().includes('server')
-            ? 'cat-servers'
-            : 'cat-lap',
-        categoryName: cat,
-        assetCode: `BULK-${cat.slice(0, 3).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`,
+        categoryId,
+        categoryName,
+        assetCode: `BULK-${tagPrefix}-${Math.floor(1000 + Math.random() * 9000)}`,
         name,
         model,
         serialNumber: serial,
