@@ -597,6 +597,7 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
         isOpen={isUpsertOpen}
         editingAsset={editingAsset}
         prefilledTag={prefilledTag}
+        existingAssets={assets}
         branches={branches}
         categories={categories}
         currentOrg={currentOrg}

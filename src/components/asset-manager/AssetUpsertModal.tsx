@@ -15,7 +15,8 @@ import {
   Loader2,
   ArrowRight,
   ArrowLeft,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Info
 } from 'lucide-react';
 import { fetchHardwareSpecs } from '../../lib/ai/specs';
 import { AssetService } from '../../lib/asset-service';
@@ -24,6 +25,7 @@ interface AssetUpsertModalProps {
   isOpen: boolean;
   editingAsset: Asset | null;
   prefilledTag?: string;
+  existingAssets?: Asset[];
   branches: Branch[];
   categories: AssetCategory[];
   currentOrg: Organization;
@@ -35,6 +37,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
   isOpen,
   editingAsset,
   prefilledTag,
+  existingAssets,
   branches,
   categories,
   currentOrg,
@@ -92,7 +95,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
         name: '',
         model: '',
         assetCode: generatedCode,
-        serialNumber: `SN-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
+        serialNumber: '',
         macAddress: '',
         imeiNumber: '',
         categoryId: categories[0]?.id || 'cat-1',
@@ -160,6 +163,28 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
     if (!formData.name?.trim() || !formData.assetCode?.trim()) {
       setFormError('Asset Name and Asset Code are required.');
       return;
+    }
+
+    if (existingAssets && existingAssets.length > 0) {
+      const cleanCode = formData.assetCode.trim().toLowerCase();
+      const codeDuplicate = existingAssets.find(
+        a => a.id !== editingAsset?.id && a.assetCode.trim().toLowerCase() === cleanCode
+      );
+      if (codeDuplicate) {
+        setFormError(`Asset Tag "${formData.assetCode.trim()}" is already assigned to "${codeDuplicate.name}". Each device must have a unique Asset Tag.`);
+        return;
+      }
+
+      const cleanSerial = formData.serialNumber?.trim().toLowerCase();
+      if (cleanSerial && !cleanSerial.startsWith('sn-')) {
+        const serialDuplicate = existingAssets.find(
+          a => a.id !== editingAsset?.id && a.serialNumber?.trim().toLowerCase() === cleanSerial
+        );
+        if (serialDuplicate) {
+          setFormError(`Serial Number "${formData.serialNumber?.trim()}" is already registered to "${serialDuplicate.name}". Each physical machine must have a unique factory serial number.`);
+          return;
+        }
+      }
     }
 
     const branch = branches.find(b => b.id === formData.branchId) || branches[0]!;
@@ -304,38 +329,69 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                       required
                       value={formData.model || formData.name || ''}
                       onChange={(e) => setFormData({ ...formData, model: e.target.value, name: e.target.value })}
-                      placeholder="e.g. MacBook Pro 16, Dell XPS 15, Logitech MX Master 3S, or Dell KM5221W Combo"
+                      placeholder="e.g. MacBook Pro 16, Dell XPS 15, or Dell Latitude 5540"
                       className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 text-sm"
                     />
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Hardware model name. Multiple identical laptops share the same model.
+                    </p>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-slate-300 font-semibold mb-1">
-                        Asset Tag / Barcode
+                        Asset Tag / Barcode <span className="text-rose-400">*</span>
                       </label>
                       <input
                         type="text"
                         required
                         value={formData.assetCode || ''}
                         onChange={(e) => setFormData({ ...formData, assetCode: e.target.value })}
+                        placeholder="e.g. AST-1042"
                         className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl font-mono text-emerald-400 focus:outline-none focus:border-emerald-500"
                       />
+                      <p className="text-[10px] text-slate-400 mt-0.5">Unique barcode/sticker tag for this specific unit.</p>
                     </div>
+
                     <div>
-                      <label className="block text-slate-300 font-semibold mb-1">Category</label>
-                      <select
-                        value={formData.categoryId}
-                        onChange={(e) => {
-                          const c = categories.find(cat => cat.id === e.target.value);
-                          setFormData({ ...formData, categoryId: e.target.value, categoryName: c?.name || 'Hardware' });
-                        }}
-                        className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
-                      >
-                        {categories.map(c => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
-                        ))}
-                      </select>
+                      <label className="block text-slate-300 font-semibold mb-1">
+                        Manufacturer Serial (S/N)
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.serialNumber || ''}
+                        onChange={(e) => setFormData({ ...formData, serialNumber: e.target.value })}
+                        placeholder="e.g. 7X9K2M3 or C02G8..."
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
+                      />
+                      <p className="text-[10px] text-slate-400 mt-0.5">Factory chassis S/N or Service Tag underneath.</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Category</label>
+                    <select
+                      value={formData.categoryId}
+                      onChange={(e) => {
+                        const c = categories.find(cat => cat.id === e.target.value);
+                        setFormData({ ...formData, categoryId: e.target.value, categoryName: c?.name || 'Hardware' });
+                      }}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
+                    >
+                      {categories.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Differentiating Identical Units Guidance Callout */}
+                  <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-start gap-2.5 text-xs text-blue-200">
+                    <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-semibold text-blue-300">Enrolling multiple identical laptops?</span>
+                      <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                        Identical laptops can have the exact same Model and Name. The system distinguishes them using their unique <strong>Asset Tag</strong> (the barcode sticker you attach) and manufacturer <strong>Serial Number</strong> (from the chassis).
+                      </p>
                     </div>
                   </div>
 
@@ -493,6 +549,13 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
           ) : (
             /* TECHNICAL MODE: All Fields */
             <div className="space-y-4">
+              <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-start gap-2.5 text-xs text-blue-200">
+                <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                <span>
+                  <strong>Tip for identical machines:</strong> Keep the <em>Model Identifier</em> identical across all units, but ensure each unit has a distinct <em>Asset Tag</em> (internal barcode) and <em>Serial Number</em> (factory S/N).
+                </span>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">
@@ -502,18 +565,22 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                     type="text"
                     required
                     value={formData.name || ''}
+                    placeholder="e.g. Dell Latitude 5540 or LAP-FIN-01"
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Common display name or department device name.</p>
                 </div>
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">Model Identifier</label>
                   <input
                     type="text"
                     value={formData.model || ''}
+                    placeholder="e.g. Latitude 5540"
                     onChange={(e) => setFormData({ ...formData, model: e.target.value })}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Hardware model specification (shared across identical units).</p>
                 </div>
 
                 <div>
@@ -524,18 +591,22 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                     type="text"
                     required
                     value={formData.assetCode || ''}
+                    placeholder="e.g. AST-1042"
                     onChange={(e) => setFormData({ ...formData, assetCode: e.target.value })}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl font-mono text-emerald-400 focus:outline-none focus:border-emerald-500"
                   />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Unique organization barcode tag code for this unit.</p>
                 </div>
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">Serial Number</label>
                   <input
                     type="text"
                     value={formData.serialNumber || ''}
+                    placeholder="e.g. 7X9K2M3 or C02G8..."
                     onChange={(e) => setFormData({ ...formData, serialNumber: e.target.value })}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Unique manufacturer hardware S/N from bottom chassis.</p>
                 </div>
 
                 <div>
