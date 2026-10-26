@@ -45,7 +45,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
   onSave
 }) => {
   const [activeStep, setActiveStep] = useState<number>(1);
-  const [showAdvancedFields, setShowAdvancedFields] = useState<boolean>(false);
+  const [showAdvancedFields, setShowAdvancedFields] = useState<boolean>(true);
 
   const [formData, setFormData] = useState<Partial<Asset>>({
     name: '',
@@ -222,7 +222,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-950/70 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -233,7 +233,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
               <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
                 {editingAsset ? 'Edit Hardware Asset' : 'Enroll New Asset'}
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-mono">
-                  {showAdvancedFields ? 'Technical Mode' : 'Guided Wizard'}
+                  {showAdvancedFields ? 'Full Inventory View' : '2-Step Quick Intake'}
                 </span>
               </h2>
               <p className="text-xs text-slate-400">
@@ -242,18 +242,40 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setShowAdvancedFields(!showAdvancedFields)}
-              className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center gap-1 transition-colors border border-slate-700"
-              title="Toggle between Simplified Wizard and All Technical Fields"
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">
-                {showAdvancedFields ? 'Simplified Wizard' : 'All Fields'}
-              </span>
-            </button>
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* View Mode Segmented Switch */}
+            <div className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-slate-800 text-xs">
+              <button
+                type="button"
+                onClick={() => setShowAdvancedFields(true)}
+                className={`px-2.5 py-1 rounded-lg font-medium transition-all flex items-center gap-1.5 ${
+                  showAdvancedFields
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="View and edit all hardware, network, location, and financial fields"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">All Details</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAdvancedFields(false);
+                  setActiveStep(1);
+                }}
+                className={`px-2.5 py-1 rounded-lg font-medium transition-all flex items-center gap-1.5 ${
+                  !showAdvancedFields
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Switch to 2-step simplified intake"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">2-Step Quick</span>
+              </button>
+            </div>
+
             <button
               onClick={onClose}
               className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-100 transition-colors"
@@ -482,6 +504,34 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                         className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
                       />
                     </div>
+
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">
+                        Operational Status
+                      </label>
+                      <select
+                        value={formData.status || 'ACTIVE'}
+                        onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
+                      >
+                        <option value="ACTIVE">ACTIVE (In Service)</option>
+                        <option value="REPAIR">REPAIR (Maintenance)</option>
+                        <option value="DAMAGED">DAMAGED</option>
+                        <option value="DEPRECATED">DEPRECATED</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">
+                        Warranty Expiry Date
+                      </label>
+                      <input
+                        type="date"
+                        value={formData.warrantyExpiry ? formData.warrantyExpiry.split('T')[0] : ''}
+                        onChange={(e) => setFormData({ ...formData, warrantyExpiry: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
                   </div>
 
                   {/* Preexisting Asset Depreciation Valuation Card */}
@@ -547,175 +597,295 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
               )}
             </div>
           ) : (
-            /* TECHNICAL MODE: All Fields */
+            /* FULL INVENTORY VIEW: All Details Structured Cleanly */
             <div className="space-y-4">
               <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-start gap-2.5 text-xs text-blue-200">
                 <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
                 <span>
-                  <strong>Tip for identical machines:</strong> Keep the <em>Model Identifier</em> identical across all units, but ensure each unit has a distinct <em>Asset Tag</em> (internal barcode) and <em>Serial Number</em> (factory S/N).
+                  <strong>Complete Inventory Ledger:</strong> Every field is captured for this asset. For identical laptops, keep <em>Model</em> the same, and differentiate using the unique <em>Asset Tag</em> and <em>Serial Number</em>.
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">
-                    Asset Name <span className="text-rose-400">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.name || ''}
-                    placeholder="e.g. Dell Latitude 5540 or LAP-FIN-01"
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
-                  />
-                  <p className="text-[10px] text-slate-400 mt-0.5">Common display name or department device name.</p>
-                </div>
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Model Identifier</label>
-                  <input
-                    type="text"
-                    value={formData.model || ''}
-                    placeholder="e.g. Latitude 5540"
-                    onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
-                  />
-                  <p className="text-[10px] text-slate-400 mt-0.5">Hardware model specification (shared across identical units).</p>
+              {/* 1. Hardware Identity & Tagging */}
+              <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80 space-y-3">
+                <div className="flex items-center gap-2 text-slate-300 font-semibold text-xs border-b border-slate-800/60 pb-2">
+                  <Tag className="w-4 h-4 text-emerald-400" />
+                  <span>1. Hardware Identity &amp; Tagging</span>
                 </div>
 
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">
-                    Asset Tag / Code <span className="text-rose-400">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.assetCode || ''}
-                    placeholder="e.g. AST-1042"
-                    onChange={(e) => setFormData({ ...formData, assetCode: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl font-mono text-emerald-400 focus:outline-none focus:border-emerald-500"
-                  />
-                  <p className="text-[10px] text-slate-400 mt-0.5">Unique organization barcode tag code for this unit.</p>
-                </div>
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Serial Number</label>
-                  <input
-                    type="text"
-                    value={formData.serialNumber || ''}
-                    placeholder="e.g. 7X9K2M3 or C02G8..."
-                    onChange={(e) => setFormData({ ...formData, serialNumber: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
-                  />
-                  <p className="text-[10px] text-slate-400 mt-0.5">Unique manufacturer hardware S/N from bottom chassis.</p>
-                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">
+                      Asset Name <span className="text-rose-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.name || ''}
+                      placeholder="e.g. Dell Latitude 5540 - FIN01"
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-0.5">Common display name or department device name.</p>
+                  </div>
 
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">MAC Address</label>
-                  <input
-                    type="text"
-                    value={formData.macAddress || ''}
-                    onChange={(e) => setFormData({ ...formData, macAddress: e.target.value })}
-                    placeholder="00:1A:2B:3C:4D:5E"
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Branch Facility</label>
-                  <select
-                    value={formData.branchId}
-                    onChange={(e) => {
-                      const b = branches.find(br => br.id === e.target.value);
-                      setFormData({ ...formData, branchId: e.target.value, branchName: b?.name || '' });
-                    }}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
-                  >
-                    {branches.map(b => (
-                      <option key={b.id} value={b.id}>{b.name} ({b.code})</option>
-                    ))}
-                  </select>
-                </div>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Model Identifier</label>
+                    <input
+                      type="text"
+                      value={formData.model || ''}
+                      placeholder="e.g. Latitude 5540"
+                      onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-0.5">Hardware model specification (shared across identical units).</p>
+                  </div>
 
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Status</label>
-                  <select
-                    value={formData.status}
-                    onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
-                  >
-                    <option value="ACTIVE">ACTIVE</option>
-                    <option value="REPAIR">REPAIR</option>
-                    <option value="DAMAGED">DAMAGED</option>
-                    <option value="DEPRECATED">DEPRECATED</option>
-                    <option value="SOLD">SOLD</option>
-                    <option value="DISPOSED">DISPOSED</option>
-                  </select>
-                </div>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Category</label>
+                    <select
+                      value={formData.categoryId}
+                      onChange={(e) => {
+                        const c = categories.find(cat => cat.id === e.target.value);
+                        setFormData({ ...formData, categoryId: e.target.value, categoryName: c?.name || 'Hardware' });
+                      }}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
+                    >
+                      {categories.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
 
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Physical Condition</label>
-                  <select
-                    value={formData.condition || 'GOOD'}
-                    onChange={(e) => setFormData({ ...formData, condition: e.target.value as any })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
-                  >
-                    <option value="NEW">New (Brand New in Box)</option>
-                    <option value="GOOD">Good (Pre-owned / Legacy)</option>
-                    <option value="FAIR">Fair (Visible wear, operational)</option>
-                    <option value="POOR">Poor (Degraded / Needs Attention)</option>
-                  </select>
-                </div>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">
+                      Asset Tag / Barcode <span className="text-rose-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.assetCode || ''}
+                      placeholder="e.g. AST-1042"
+                      onChange={(e) => setFormData({ ...formData, assetCode: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl font-mono text-emerald-400 focus:outline-none focus:border-emerald-500"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-0.5">Unique organization barcode tag code for this unit.</p>
+                  </div>
 
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Historical Acquisition Date</label>
-                  <input
-                    type="date"
-                    value={formData.purchaseDate ? new Date(formData.purchaseDate).toISOString().split('T')[0] : ''}
-                    onChange={(e) => {
-                      const d = e.target.value ? new Date(e.target.value).toISOString() : '';
-                      const autoVal = AssetService.calculateCurrentValue(formData.purchaseCost || 0, d);
-                      setFormData({ ...formData, purchaseDate: d, currentValue: autoVal });
-                    }}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Original Cost ($)</label>
-                  <input
-                    type="number"
-                    value={formData.purchaseCost || 0}
-                    onChange={(e) => {
-                      const cost = Number(e.target.value);
-                      const autoVal = AssetService.calculateCurrentValue(cost, formData.purchaseDate);
-                      setFormData({ ...formData, purchaseCost: cost, currentValue: autoVal });
-                    }}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Current Depreciated Value ($)</label>
-                  <input
-                    type="number"
-                    value={formData.currentValue ?? formData.purchaseCost ?? 0}
-                    onChange={(e) => setFormData({ ...formData, currentValue: Number(e.target.value) })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl font-mono text-emerald-400 focus:outline-none focus:border-emerald-500"
-                  />
+                  <div className="sm:col-span-2">
+                    <label className="block text-slate-300 font-semibold mb-1">Manufacturer Serial Number (S/N)</label>
+                    <input
+                      type="text"
+                      value={formData.serialNumber || ''}
+                      placeholder="e.g. 7X9K2M3 or C02G8..."
+                      onChange={(e) => setFormData({ ...formData, serialNumber: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-0.5">Factory hardware serial number or Dell Service Tag from chassis.</p>
+                  </div>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">
-                  Specifications & Hardware Telemetry
-                </label>
-                <textarea
-                  rows={3}
-                  value={formData.notes || ''}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl font-mono text-[11px] text-slate-100 focus:outline-none focus:border-emerald-500"
-                />
+              {/* 2. Facility & Operational Status */}
+              <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80 space-y-3">
+                <div className="flex items-center gap-2 text-slate-300 font-semibold text-xs border-b border-slate-800/60 pb-2">
+                  <MapPin className="w-4 h-4 text-emerald-400" />
+                  <span>2. Facility &amp; Operational Status</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Branch Facility</label>
+                    <select
+                      value={formData.branchId}
+                      onChange={(e) => {
+                        const b = branches.find(br => br.id === e.target.value);
+                        setFormData({ ...formData, branchId: e.target.value, branchName: b?.name || '' });
+                      }}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
+                    >
+                      {branches.map(b => (
+                        <option key={b.id} value={b.id}>{b.name} ({b.code})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Status</label>
+                    <select
+                      value={formData.status}
+                      onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="ACTIVE">ACTIVE (In Service / Available)</option>
+                      <option value="REPAIR">REPAIR (Under Maintenance)</option>
+                      <option value="DAMAGED">DAMAGED (Out of Service)</option>
+                      <option value="DEPRECATED">DEPRECATED (End of Life)</option>
+                      <option value="SOLD">SOLD</option>
+                      <option value="DISPOSED">DISPOSED</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Physical Condition</label>
+                    <select
+                      value={formData.condition || 'GOOD'}
+                      onChange={(e) => setFormData({ ...formData, condition: e.target.value as any })}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="NEW">New (Brand New in Box)</option>
+                      <option value="GOOD">Good (Pre-owned / Legacy)</option>
+                      <option value="FAIR">Fair (Visible wear, operational)</option>
+                      <option value="POOR">Poor (Degraded / Needs Attention)</option>
+                    </select>
+                  </div>
+                </div>
               </div>
 
+              {/* 3. Acquisition, Valuation & Warranty */}
+              <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80 space-y-3">
+                <div className="flex items-center gap-2 text-slate-300 font-semibold text-xs border-b border-slate-800/60 pb-2">
+                  <DollarSign className="w-4 h-4 text-emerald-400" />
+                  <span>3. Financials, Depreciation &amp; Warranty</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Acquisition Date</label>
+                    <input
+                      type="date"
+                      value={formData.purchaseDate ? formData.purchaseDate.split('T')[0] : ''}
+                      onChange={(e) => {
+                        const newDate = e.target.value;
+                        const autoVal = AssetService.calculateCurrentValue(Number(formData.purchaseCost) || 0, newDate);
+                        setFormData({ ...formData, purchaseDate: newDate, currentValue: autoVal });
+                      }}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Original Purchase Cost ($)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formData.purchaseCost || 0}
+                      onChange={(e) => {
+                        const cost = Number(e.target.value);
+                        const autoVal = AssetService.calculateCurrentValue(cost, formData.purchaseDate || new Date().toISOString().split('T')[0]!);
+                        setFormData({ ...formData, purchaseCost: cost, currentValue: autoVal });
+                      }}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-slate-300 font-semibold">Current Book Value ($)</label>
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, currentValue: computedDepreciatedValue })}
+                        className="text-[10px] text-emerald-400 hover:underline font-mono"
+                        title="Reset to 36-month straight-line depreciation formula"
+                      >
+                        Reset to ${computedDepreciatedValue}
+                      </button>
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formData.currentValue ?? computedDepreciatedValue}
+                      onChange={(e) => setFormData({ ...formData, currentValue: Number(e.target.value) })}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl font-mono text-emerald-400 font-bold focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-slate-300 font-semibold">Warranty Expiry Date</label>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const d = new Date();
+                            d.setFullYear(d.getFullYear() + 1);
+                            setFormData({ ...formData, warrantyExpiry: d.toISOString().split('T')[0]! });
+                          }}
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
+                        >
+                          +1 Yr
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const d = new Date();
+                            d.setFullYear(d.getFullYear() + 3);
+                            setFormData({ ...formData, warrantyExpiry: d.toISOString().split('T')[0]! });
+                          }}
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
+                        >
+                          +3 Yrs
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="date"
+                      value={formData.warrantyExpiry ? formData.warrantyExpiry.split('T')[0] : ''}
+                      onChange={(e) => setFormData({ ...formData, warrantyExpiry: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. Technical Specifications & Network */}
+              <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80 space-y-3">
+                <div className="flex items-center gap-2 text-slate-300 font-semibold text-xs border-b border-slate-800/60 pb-2">
+                  <Cpu className="w-4 h-4 text-emerald-400" />
+                  <span>4. Technical Specifications, Specs &amp; Network</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Network MAC Address</label>
+                    <input
+                      type="text"
+                      value={formData.macAddress || ''}
+                      onChange={(e) => setFormData({ ...formData, macAddress: e.target.value })}
+                      placeholder="00:1A:2B:3C:4D:5E"
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-0.5">Physical Wi-Fi or Ethernet MAC address.</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">IMEI / Cellular Identifier</label>
+                    <input
+                      type="text"
+                      value={formData.imeiNumber || ''}
+                      onChange={(e) => setFormData({ ...formData, imeiNumber: e.target.value })}
+                      placeholder="e.g. 354892091234567"
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-0.5">For cellular LTE laptops, tablets, or phones.</p>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-slate-300 font-semibold mb-1">
+                      Specifications &amp; Hardware Telemetry (CPU, RAM, SSD, Ports)
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={formData.notes || ''}
+                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                      placeholder="Populated automatically when clicking 'Auto-fill from Catalog' above, or enter specs manually (e.g. Intel Core i7-1370P | 32GB RAM | 1TB SSD | 2x Thunderbolt 4)."
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl font-mono text-[11px] text-slate-100 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Submit / Cancel Actions */}
               <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
                 <button
                   type="button"
