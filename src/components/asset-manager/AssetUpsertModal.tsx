@@ -61,8 +61,8 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
     status: 'ACTIVE',
     condition: 'NEW',
     purchaseDate: new Date().toISOString().split('T')[0],
-    purchaseCost: 1200,
-    currentValue: 1200,
+    purchaseCost: 0,
+    currentValue: 0,
     warrantyExpiry: new Date(Date.now() + 365 * 24 * 3600 * 1000 * 3).toISOString().split('T')[0],
     notes: '',
     imageUrl: ''
@@ -105,8 +105,8 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
         status: 'ACTIVE',
         condition: 'NEW',
         purchaseDate: new Date().toISOString().split('T')[0],
-        purchaseCost: 1200,
-        currentValue: 1200,
+        purchaseCost: 0,
+        currentValue: 0,
         warrantyExpiry: new Date(Date.now() + 365 * 24 * 3600 * 1000 * 3).toISOString().split('T')[0],
         notes: '',
         imageUrl: ''
@@ -152,6 +152,35 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
       setAiSuccessMessage(`Catalog specs populated for ${specs.model}!`);
     } catch (err: any) {
       setFormError('Failed to populate specs: ' + err.message);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleEstimateCost = async () => {
+    const query = formData.model || formData.name;
+    if (!query || query.trim().length === 0) {
+      setFormError('Please enter a device model or name first to look up standard MSRP.');
+      return;
+    }
+
+    setAiLoading(true);
+    setFormError('');
+    try {
+      const specs = await fetchHardwareSpecs(query);
+      if (specs.estimatedCostUSD > 0) {
+        const autoVal = AssetService.calculateCurrentValue(specs.estimatedCostUSD, formData.purchaseDate || new Date().toISOString().split('T')[0]!);
+        setFormData(prev => ({
+          ...prev,
+          purchaseCost: specs.estimatedCostUSD,
+          currentValue: autoVal
+        }));
+        setAiSuccessMessage(`Estimated retail MSRP ($${specs.estimatedCostUSD.toLocaleString()}) applied for ${specs.model}!`);
+      } else {
+        setFormError('No standard MSRP found for this model. You can enter an estimated current value or $0.');
+      }
+    } catch {
+      setFormError('Could not estimate pricing for this model.');
     } finally {
       setAiLoading(false);
     }
@@ -489,9 +518,37 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                     </div>
 
                     <div>
-                      <label className="block text-slate-300 font-semibold mb-1">
-                        Original Purchase Cost ($)
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-slate-300 font-semibold">
+                          Original Purchase Cost ($)
+                        </label>
+                        <div className="flex items-center gap-1.5 text-[10px]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormData(prev => ({
+                                ...prev,
+                                purchaseCost: 0,
+                                notes: prev.notes ? `${prev.notes}\n[Acquisition cost unknown - legacy/inherited intake]` : '[Acquisition cost unknown - legacy/inherited intake]'
+                              }));
+                            }}
+                            className="text-amber-400 hover:text-amber-300 hover:underline cursor-pointer"
+                            title="Set initial cost to $0 for legacy/inherited assets without invoices"
+                          >
+                            Cost Unknown ($0)?
+                          </button>
+                          <span className="text-slate-600">•</span>
+                          <button
+                            type="button"
+                            onClick={handleEstimateCost}
+                            disabled={aiLoading}
+                            className="text-emerald-400 hover:text-emerald-300 hover:underline cursor-pointer"
+                            title="Look up standard retail MSRP from the model name"
+                          >
+                            Estimate MSRP
+                          </button>
+                        </div>
+                      </div>
                       <input
                         type="number"
                         min="0"
@@ -503,6 +560,9 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                         }}
                         className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
                       />
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Leave at $0 if original invoice is unknown; you can enter an estimated current value below.
+                      </p>
                     </div>
 
                     <div>
@@ -765,7 +825,35 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Original Purchase Cost ($)</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-slate-300 font-semibold">Original Purchase Cost ($)</label>
+                      <div className="flex items-center gap-1.5 text-[10px]">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormData(prev => ({
+                              ...prev,
+                              purchaseCost: 0,
+                              notes: prev.notes ? `${prev.notes}\n[Acquisition cost unknown - legacy/inherited intake]` : '[Acquisition cost unknown - legacy/inherited intake]'
+                            }));
+                          }}
+                          className="text-amber-400 hover:text-amber-300 hover:underline cursor-pointer"
+                          title="Set initial cost to $0 for legacy/inherited assets without invoices"
+                        >
+                          Cost Unknown ($0)?
+                        </button>
+                        <span className="text-slate-600">•</span>
+                        <button
+                          type="button"
+                          onClick={handleEstimateCost}
+                          disabled={aiLoading}
+                          className="text-emerald-400 hover:text-emerald-300 hover:underline cursor-pointer"
+                          title="Look up standard retail MSRP from the model name"
+                        >
+                          Estimate MSRP
+                        </button>
+                      </div>
+                    </div>
                     <input
                       type="number"
                       min="0"
@@ -777,6 +865,9 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                       }}
                       className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
                     />
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Enter $0 if initial invoice is missing; you can set an estimated present value below.
+                    </p>
                   </div>
 
                   <div>
