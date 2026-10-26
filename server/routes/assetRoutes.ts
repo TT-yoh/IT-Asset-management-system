@@ -13,11 +13,17 @@ assetRouter.use(authenticate);
 assetRouter.get('/', requirePermission('assets:read'), async (req: Request, res: Response) => {
   const { orgId, role, branchId } = req.auth!;
 
+  let effectiveOrgId = orgId;
+  const requestedOrg = (req.headers['x-org-id'] as string) || (req.query.orgId as string);
+  if (requestedOrg && (role === 'ADMIN' || role === 'DIRECTOR')) {
+    effectiveOrgId = requestedOrg;
+  }
+
   let sql = 'SELECT * FROM `assets` WHERE `org_id` = ?';
-  const params: any[] = [orgId];
+  const params: any[] = [effectiveOrgId];
 
   // Enforce branch boundary for BRANCH_MANAGER and USER
-  if (role === 'BRANCH_MANAGER' || role === 'USER') {
+  if ((role === 'BRANCH_MANAGER' || role === 'USER') && branchId) {
     sql += ' AND `branch_id` = ?';
     params.push(branchId);
   }
@@ -48,15 +54,22 @@ assetRouter.post('/', requirePermission('assets:create'), async (req: Request, r
   const data = req.body;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
-  if (!data.name || !data.assetCode || !data.serialNumber) {
-    res.status(400).json({ error: 'Asset name, assetCode, and serialNumber are required.' });
+  const assetCode = data.assetCode || data.asset_code || `AST-${Date.now()}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
+  const name = data.name || data.assetName || data.asset_name;
+  const serialNumber = data.serialNumber || data.serial_number || `SN-${assetCode}`;
+
+  if (!name || !assetCode) {
+    res.status(400).json({ error: 'Asset name and assetCode are required.' });
     return;
   }
 
   const assetId = data.id || `ast-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
   // Enforce branch scoping: BRANCH_MANAGER can only create within their branch
-  const effectiveBranchId = role === 'BRANCH_MANAGER' ? userBranchId : (data.branchId || userBranchId);
-  const condition = normalizeCondition(data.condition || data.assetCondition);
+  const effectiveBranchId = role === 'BRANCH_MANAGER' ? userBranchId : (data.branchId || data.branch_id || userBranchId);
+  const condition = normalizeCondition(data.condition || data.assetCondition || data.asset_condition);
+  const effectiveOrgId = ((role === 'ADMIN' || role === 'DIRECTOR') && (data.orgId || data.org_id))
+    ? (data.orgId || data.org_id)
+    : orgId;
 
   const insertSql = `
     INSERT INTO \`assets\` (
@@ -71,41 +84,41 @@ assetRouter.post('/', requirePermission('assets:create'), async (req: Request, r
     await withTransaction(async (tx) => {
       await tx(insertSql, [
         assetId,
-        orgId, // Derived strictly from session!
+        effectiveOrgId,
         effectiveBranchId,
-        data.branchName || 'Main Hub',
-        data.categoryId || 'cat-gen',
-        data.categoryName || 'Hardware',
-        data.assetCode,
-        data.name,
+        data.branchName || data.branch_name || 'Main Hub',
+        data.categoryId || data.category_id || 'cat-gen',
+        data.categoryName || data.category_name || 'Hardware',
+        assetCode,
+        name,
         data.model || '',
-        data.serialNumber,
-        data.macAddress || null,
-        data.phoneNumber || null,
-        data.registeredEmail || null,
-        data.imeiNumber || null,
+        serialNumber,
+        data.macAddress || data.mac_address || null,
+        data.phoneNumber || data.phone_number || null,
+        data.registeredEmail || data.registered_email || null,
+        data.imeiNumber || data.imei_number || null,
         data.status || 'ACTIVE',
         condition,
-        data.purchaseDate || new Date().toISOString().split('T')[0],
-        data.purchaseCost || 0,
-        data.warrantyExpiry || null,
-        data.currentValue || data.purchaseCost || 0,
-        data.imageUrl || '',
+        data.purchaseDate || data.purchase_date || new Date().toISOString().split('T')[0],
+        Number(data.purchaseCost ?? data.purchase_cost ?? 0),
+        data.warrantyExpiry || data.warranty_expiry || null,
+        Number(data.currentValue ?? data.current_value ?? data.purchaseCost ?? data.purchase_cost ?? 0),
+        data.imageUrl || data.image_url || '',
         data.notes || null
       ]);
 
       await recordAuditEvent(tx, {
-        orgId,
+        orgId: effectiveOrgId,
         actorId,
         userName: actorName,
         role,
         action: 'CREATE_ASSET',
         entityType: 'Asset',
         entityId: assetId,
-        entityName: data.name,
+        entityName: name,
         changes: {
-          assetCode: data.assetCode,
-          name: data.name,
+          assetCode,
+          name,
           model: data.model,
           branchId: effectiveBranchId,
           status: data.status || 'ACTIVE'
@@ -167,8 +180,8 @@ assetRouter.put('/:id', requirePermission('assets:update'), async (req: Request,
     WHERE \`id\` = ? AND \`org_id\` = ?;
   `;
 
-  const updatedCondition = data.condition || data.assetCondition
-    ? normalizeCondition(data.condition || data.assetCondition)
+  const updatedCondition = (data.condition || data.assetCondition || data.asset_condition)
+    ? normalizeCondition(data.condition || data.assetCondition || data.asset_condition)
     : prev.asset_condition;
 
   try {
@@ -178,7 +191,7 @@ assetRouter.put('/:id', requirePermission('assets:update'), async (req: Request,
         data.model ?? prev.model,
         data.status ?? prev.status,
         updatedCondition,
-        data.currentValue ?? prev.current_value,
+        data.currentValue ?? data.current_value ?? prev.current_value,
         data.notes ?? prev.notes,
         assetId,
         orgId

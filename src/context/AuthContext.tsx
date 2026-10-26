@@ -47,6 +47,7 @@ interface AuthContextType {
   setCurrentOrg: (org: Organization) => void;
   handleSyncUsers: (users: User[]) => void;
   handleSyncBranches: (branches: Branch[]) => void;
+  handleSyncOrganizations: (orgs: Organization[]) => void;
   handleLoginSuccess: (user: User, org: Organization) => void;
   handleLogout: () => void;
   handleSelectOrg: (org: Organization) => void;
@@ -218,6 +219,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
    */
   const handleSyncBranches = (branches: Branch[]) => {
     setSystemBranches(branches);
+  };
+
+  /**
+   * Narrow action to synchronize organizations from remote database/storage
+   */
+  const handleSyncOrganizations = (orgs: Organization[]) => {
+    if (orgs && orgs.length > 0) {
+      setSystemOrgs(prev => {
+        const map = new Map<string, Organization>();
+        prev.forEach(o => map.set(o.id, o));
+        orgs.forEach(o => map.set(o.id, o));
+        return Array.from(map.values());
+      });
+    }
   };
 
   /**
@@ -576,6 +591,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setCurrentOrg,
         handleSyncUsers,
         handleSyncBranches,
+        handleSyncOrganizations,
         handleLoginSuccess,
         handleLogout,
         handleSelectOrg,

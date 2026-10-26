@@ -57,6 +57,7 @@ function AppShell() {
     handleUpdateDepartment,
     handleDeleteDepartment,
     handleSwitchUser,
+    handleSelectOrg,
     handleLogout
   } = useAuth();
 
@@ -73,6 +74,7 @@ function AppShell() {
     filteredAuditLogs,
     searchQuery,
     setSearchQuery,
+    refreshAppData,
     handleAddAsset,
     handleUpdateAsset,
     handleDeleteAsset,
@@ -203,6 +205,9 @@ function AppShell() {
         onLogout={handleLogout}
         branches={currentOrgBranches}
         assets={filteredAssets}
+        systemOrgs={systemOrgs}
+        onSelectOrg={handleSelectOrg}
+        onRefreshData={refreshAppData}
       />
 
       {/* Main Container: Sidebar + Active Tab Viewport */}

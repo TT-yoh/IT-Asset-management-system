@@ -47,28 +47,35 @@ app.use('/api/audit-logs', auditRouter);
 app.get('/api/init', authenticate, async (req: Request, res: Response) => {
   const { orgId, role, branchId } = req.auth!;
 
+  let effectiveOrgId = orgId;
+  const requestedOrg = (req.headers['x-org-id'] as string) || (req.query.orgId as string);
+  if (requestedOrg && (role === 'ADMIN' || role === 'DIRECTOR')) {
+    effectiveOrgId = requestedOrg;
+  }
+
   try {
     let assetSql = 'SELECT * FROM `assets` WHERE `org_id` = ?';
-    const assetParams: any[] = [orgId];
-    if (role === 'BRANCH_MANAGER' || role === 'USER') {
+    const assetParams: any[] = [effectiveOrgId];
+    if ((role === 'BRANCH_MANAGER' || role === 'USER') && branchId) {
       assetSql += ' AND `branch_id` = ?';
       assetParams.push(branchId);
     }
     assetSql += ' ORDER BY `created_at` DESC;';
 
-    const [assets, checkouts, maintenances, budgets, branches, rawUsers, departments] = await Promise.all([
+    const [assets, checkouts, maintenances, budgets, branches, rawUsers, departments, rawOrgs] = await Promise.all([
       query(assetSql, assetParams),
-      query('SELECT c.* FROM `checkouts` c INNER JOIN `assets` a ON c.asset_id = a.id WHERE a.org_id = ? ORDER BY c.checked_out_at DESC;', [orgId]),
-      query('SELECT m.* FROM `maintenances` m INNER JOIN `assets` a ON m.asset_id = a.id WHERE a.org_id = ? ORDER BY m.created_at DESC;', [orgId]),
-      query('SELECT * FROM `budgets` WHERE `org_id` = ?;', [orgId]),
-      query('SELECT * FROM `branches` WHERE `org_id` = ?;', [orgId]),
-      query('SELECT `id`, `org_id`, `email`, `full_name`, `role`, `department_id`, `department_name`, `branch_id`, `branch_name`, `two_factor_enabled`, `avatar`, `status` FROM `users` WHERE `org_id` = ?;', [orgId]),
-      query('SELECT * FROM `departments` WHERE `org_id` = ? ORDER BY `name` ASC;', [orgId])
+      query('SELECT c.* FROM `checkouts` c INNER JOIN `assets` a ON c.asset_id = a.id WHERE a.org_id = ? ORDER BY c.checked_out_at DESC;', [effectiveOrgId]),
+      query('SELECT m.* FROM `maintenances` m INNER JOIN `assets` a ON m.asset_id = a.id WHERE a.org_id = ? ORDER BY m.created_at DESC;', [effectiveOrgId]),
+      query('SELECT * FROM `budgets` WHERE `org_id` = ?;', [effectiveOrgId]),
+      query('SELECT * FROM `branches` WHERE `org_id` = ?;', [effectiveOrgId]),
+      query('SELECT `id`, `org_id`, `email`, `full_name`, `role`, `department_id`, `department_name`, `branch_id`, `branch_name`, `two_factor_enabled`, `avatar`, `status` FROM `users` WHERE `org_id` = ?;', [effectiveOrgId]),
+      query('SELECT * FROM `departments` WHERE `org_id` = ? ORDER BY `name` ASC;', [effectiveOrgId]),
+      query('SELECT * FROM `organizations` ORDER BY `name` ASC;')
     ]);
 
     let auditLogs: any[] = [];
     if (role === 'ADMIN' || role === 'DIRECTOR' || role === 'FINANCE') {
-      auditLogs = await query('SELECT * FROM `audit_logs` WHERE `org_id` = ? ORDER BY `timestamp` DESC LIMIT 200;', [orgId]);
+      auditLogs = await query('SELECT * FROM `audit_logs` WHERE `org_id` = ? ORDER BY `timestamp` DESC LIMIT 200;', [effectiveOrgId]);
     }
 
     const sanitizedUsers = rawUsers.map((u: any) => ({
@@ -86,6 +93,15 @@ app.get('/api/init', authenticate, async (req: Request, res: Response) => {
       status: u.status || 'ACTIVE'
     }));
 
+    const sanitizedOrgs = (rawOrgs || []).map((o: any) => ({
+      id: o.id,
+      name: o.name,
+      type: o.type || 'Enterprise',
+      logo: o.logo || '🏢',
+      brandingColor: o.branding_color || '#10b981',
+      branchesCount: o.branches_count || 1
+    }));
+
     res.json({
       assets,
       checkouts,
@@ -93,6 +109,7 @@ app.get('/api/init', authenticate, async (req: Request, res: Response) => {
       budgets,
       branches,
       departments,
+      organizations: sanitizedOrgs,
       users: sanitizedUsers,
       auditLogs,
       currentUser: req.auth

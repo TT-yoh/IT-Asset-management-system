@@ -71,7 +71,7 @@ interface AssetContextType {
 const AssetContext = createContext<AssetContextType | undefined>(undefined);
 
 export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { currentOrg, currentUser, isBranchRestricted, handleSyncUsers, handleSyncBranches } = useAuth();
+  const { currentOrg, currentUser, isBranchRestricted, handleSyncUsers, handleSyncBranches, handleSyncOrganizations } = useAuth();
   const { addNotification, setNotifications, evaluateAutomatedAlerts } = useNotifications();
 
   const [assets, setAssets] = useState<Asset[]>(INITIAL_ASSETS);
@@ -88,7 +88,7 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const refreshAppData = async () => {
     try {
-      const data = await loadInitialData();
+      const data = await loadInitialData(currentOrg?.id);
       setAssets(data.assets);
       setCheckouts(data.checkouts);
       setMaintenances(data.maintenances);
@@ -97,6 +97,9 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setNotifications(data.notifications);
       handleSyncUsers(data.users);
       handleSyncBranches(data.branches);
+      if (data.organizations && handleSyncOrganizations) {
+        handleSyncOrganizations(data.organizations);
+      }
       setLastSyncedAt(data.lastSyncedAt);
     } catch (err) {
       console.warn('Initial data load notice:', err);
@@ -197,6 +200,43 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     };
   }, []);
 
+  // 1. Initial data load and re-sync whenever active organization changes
+  useEffect(() => {
+    refreshAppData();
+  }, [currentOrg?.id]);
+
+  // 2. Cross-tab instant synchronization via browser storage events
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEYS.ASSETS || e.key === STORAGE_KEYS.CHECKOUTS || e.key === STORAGE_KEYS.MAINTENANCES) {
+        refreshAppData();
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
+  // 3. Multi-client real-time background sync (every 6s) and on window focus
+  useEffect(() => {
+    const pollInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible' && navigator.onLine) {
+        refreshAppData();
+      }
+    }, 6000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        refreshAppData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(pollInterval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [currentOrg?.id]);
+
   // Run automated alerts evaluation on asset/checkout/maintenance changes
   useEffect(() => {
     if (currentOrg?.id) {
@@ -278,19 +318,10 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const updatedAssets = [newAst, ...assets];
     setAssets(updatedAssets);
 
-    // 1. Primary: TiDB SQL execution
-    try {
-      const row = mapAssetToTiDBRow(newAst);
-      const q = generateTiDBUpsertQuery('assets', row);
-      await executeTiDBQuery(q.sql, q.values);
-    } catch {
-      queueOfflineMutation('assets', 'INSERT', newAst, { baseVersion: newAst.version || 1 });
-    }
+    // 1. Direct Server & TiDB Database Persist
+    await persistAsset(newAst, updatedAssets, false);
 
-    // 2. Persist locally
-    persistAsset(newAst, updatedAssets);
-
-    // 3. Audit trail
+    // 2. Audit trail
     const newLog = await commitAuditEvent({
       orgId: currentOrg.id,
       user: currentUser ? currentUser : { fullName: 'System Admin', role: 'ADMIN' },
@@ -315,17 +346,8 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const updatedAssets = assets.map(a => a.id === updatedAst.id ? updatedAst : a);
     setAssets(updatedAssets);
 
-    // 1. Primary: TiDB SQL execution
-    try {
-      const row = mapAssetToTiDBRow(updatedAst);
-      const q = generateTiDBUpsertQuery('assets', row);
-      await executeTiDBQuery(q.sql, q.values);
-    } catch {
-      queueOfflineMutation('assets', 'UPDATE', updatedAst, { baseVersion: updatedAst.version || 1 });
-    }
-
-    // 2. Persist locally
-    persistAsset(updatedAst, updatedAssets);
+    // 1. Direct Server & TiDB Database Update
+    await persistAsset(updatedAst, updatedAssets, true);
 
     const newLog = await commitAuditEvent({
       orgId: currentOrg.id,
@@ -344,15 +366,8 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const remainingAssets = assets.filter(a => a.id !== astId);
     setAssets(remainingAssets);
 
-    // 1. Primary TiDB
-    try {
-      await executeTiDBQuery('DELETE FROM `assets` WHERE `id` = ?;', [astId]);
-    } catch {
-      queueOfflineMutation('assets', 'DELETE', { id: astId }, { baseVersion: target?.version || 1 });
-    }
-
-    // 2. Persist locally
-    deleteAssetFromDb(astId, remainingAssets);
+    // 1. Direct Server & TiDB Database Delete
+    await deleteAssetFromDb(astId, remainingAssets);
 
     if (target) {
       const newLog = await commitAuditEvent({
@@ -372,19 +387,7 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const updatedAssets = [...newAssets, ...assets];
     setAssets(updatedAssets);
 
-    // 1. Primary TiDB
-    try {
-      for (const ast of newAssets) {
-        const row = mapAssetToTiDBRow(ast);
-        const q = generateTiDBUpsertQuery('assets', row);
-        await executeTiDBQuery(q.sql, q.values);
-      }
-    } catch {
-      newAssets.forEach(a => queueOfflineMutation('assets', 'INSERT', a));
-    }
-
-    // 2. Persist locally
-    bulkPersistAssets(newAssets, updatedAssets);
+    await bulkPersistAssets(newAssets, updatedAssets);
 
     const newLog = await commitAuditEvent({
       orgId: currentOrg.id,
@@ -403,11 +406,17 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const updatedAssets = assets.map(a => idSet.has(a.id) ? { ...a, status: newStatus } : a);
     setAssets(updatedAssets);
 
-    try {
-      const placeholders = assetIds.map(() => '?').join(', ');
-      await executeTiDBQuery(`UPDATE \`assets\` SET \`status\` = ? WHERE \`id\` IN (${placeholders});`, [newStatus, ...assetIds]);
-    } catch {
-      assetIds.forEach(id => queueOfflineMutation('assets', 'UPDATE', { id, status: newStatus }));
+    for (const id of assetIds) {
+      try {
+        await fetch(`/api/assets/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ status: newStatus })
+        });
+      } catch {
+        queueOfflineMutation('assets', 'UPDATE', { id, status: newStatus });
+      }
     }
 
     bulkPersistAssets(updatedAssets.filter(a => idSet.has(a.id)), updatedAssets);
@@ -429,14 +438,17 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const updatedAssets = assets.map(a => idSet.has(a.id) ? { ...a, branchId: targetBranchId, branchName: targetBranchName } : a);
     setAssets(updatedAssets);
 
-    try {
-      const placeholders = assetIds.map(() => '?').join(', ');
-      await executeTiDBQuery(
-        `UPDATE \`assets\` SET \`branch_id\` = ?, \`branch_name\` = ? WHERE \`id\` IN (${placeholders});`,
-        [targetBranchId, targetBranchName, ...assetIds]
-      );
-    } catch {
-      assetIds.forEach(id => queueOfflineMutation('assets', 'UPDATE', { id, branchId: targetBranchId, branchName: targetBranchName }));
+    for (const id of assetIds) {
+      try {
+        await fetch(`/api/assets/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ branchId: targetBranchId, branchName: targetBranchName })
+        });
+      } catch {
+        queueOfflineMutation('assets', 'UPDATE', { id, branchId: targetBranchId, branchName: targetBranchName });
+      }
     }
 
     bulkPersistAssets(updatedAssets.filter(a => idSet.has(a.id)), updatedAssets);
@@ -458,14 +470,18 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const remainingAssets = assets.filter(a => !idSet.has(a.id));
     setAssets(remainingAssets);
 
-    try {
-      const placeholders = assetIds.map(() => '?').join(', ');
-      await executeTiDBQuery(`DELETE FROM \`assets\` WHERE \`id\` IN (${placeholders});`, assetIds);
-    } catch {
-      assetIds.forEach(id => queueOfflineMutation('assets', 'DELETE', { id }));
+    for (const id of assetIds) {
+      try {
+        await fetch(`/api/assets/${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include'
+        });
+      } catch {
+        queueOfflineMutation('assets', 'DELETE', { id });
+      }
+      deleteAssetFromDb(id, remainingAssets);
     }
-
-    assetIds.forEach(id => deleteAssetFromDb(id, remainingAssets));
 
     const newLog = await commitAuditEvent({
       orgId: currentOrg.id,

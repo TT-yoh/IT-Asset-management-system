@@ -38,6 +38,9 @@ interface NavbarProps {
   onLogout?: () => void;
   branches?: Branch[];
   assets?: Asset[];
+  systemOrgs?: Organization[];
+  onSelectOrg?: (org: Organization) => void;
+  onRefreshData?: () => Promise<void>;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -55,10 +58,15 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenScanner,
   onLogout,
   branches = [],
-  assets = []
+  assets = [],
+  systemOrgs = [],
+  onSelectOrg,
+  onRefreshData
 }) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
+  const [showOrgDropdown, setShowOrgDropdown] = useState(false);
+  const [isManualSyncing, setIsManualSyncing] = useState(false);
   const [showMobileSearch, setShowMobileSearch] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showRoleSimulator, setShowRoleSimulator] = useState(false);
@@ -106,48 +114,126 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {/* Dedicated Company Brand Badge */}
-          <div className="flex items-center space-x-2 sm:space-x-2.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-950/60 border border-slate-800 text-left">
-            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-sm sm:text-base shrink-0">
-              {currentOrg.logo || '🏢'}
-            </div>
-            <div>
-              <div className="flex items-center space-x-1.5">
-                <span className="text-xs font-bold text-white tracking-tight truncate max-w-[110px] sm:max-w-[190px]">
-                  {currentOrg.name}
-                </span>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Active Multi-Tenant Context" />
+          {/* Dedicated Company Brand Badge with Multi-Tenant Switcher */}
+          <div className="relative">
+            <button
+              onClick={() => {
+                if (systemOrgs && systemOrgs.length > 1) {
+                  setShowOrgDropdown(!showOrgDropdown);
+                  setShowUserMenu(false);
+                  setShowNotifMenu(false);
+                }
+              }}
+              className={`flex items-center space-x-2 sm:space-x-2.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-950/60 border border-slate-800 text-left transition ${
+                systemOrgs && systemOrgs.length > 1 ? 'hover:border-slate-700 hover:bg-slate-900 cursor-pointer' : ''
+              }`}
+              title={systemOrgs && systemOrgs.length > 1 ? 'Switch Organization Tenant' : 'Current Organization Context'}
+            >
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-sm sm:text-base shrink-0">
+                {currentOrg.logo || '🏢'}
               </div>
-              <span className="text-[9px] sm:text-[10px] text-emerald-400 font-semibold block leading-none mt-0.5 truncate max-w-[110px] sm:max-w-[190px]">
-                {currentOrg.type}
-              </span>
-            </div>
+              <div>
+                <div className="flex items-center space-x-1.5">
+                  <span className="text-xs font-bold text-white tracking-tight truncate max-w-[110px] sm:max-w-[170px]">
+                    {currentOrg.name}
+                  </span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Active Multi-Tenant Context" />
+                  {systemOrgs && systemOrgs.length > 1 && (
+                    <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${showOrgDropdown ? 'rotate-180' : ''}`} />
+                  )}
+                </div>
+                <span className="text-[9px] sm:text-[10px] text-emerald-400 font-semibold block leading-none mt-0.5 truncate max-w-[110px] sm:max-w-[170px]">
+                  {currentOrg.type}
+                </span>
+              </div>
+            </button>
+
+            {/* Organization Switcher Dropdown */}
+            {showOrgDropdown && systemOrgs && systemOrgs.length > 1 && (
+              <div className="absolute left-0 mt-2 w-72 bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-150">
+                <div className="p-3 bg-slate-900/90 border-b border-slate-700">
+                  <div className="text-xs font-bold text-white">Switch Organization Tenant</div>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    Data isolation: Each organization maintains separate assets, staff, and audit trails.
+                  </p>
+                </div>
+                <div className="p-1.5 max-h-60 overflow-y-auto space-y-1">
+                  {systemOrgs.map((org) => {
+                    const isSelected = org.id === currentOrg.id;
+                    return (
+                      <button
+                        key={org.id}
+                        onClick={() => {
+                          if (onSelectOrg) onSelectOrg(org);
+                          setShowOrgDropdown(false);
+                        }}
+                        className={`w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between transition cursor-pointer ${
+                          isSelected
+                            ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-semibold'
+                            : 'hover:bg-slate-700/60 text-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 truncate">
+                          <span className="text-base shrink-0">{org.logo || '🏢'}</span>
+                          <div className="truncate">
+                            <div className="text-white truncate font-medium">{org.name}</div>
+                            <div className="text-[10px] text-slate-400">{org.type}</div>
+                          </div>
+                        </div>
+                        {isSelected && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Simple, Human-Friendly Connection Status Pill */}
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-slate-950/60 border border-slate-800 text-xs">
-            {syncStatus.deadLetterCount > 0 && (
-              <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-bold">
-                ⚠️ {syncStatus.deadLetterCount} sync failed
-              </span>
-            )}
-            {syncStatus.isOnline ? (
-              syncStatus.queuedCount > 0 ? (
-                <div className="flex items-center gap-1.5 text-amber-400 font-medium">
-                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-                  <span>Syncing {syncStatus.queuedCount} updates...</span>
-                </div>
+          {/* Simple, Human-Friendly Connection Status Pill + Manual Sync Button */}
+          <div className="hidden sm:flex items-center gap-2">
+            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-slate-950/60 border border-slate-800 text-xs">
+              {syncStatus.deadLetterCount > 0 && (
+                <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-bold">
+                  ⚠️ {syncStatus.deadLetterCount} sync failed
+                </span>
+              )}
+              {syncStatus.isOnline ? (
+                syncStatus.queuedCount > 0 ? (
+                  <div className="flex items-center gap-1.5 text-amber-400 font-medium">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                    <span>Syncing {syncStatus.queuedCount} updates...</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 text-emerald-400 font-medium">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    <span>Connected</span>
+                  </div>
+                )
               ) : (
-                <div className="flex items-center gap-1.5 text-emerald-400 font-medium">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                  <span>Connected</span>
+                <div className="flex items-center gap-1.5 text-amber-400 font-medium">
+                  <span className="w-2 h-2 rounded-full bg-amber-400" />
+                  <span>Working Offline ({syncStatus.queuedCount} queued)</span>
                 </div>
-              )
-            ) : (
-              <div className="flex items-center gap-1.5 text-amber-400 font-medium">
-                <span className="w-2 h-2 rounded-full bg-amber-400" />
-                <span>Working Offline ({syncStatus.queuedCount} queued)</span>
-              </div>
+              )}
+            </div>
+
+            {onRefreshData && (
+              <button
+                onClick={async () => {
+                  setIsManualSyncing(true);
+                  try {
+                    await onRefreshData();
+                  } finally {
+                    setTimeout(() => setIsManualSyncing(false), 600);
+                  }
+                }}
+                disabled={isManualSyncing}
+                title="Fetch latest database updates now"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition text-xs cursor-pointer active:scale-95 disabled:opacity-60"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isManualSyncing ? 'animate-spin' : ''}`} />
+                <span className="hidden lg:inline text-[11px] font-medium">Sync DB</span>
+              </button>
             )}
           </div>
         </div>

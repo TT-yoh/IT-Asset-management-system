@@ -14,7 +14,8 @@ import {
   SystemNotification,
   User,
   Branch,
-  Department
+  Department,
+  Organization
 } from '../types';
 import {
   INITIAL_ASSETS,
@@ -25,7 +26,8 @@ import {
   INITIAL_NOTIFICATIONS,
   USERS,
   INITIAL_BRANCHES,
-  DEPARTMENTS
+  DEPARTMENTS,
+  ORGANIZATIONS
 } from '../mockData';
 import {
   isTiDBConfigured,
@@ -47,38 +49,62 @@ export const STORAGE_KEYS = {
   DEPARTMENTS: 'omni_it_departments_tidb',
   LAST_SYNC: 'omni_it_last_sync_tidb',
   CURRENT_USER: 'omni_it_current_user_session',
-  CURRENT_ORG: 'omni_it_current_org_session'
+  CURRENT_ORG: 'omni_it_current_org_session',
+  ORGANIZATIONS: 'omni_it_organizations_tidb'
 };
 
 // --- Mappers between Frontend Model (camelCase) and TiDB / MySQL (snake_case) ---
 
 export const mapAssetToTiDBRow = (asset: Asset) => ({
   id: asset.id,
+  orgId: asset.orgId,
   org_id: asset.orgId,
+  branchId: asset.branchId,
   branch_id: asset.branchId,
+  branchName: asset.branchName,
   branch_name: asset.branchName,
+  categoryId: asset.categoryId,
   category_id: asset.categoryId,
+  categoryName: asset.categoryName || asset.category || 'Hardware',
   category_name: asset.categoryName || asset.category || 'Hardware',
+  assetCode: asset.assetCode,
   asset_code: asset.assetCode,
   name: asset.name,
   model: asset.model || '',
+  serialNumber: asset.serialNumber,
   serial_number: asset.serialNumber,
+  macAddress: asset.macAddress || null,
   mac_address: asset.macAddress || null,
+  phoneNumber: asset.phoneNumber || null,
   phone_number: asset.phoneNumber || null,
+  registeredEmail: asset.registeredEmail || null,
   registered_email: asset.registeredEmail || null,
+  imeiNumber: asset.imeiNumber || null,
   imei_number: asset.imeiNumber || null,
   status: asset.status,
+  condition: asset.condition,
   asset_condition: asset.condition,
+  purchaseDate: asset.purchaseDate,
   purchase_date: asset.purchaseDate,
+  purchaseCost: asset.purchaseCost,
   purchase_cost: asset.purchaseCost,
+  warrantyExpiry: asset.warrantyExpiry || null,
   warranty_expiry: asset.warrantyExpiry || null,
+  currentValue: asset.currentValue,
   current_value: asset.currentValue,
+  assignedToUserId: asset.assignedToUserId || null,
   assigned_to_user_id: asset.assignedToUserId || null,
+  assignedToUserName: asset.assignedToUserName || null,
   assigned_to_user_name: asset.assignedToUserName || null,
+  assignedToUserAvatar: asset.assignedToUserAvatar || null,
   assigned_to_user_avatar: asset.assignedToUserAvatar || null,
+  assignedAt: asset.assignedAt || null,
   assigned_at: asset.assignedAt || null,
+  imageUrl: asset.imageUrl || '',
   image_url: asset.imageUrl || '',
-  notes: asset.notes || null
+  notes: asset.notes || null,
+  version: asset.version || 1,
+  baseVersion: asset.version || 1
 });
 
 export const mapTiDBRowToAsset = (row: any): Asset => ({
@@ -221,19 +247,22 @@ export interface SystemDataPayload {
   notifications: SystemNotification[];
   users: User[];
   branches: Branch[];
+  organizations?: Organization[];
   isTiDBLive: boolean;
   lastSyncedAt: string;
 }
 
 /**
- * Loads baseline dataset from TiDB cache and remote cluster.
- */
-/**
  * Loads baseline dataset from TiDB cache and remote server tier.
  */
-export const loadInitialData = async (): Promise<SystemDataPayload> => {
+export const loadInitialData = async (orgId?: string): Promise<SystemDataPayload> => {
   try {
-    const res = await fetch('/api/init', { credentials: 'include' });
+    const url = orgId ? `/api/init?orgId=${encodeURIComponent(orgId)}` : '/api/init';
+    const headers: Record<string, string> = {};
+    if (orgId) {
+      headers['x-org-id'] = orgId;
+    }
+    const res = await fetch(url, { credentials: 'include', headers });
     if (res.ok) {
       const data = await res.json();
       if (data && data.assets) {
@@ -245,6 +274,7 @@ export const loadInitialData = async (): Promise<SystemDataPayload> => {
         if (data.auditLogs) saveToStorage(STORAGE_KEYS.AUDIT_LOGS, data.auditLogs);
         if (data.users) saveToStorage(STORAGE_KEYS.USERS, data.users);
         if (data.branches) saveToStorage(STORAGE_KEYS.BRANCHES, data.branches);
+        if (data.organizations) saveToStorage(STORAGE_KEYS.ORGANIZATIONS, data.organizations);
 
         return {
           assets: mappedAssets,
@@ -255,6 +285,7 @@ export const loadInitialData = async (): Promise<SystemDataPayload> => {
           notifications: loadFromStorage<SystemNotification[]>(STORAGE_KEYS.NOTIFICATIONS, INITIAL_NOTIFICATIONS),
           users: data.users || [],
           branches: data.branches || [],
+          organizations: data.organizations || loadFromStorage<Organization[]>(STORAGE_KEYS.ORGANIZATIONS, ORGANIZATIONS),
           isTiDBLive: true,
           lastSyncedAt: updateLastTiDBSyncTime()
         };
@@ -272,6 +303,7 @@ export const loadInitialData = async (): Promise<SystemDataPayload> => {
   const cachedNotifications = loadFromStorage<SystemNotification[]>(STORAGE_KEYS.NOTIFICATIONS, INITIAL_NOTIFICATIONS);
   const cachedUsers = loadFromStorage<User[]>(STORAGE_KEYS.USERS, USERS);
   const cachedBranches = loadFromStorage<Branch[]>(STORAGE_KEYS.BRANCHES, INITIAL_BRANCHES);
+  const cachedOrgs = loadFromStorage<Organization[]>(STORAGE_KEYS.ORGANIZATIONS, ORGANIZATIONS);
 
   const isLive = isTiDBConfigured();
   const lastSync = getLastTiDBSyncTime();
@@ -285,6 +317,7 @@ export const loadInitialData = async (): Promise<SystemDataPayload> => {
     notifications: cachedNotifications,
     users: cachedUsers,
     branches: cachedBranches,
+    organizations: cachedOrgs,
     isTiDBLive: isLive,
     lastSyncedAt: lastSync
   };
@@ -377,16 +410,18 @@ export function resetToCleanSlate(adminUser: User): SystemDataPayload {
 /**
  * Persist an Asset to TiDB and cache.
  */
-export async function persistAsset(asset: Asset, allAssets?: Asset[]): Promise<boolean> {
+export async function persistAsset(asset: Asset, allAssets?: Asset[], isUpdate = false): Promise<boolean> {
   const current = allAssets || loadFromStorage<Asset[]>(STORAGE_KEYS.ASSETS, INITIAL_ASSETS);
-  const exists = current.some(a => a.id === asset.id);
+  const exists = isUpdate || current.some(a => a.id === asset.id);
   const updated = exists ? current.map(a => (a.id === asset.id ? asset : a)) : [asset, ...current];
   saveToStorage(STORAGE_KEYS.ASSETS, updated);
 
   try {
     const row = mapAssetToTiDBRow(asset);
-    const res = await fetch('/api/assets', {
-      method: 'POST',
+    const method = exists ? 'PUT' : 'POST';
+    const url = exists ? `/api/assets/${encodeURIComponent(asset.id)}` : '/api/assets';
+    const res = await fetch(url, {
+      method,
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify(row)
