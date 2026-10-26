@@ -45,7 +45,9 @@ export const STORAGE_KEYS = {
   USERS: 'omni_it_users_tidb',
   BRANCHES: 'omni_it_branches_tidb',
   DEPARTMENTS: 'omni_it_departments_tidb',
-  LAST_SYNC: 'omni_it_last_sync_tidb'
+  LAST_SYNC: 'omni_it_last_sync_tidb',
+  CURRENT_USER: 'omni_it_current_user_session',
+  CURRENT_ORG: 'omni_it_current_org_session'
 };
 
 // --- Mappers between Frontend Model (camelCase) and TiDB / MySQL (snake_case) ---
@@ -179,6 +181,34 @@ const saveToStorage = <T>(key: string, value: T): void => {
     localStorage.setItem(key, JSON.stringify(value));
   } catch (err) {
     console.warn(`Failed writing storage key "${key}":`, err);
+  }
+};
+
+export const getStoredSession = (): { user: User | null; org: Organization | null } => {
+  const user = loadFromStorage<User | null>(STORAGE_KEYS.CURRENT_USER, null);
+  const org = loadFromStorage<Organization | null>(STORAGE_KEYS.CURRENT_ORG, null);
+  return { user, org };
+};
+
+export const setStoredSession = (user: User | null, org: Organization | null): void => {
+  if (user) {
+    saveToStorage(STORAGE_KEYS.CURRENT_USER, user);
+  } else {
+    try { localStorage.removeItem(STORAGE_KEYS.CURRENT_USER); } catch {}
+  }
+  if (org) {
+    saveToStorage(STORAGE_KEYS.CURRENT_ORG, org);
+  } else {
+    try { localStorage.removeItem(STORAGE_KEYS.CURRENT_ORG); } catch {}
+  }
+};
+
+export const clearStoredSession = (): void => {
+  try {
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_ORG);
+  } catch (err) {
+    console.warn('Failed clearing stored session:', err);
   }
 };
 

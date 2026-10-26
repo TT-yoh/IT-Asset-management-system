@@ -1,7 +1,17 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { User, Organization, Branch, Department, UserRole } from '../types';
 import { ORGANIZATIONS, INITIAL_BRANCHES, USERS, DEPARTMENTS } from '../mockData';
-import { persistBranch, deleteBranchFromStorage, persistUser, deleteUserFromStorage, persistDepartment, deleteDepartmentFromStorage } from '../lib/tidb-storage';
+import { 
+  persistBranch, 
+  deleteBranchFromStorage, 
+  persistUser, 
+  deleteUserFromStorage, 
+  persistDepartment, 
+  deleteDepartmentFromStorage,
+  getStoredSession,
+  setStoredSession,
+  clearStoredSession
+} from '../lib/tidb-storage';
 import { clearOfflineStoreOnLogout } from '../lib/offline-sync';
 import { RegisterCompanyData } from '../components/RegisterCompanyModal';
 
@@ -25,6 +35,7 @@ export const validatePasswordPolicy = (pwd: string): { valid: boolean; message: 
 interface AuthContextType {
   currentUser: User | null;
   currentOrg: Organization;
+  isSessionLoading: boolean;
   systemOrgs: Organization[];
   systemUsers: User[];
   systemBranches: Branch[];
@@ -61,16 +72,78 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [systemUsers, setSystemUsers] = useState<User[]>(USERS);
   const [systemBranches, setSystemBranches] = useState<Branch[]>(INITIAL_BRANCHES);
   const [systemDepartments, setSystemDepartments] = useState<Department[]>(DEPARTMENTS);
-  const [currentOrg, setCurrentOrg] = useState<Organization>(
-    ORGANIZATIONS[0] || {
+
+  // Synchronously restore last known active session from resilient local storage
+  const initialSession = useMemo(() => getStoredSession(), []);
+
+  const [currentOrg, setCurrentOrg] = useState<Organization>(() => {
+    return initialSession.org || ORGANIZATIONS[0] || {
       id: 'org-omnitech',
       name: 'OmniTech Enterprise Systems',
       type: 'Enterprise',
       brandingColor: '#0ea5e9',
       branchesCount: 1
-    }
-  );
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+    };
+  });
+
+  const [currentUser, setCurrentUser] = useState<User | null>(() => initialSession.user);
+  const [isSessionLoading, setIsSessionLoading] = useState<boolean>(() => !initialSession.user);
+
+  // Background session verification against backend /api/auth/me cookie
+  useEffect(() => {
+    let isCancelled = false;
+
+    const verifyServerSession = async () => {
+      try {
+        const res = await fetch('/api/auth/me', { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.user && !isCancelled) {
+            const serverUser: User = {
+              id: data.user.id,
+              orgId: data.user.orgId || data.user.org_id,
+              email: data.user.email,
+              fullName: data.user.fullName || data.user.full_name,
+              role: data.user.role,
+              status: data.user.status || 'ACTIVE',
+              departmentId: data.user.departmentId || data.user.department_id,
+              departmentName: data.user.departmentName || data.user.department_name,
+              branchId: data.user.branchId || data.user.branch_id,
+              branchName: data.user.branchName || data.user.branch_name,
+              twoFactorEnabled: Boolean(data.user.twoFactorEnabled || data.user.two_factor_enabled),
+              avatar: data.user.avatar || `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80`
+            };
+
+            setCurrentUser(serverUser);
+            setCurrentOrg(prevOrg => {
+              const matchedOrg = systemOrgs.find(o => o.id === serverUser.orgId) || prevOrg;
+              setStoredSession(serverUser, matchedOrg);
+              return matchedOrg;
+            });
+          }
+        } else if (res.status === 401 || res.status === 403) {
+          // If server explicitly rejects session cookie and user had no offline session
+          if (!isCancelled) {
+            clearStoredSession();
+            setCurrentUser(null);
+          }
+        }
+      } catch (err) {
+        // Network unavailable or offline: preserve existing local storage session
+        console.warn('Session verification fallback to local cached session:', err);
+      } finally {
+        if (!isCancelled) {
+          setIsSessionLoading(false);
+        }
+      }
+    };
+
+    verifyServerSession();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [systemOrgs]);
 
   const isBranchRestricted = Boolean(
     currentUser && (currentUser.role === 'BRANCH_MANAGER' || currentUser.role === 'USER')
@@ -79,15 +152,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const currentOrgBranches = systemBranches.filter(b => b.orgId === currentOrg.id);
   const currentOrgDepartments = systemDepartments.filter(d => d.orgId === currentOrg.id);
 
-  const handleLoginSuccess = (user: User, org: Organization) => {
+  const handleLoginSuccess = useCallback((user: User, org: Organization) => {
     setCurrentOrg(org);
     setCurrentUser(user);
+    setStoredSession(user, org);
     if (typeof window !== 'undefined') {
-      window.history.pushState({ tab: 'dashboard' }, '', '#/dashboard');
+      const pendingRedirect = sessionStorage.getItem('omni_redirect_tab');
+      sessionStorage.removeItem('omni_redirect_tab');
+      const validTabs = ['dashboard', 'assets', 'checkout', 'repair', 'branches', 'users', 'reports', 'budget', 'audit'];
+      const targetTab = pendingRedirect && validTabs.includes(pendingRedirect) ? pendingRedirect : 'dashboard';
+      window.history.pushState({ tab: targetTab }, '', `#/${targetTab}`);
     }
-  };
+  }, []);
 
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     try {
       const result = await clearOfflineStoreOnLogout(false);
       if (!result.cleared && result.pendingCount > 0) {
@@ -103,12 +181,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       console.warn('Offline store cleanup notice during logout:', err);
     }
 
-    fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch {}
+
+    clearStoredSession();
     setCurrentUser(null);
     if (typeof window !== 'undefined') {
       window.history.replaceState({ tab: 'login' }, '', '#/login');
     }
-  };
+  }, []);
 
   /**
    * Switch user with organization scoping
@@ -116,12 +198,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const handleSwitchUser = (user: User | null) => {
     if (!user) {
       setCurrentUser(null);
+      clearStoredSession();
       return;
     }
-    const found = systemUsers.find(u => u.id === user.id);
-    if (found) {
-      setCurrentUser(found);
-    }
+    const found = systemUsers.find(u => u.id === user.id) || user;
+    setCurrentUser(found);
+    setStoredSession(found, currentOrg);
   };
 
   /**
@@ -482,6 +564,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       value={{
         currentUser,
         currentOrg,
+        isSessionLoading,
         systemOrgs,
         systemUsers,
         systemBranches,

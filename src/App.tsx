@@ -36,6 +36,7 @@ function AppShell() {
   const {
     currentUser,
     currentOrg,
+    isSessionLoading,
     systemOrgs,
     systemUsers,
     currentOrgBranches,
@@ -93,6 +94,14 @@ function AppShell() {
   const [initialAssetStatusFilter, setInitialAssetStatusFilter] = useState<string>('ALL');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   const [isGlobalScannerOpen, setIsGlobalScannerOpen] = useState<boolean>(false);
+  const mainViewportRef = React.useRef<HTMLElement>(null);
+
+  // Smooth scroll reset whenever tab changes so the new page never starts in an awkward scrolled position
+  useEffect(() => {
+    if (mainViewportRef.current) {
+      mainViewportRef.current.scrollTo({ top: 0, behavior: 'instant' });
+    }
+  }, [activeTab]);
 
   // Navigate between tabs with browser history tracking (popstate / back arrow support)
   const navigateToTab = (tab: NavTab, replace = false) => {
@@ -107,18 +116,22 @@ function AppShell() {
     }
   };
 
-  // Sync browser back/forward buttons with current view tab and login page
+  // Sync browser back/forward buttons with current view tab
   useEffect(() => {
     const handleHistoryChange = () => {
       const cleanHash = window.location.hash.replace(/^#\/?/, '').trim().toLowerCase();
 
-      // If user clicks Back arrow all the way back to login or empty root while authenticated
-      if (cleanHash === 'login' || cleanHash === 'activate' || !cleanHash) {
-        if (currentUser) {
-          handleLogout();
-        }
-      } else if (VALID_TABS.includes(cleanHash as NavTab)) {
+      if (VALID_TABS.includes(cleanHash as NavTab)) {
         setActiveTabState(cleanHash as NavTab);
+      } else if (!cleanHash) {
+        // If at root URL, stay on dashboard without forcing a destructive logout
+        if (currentUser) {
+          navigateToTab('dashboard', true);
+        }
+      } else if (cleanHash === 'login' || cleanHash === 'activate') {
+        if (currentUser) {
+          navigateToTab('dashboard', true);
+        }
       }
     };
 
@@ -129,10 +142,33 @@ function AppShell() {
       window.removeEventListener('popstate', handleHistoryChange);
       window.removeEventListener('hashchange', handleHistoryChange);
     };
-  }, [currentUser, handleLogout]);
+  }, [currentUser]);
 
-  // If not authenticated, render LoginPortal
+  // While verifying background session cookie without cached session, show smooth splash
+  if (isSessionLoading && !currentUser) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 selection:bg-emerald-500">
+        <div className="flex items-center gap-3 animate-pulse">
+          <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+            <span className="text-xl">🌐</span>
+          </div>
+          <div>
+            <h1 className="text-sm font-bold text-white tracking-tight">OmniAsset Enterprise</h1>
+            <p className="text-[11px] text-slate-500">Restoring encrypted session...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // If not authenticated, save intended tab and render LoginPortal
   if (!currentUser) {
+    const requested = getTabFromHash();
+    if (requested && requested !== 'dashboard' && typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem('omni_redirect_tab', requested);
+      } catch {}
+    }
     return (
       <LoginPortal
         organizations={systemOrgs}
@@ -189,7 +225,11 @@ function AppShell() {
           onCloseMobileDrawer={() => setIsMobileMenuOpen(false)}
         />
 
-        <main className="flex-1 overflow-y-auto bg-slate-950 p-2 sm:p-4 md:p-6 pb-24 md:pb-8">
+        <main
+          ref={mainViewportRef}
+          className="flex-1 overflow-y-auto bg-slate-950 p-2 sm:p-4 md:p-6 pb-24 md:pb-8"
+        >
+          <div key={activeTab} className="animate-fadeIn">
           {activeTab === 'dashboard' && (
             <Dashboard3D
               currentOrg={currentOrg}
@@ -326,6 +366,7 @@ function AppShell() {
               onClearDummyUsers={handleClearDummyUsers}
             />
           )}
+          </div>
         </main>
       </div>
 
