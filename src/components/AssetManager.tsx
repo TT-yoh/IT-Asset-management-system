@@ -269,7 +269,7 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
       if (!text) return;
 
       const defaultBranch = branches[0]?.name || 'Main HQ';
-      const result = AssetService.processBulkCSV(text, currentOrg.id, defaultBranch);
+      const result = AssetService.processBulkCSV(text, currentOrg.id, defaultBranch, assets);
 
       if (result.errors.length > 0 && result.createdAssets.length === 0) {
         setImportBanner({ message: `CSV Import Failed: ${result.errors[0]?.message}`, isError: true });
@@ -280,9 +280,10 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
           } else if (onAddAsset) {
             result.createdAssets.forEach((a) => onAddAsset(a));
           }
-          const msg = result.errors.length > 0
-            ? `Imported ${result.successCount} assets with ${result.errorCount} warning(s).`
-            : `Successfully onboarded ${result.successCount} historical/legacy assets into TiDB!`;
+          const skippedCount = result.errors.length;
+          const msg = skippedCount > 0
+            ? `Successfully imported ${result.successCount} assets. (Skipped ${skippedCount} redundant/invalid rows: ${result.errors[0]?.message})`
+            : `Successfully onboarded ${result.successCount} unique assets into database!`;
           setImportBanner({ message: msg, isError: false });
         }
       }

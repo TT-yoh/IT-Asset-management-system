@@ -34,6 +34,99 @@ assetRouter.get('/', requirePermission('assets:read'), async (req: Request, res:
   res.json({ assets: rows });
 });
 
+/**
+ * GET /api/assets/check-redundancy
+ * Pre-flight redundancy check for Asset Tag, Serial, MAC, and IMEI
+ */
+assetRouter.get('/check-redundancy', async (req: Request, res: Response) => {
+  const { orgId, role } = req.auth!;
+  let effectiveOrgId = orgId;
+  const requestedOrg = (req.headers['x-org-id'] as string) || (req.query.orgId as string);
+  if (requestedOrg && (role === 'ADMIN' || role === 'DIRECTOR')) {
+    effectiveOrgId = requestedOrg;
+  }
+
+  const assetCode = String(req.query.assetCode || '').trim();
+  const serialNumber = String(req.query.serialNumber || '').trim();
+  const macAddress = String(req.query.macAddress || '').trim();
+  const imeiNumber = String(req.query.imeiNumber || '').trim();
+  const excludeId = String(req.query.excludeId || '').trim();
+
+  const isAutoSerial = serialNumber.toLowerCase().startsWith('sn-ast') || serialNumber.toLowerCase().startsWith('sn-bulk');
+
+  const duplicateQuery = `
+    SELECT id, name, asset_code, serial_number, mac_address, imei_number, branch_name
+    FROM \`assets\`
+    WHERE \`org_id\` = ? AND id != ? AND (
+      (? != '' AND LOWER(\`asset_code\`) = LOWER(?))
+      OR (? = 1 AND LOWER(\`serial_number\`) = LOWER(?))
+      OR (? != '' AND LOWER(\`mac_address\`) = LOWER(?))
+      OR (? != '' AND LOWER(\`imei_number\`) = LOWER(?))
+    ) LIMIT 1;
+  `;
+
+  const rows = await query(duplicateQuery, [
+    effectiveOrgId,
+    excludeId,
+    assetCode,
+    assetCode,
+    serialNumber && !isAutoSerial ? 1 : 0,
+    serialNumber,
+    macAddress,
+    macAddress,
+    imeiNumber,
+    imeiNumber
+  ]);
+
+  if (rows.length === 0) {
+    res.json({
+      isRedundant: false,
+      tagConflict: null,
+      serialConflict: null,
+      macConflict: null,
+      imeiConflict: null
+    });
+    return;
+  }
+
+  const match = rows[0];
+  const isTagMatch = assetCode && match.asset_code?.toLowerCase() === assetCode.toLowerCase();
+  const isSerialMatch = serialNumber && !isAutoSerial && match.serial_number?.toLowerCase() === serialNumber.toLowerCase();
+  const isMacMatch = macAddress && match.mac_address?.toLowerCase() === macAddress.toLowerCase();
+  const isImeiMatch = imeiNumber && match.imei_number?.toLowerCase() === imeiNumber.toLowerCase();
+
+  let conflictField = 'Asset Tag';
+  let conflictVal = assetCode;
+
+  if (isSerialMatch) {
+    conflictField = 'Serial Number';
+    conflictVal = serialNumber;
+  } else if (isMacMatch) {
+    conflictField = 'MAC Address';
+    conflictVal = macAddress;
+  } else if (isImeiMatch) {
+    conflictField = 'IMEI Number';
+    conflictVal = imeiNumber;
+  }
+
+  res.json({
+    isRedundant: true,
+    tagConflict: isTagMatch ? match : null,
+    serialConflict: isSerialMatch ? match : null,
+    macConflict: isMacMatch ? match : null,
+    imeiConflict: isImeiMatch ? match : null,
+    conflictField,
+    conflictValue: conflictVal,
+    message: `${conflictField} "${conflictVal}" is already registered to "${match.name}" (Tag: ${match.asset_code}, Branch: ${match.branch_name}).`,
+    conflictAsset: {
+      id: match.id,
+      name: match.name,
+      assetCode: match.asset_code,
+      branchName: match.branch_name
+    }
+  });
+});
+
 export function normalizeCondition(cond?: string): 'NEW' | 'GOOD' | 'FAIR' | 'POOR' {
   if (!cond) return 'GOOD';
   const c = String(cond).toUpperCase().trim();
@@ -42,6 +135,14 @@ export function normalizeCondition(cond?: string): 'NEW' | 'GOOD' | 'FAIR' | 'PO
   if (['FAIR', 'ACCEPTABLE', 'DEGRADED'].includes(c)) return 'FAIR';
   if (['POOR', 'DAMAGED', 'BROKEN', 'DEFECTIVE'].includes(c)) return 'POOR';
   return 'GOOD';
+}
+
+export function normalizeStatus(status?: string): string {
+  if (!status) return 'ACTIVE';
+  const s = String(status).toUpperCase().trim();
+  if (s === 'AVAILABLE') return 'ACTIVE';
+  if (['ACTIVE', 'DAMAGED', 'REPAIR', 'DEPRECATED', 'SOLD', 'DISPOSED'].includes(s)) return s;
+  return 'ACTIVE';
 }
 
 /**
@@ -71,6 +172,63 @@ assetRouter.post('/', requirePermission('assets:create'), async (req: Request, r
     ? (data.orgId || data.org_id)
     : orgId;
 
+  // Redundancy & Duplicate Data Check
+  const cleanCode = assetCode.trim();
+  const cleanSerial = serialNumber.trim();
+  const mac = (data.macAddress || data.mac_address || '').trim();
+  const imei = (data.imeiNumber || data.imei_number || '').trim();
+
+  const isAutoSerial = cleanSerial.toLowerCase().startsWith('sn-ast') || cleanSerial.toLowerCase().startsWith('sn-bulk');
+  const duplicateQuery = `
+    SELECT id, name, asset_code, serial_number, mac_address, imei_number
+    FROM \`assets\`
+    WHERE \`org_id\` = ? AND (
+      LOWER(\`asset_code\`) = LOWER(?)
+      OR (? = 1 AND LOWER(\`serial_number\`) = LOWER(?))
+      OR (? != '' AND LOWER(\`mac_address\`) = LOWER(?))
+      OR (? != '' AND LOWER(\`imei_number\`) = LOWER(?))
+    ) LIMIT 1;
+  `;
+
+  const duplicates = await query(duplicateQuery, [
+    effectiveOrgId,
+    cleanCode,
+    cleanSerial && !isAutoSerial ? 1 : 0,
+    cleanSerial,
+    mac,
+    mac,
+    imei,
+    imei
+  ]);
+
+  if (duplicates.length > 0) {
+    const match = duplicates[0];
+    let conflictField = 'Asset Tag / Barcode';
+    let conflictVal = cleanCode;
+
+    if (cleanSerial && !isAutoSerial && match.serial_number && match.serial_number.toLowerCase() === cleanSerial.toLowerCase()) {
+      conflictField = 'Serial Number';
+      conflictVal = cleanSerial;
+    } else if (mac && match.mac_address && match.mac_address.toLowerCase() === mac.toLowerCase()) {
+      conflictField = 'MAC Address';
+      conflictVal = mac;
+    } else if (imei && match.imei_number && match.imei_number.toLowerCase() === imei.toLowerCase()) {
+      conflictField = 'IMEI Number';
+      conflictVal = imei;
+    }
+
+    res.status(409).json({
+      error: `Redundant data detected: ${conflictField} "${conflictVal}" is already registered to "${match.name}" (Tag: ${match.asset_code}).`,
+      conflictField,
+      conflictAsset: {
+        id: match.id,
+        name: match.name,
+        assetCode: match.asset_code
+      }
+    });
+    return;
+  }
+
   const insertSql = `
     INSERT INTO \`assets\` (
       \`id\`, \`org_id\`, \`branch_id\`, \`branch_name\`, \`category_id\`, \`category_name\`,
@@ -97,7 +255,7 @@ assetRouter.post('/', requirePermission('assets:create'), async (req: Request, r
         data.phoneNumber || data.phone_number || null,
         data.registeredEmail || data.registered_email || null,
         data.imeiNumber || data.imei_number || null,
-        data.status || 'ACTIVE',
+        normalizeStatus(data.status),
         condition,
         data.purchaseDate || data.purchase_date || new Date().toISOString().split('T')[0],
         Number(data.purchaseCost ?? data.purchase_cost ?? 0),

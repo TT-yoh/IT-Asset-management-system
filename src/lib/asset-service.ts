@@ -112,49 +112,156 @@ export class AssetService {
   }
 
   /**
-   * Parse CSV bulk upload
+   * Parse CSV bulk upload with rigorous redundant data verification
    */
-  static processBulkCSV(csvText: string, orgId: string, branchName: string): BulkUploadResult {
+  static processBulkCSV(csvText: string, orgId: string, branchName: string, existingAssets: Asset[] = []): BulkUploadResult {
     const lines = csvText.trim().split(/\r?\n/);
     if (lines.length <= 1) {
       return { successCount: 0, errorCount: 1, errors: [{ row: 1, message: 'CSV file is empty or missing headers' }], createdAssets: [] };
     }
 
-    const headers = lines[0]!.toLowerCase().split(',').map(h => h.trim());
-    const reqHeaders = ['name', 'model', 'serial_number', 'category', 'purchase_cost'];
-    const missing = reqHeaders.filter(r => !headers.includes(r));
+    const headers = lines[0]!.toLowerCase().split(',').map(h => h.trim().replace(/['"]/g, ''));
+    
+    // Flexible header matcher supporting snake_case, camelCase, and plain words
+    const findHeaderIdx = (keys: string[]) => {
+      return headers.findIndex(h => keys.some(k => h === k || h.replace(/[-_\s]/g, '') === k.replace(/[-_\s]/g, '')));
+    };
 
-    if (missing.length > 0) {
-      return { successCount: 0, errorCount: 1, errors: [{ row: 1, message: `Missing required CSV headers: ${missing.join(', ')}` }], createdAssets: [] };
+    const nameIdx = findHeaderIdx(['name', 'asset_name', 'assetname', 'title', 'device_name']);
+    const modelIdx = findHeaderIdx(['model', 'device_model', 'type']);
+    const serialIdx = findHeaderIdx(['serial_number', 'serialnumber', 'serial', 'sn', 'chassis_serial']);
+    const catIdx = findHeaderIdx(['category', 'category_name', 'categoryname', 'cat']);
+    const costIdx = findHeaderIdx(['purchase_cost', 'purchasecost', 'cost', 'price', 'purchase_price', 'msrp']);
+    const tagIdx = findHeaderIdx(['asset_code', 'assetcode', 'asset_tag', 'assettag', 'tag', 'barcode', 'asset_id']);
+    const dateIdx = findHeaderIdx(['purchase_date', 'purchasedate', 'date', 'purchased', 'acquired']);
+    const conditionIdx = findHeaderIdx(['condition', 'asset_condition']);
+    const valueIdx = findHeaderIdx(['current_value', 'currentvalue', 'book_value', 'current_val', 'valuation']);
+    const phoneIdx = findHeaderIdx(['phone_number', 'phonenumber', 'phone']);
+    const emailIdx = findHeaderIdx(['registered_email', 'registeredemail', 'email']);
+    const macIdx = findHeaderIdx(['mac_address', 'macaddress', 'mac']);
+    const imeiIdx = findHeaderIdx(['imei_number', 'imeinumber', 'imei']);
+
+    if (nameIdx === -1 || serialIdx === -1) {
+      return {
+        successCount: 0,
+        errorCount: 1,
+        errors: [{ row: 1, message: 'Missing required CSV headers: "name" and "serial_number" (or "serial") must be present.' }],
+        createdAssets: []
+      };
     }
-
-    const nameIdx = headers.indexOf('name');
-    const modelIdx = headers.indexOf('model');
-    const serialIdx = headers.indexOf('serial_number');
-    const catIdx = headers.indexOf('category');
-    const costIdx = headers.indexOf('purchase_cost');
-    const dateIdx = headers.findIndex(h => h.includes('date') || h.includes('purchased') || h.includes('acquired'));
-    const conditionIdx = headers.findIndex(h => h.includes('condition'));
-    const valueIdx = headers.findIndex(h => h.includes('current_value') || h.includes('book_value') || h.includes('current_val'));
-    const phoneIdx = headers.findIndex(h => h.includes('phone') || h.includes('number'));
-    const emailIdx = headers.findIndex(h => h.includes('email'));
 
     const createdAssets: Asset[] = [];
     const errors: { row: number; message: string }[] = [];
+    const seenSerialsInBatch = new Set<string>();
+    const seenTagsInBatch = new Set<string>();
+    const seenMacsInBatch = new Set<string>();
+    const seenImeisInBatch = new Set<string>();
 
     for (let i = 1; i < lines.length; i++) {
       const rowStr = lines[i]!.trim();
       if (!rowStr) continue;
-      const cols = rowStr.split(',').map(c => c.trim());
+      const cols = rowStr.split(',').map(c => c.trim().replace(/^["']|["']$/g, ''));
 
       const name = cols[nameIdx] || '';
-      const model = cols[modelIdx] || 'Standard IT Model';
+      const model = modelIdx !== -1 ? cols[modelIdx] || 'Standard IT Model' : 'Standard IT Model';
       const serial = cols[serialIdx] || '';
-      const cat = cols[catIdx] || 'Laptops';
-      const costStr = cols[costIdx] || '1000';
+      const rawTag = tagIdx !== -1 ? cols[tagIdx] : '';
+      const cat = catIdx !== -1 ? cols[catIdx] || 'Laptops' : 'Laptops';
+      const costStr = costIdx !== -1 ? cols[costIdx] || '1000' : '1000';
       const cost = parseFloat(costStr) || 1000;
       const phoneVal = phoneIdx !== -1 ? cols[phoneIdx] : undefined;
       const emailVal = emailIdx !== -1 ? cols[emailIdx] : undefined;
+      const rawMac = macIdx !== -1 ? cols[macIdx] : undefined;
+      const rawImei = imeiIdx !== -1 ? cols[imeiIdx] : undefined;
+
+      // Mandatory field verification
+      if (!name || !serial) {
+        errors.push({ row: i + 1, message: 'Name and Serial Number are mandatory' });
+        continue;
+      }
+
+      const cleanSerial = serial.trim().toLowerCase();
+      const isAutoSerial = cleanSerial.startsWith('sn-ast') || cleanSerial.startsWith('sn-bulk');
+
+      // 1. Redundancy check within this CSV batch
+      if (!isAutoSerial) {
+        if (seenSerialsInBatch.has(cleanSerial)) {
+          errors.push({ row: i + 1, message: `Redundant serial: "${serial}" appears multiple times within this CSV import file.` });
+          continue;
+        }
+        seenSerialsInBatch.add(cleanSerial);
+      }
+
+      // 2. Redundancy check against preexisting database assets
+      if (!isAutoSerial && existingAssets.length > 0) {
+        const dbSerialConflict = existingAssets.find(
+          a => a.serialNumber?.trim().toLowerCase() === cleanSerial
+        );
+        if (dbSerialConflict) {
+          errors.push({
+            row: i + 1,
+            message: `Redundant asset: Serial "${serial}" already exists in inventory (assigned to "${dbSerialConflict.name}", Tag: ${dbSerialConflict.assetCode}).`
+          });
+          continue;
+        }
+      }
+
+      // 3. Asset Tag redundancy check if tag column provided
+      if (rawTag) {
+        const cleanTag = rawTag.trim().toLowerCase();
+        if (seenTagsInBatch.has(cleanTag)) {
+          errors.push({ row: i + 1, message: `Redundant tag: "${rawTag}" appears multiple times in this CSV file.` });
+          continue;
+        }
+        seenTagsInBatch.add(cleanTag);
+
+        const dbTagConflict = existingAssets.find(
+          a => a.assetCode?.trim().toLowerCase() === cleanTag
+        );
+        if (dbTagConflict) {
+          errors.push({
+            row: i + 1,
+            message: `Redundant tag: Asset Tag "${rawTag}" already belongs to "${dbTagConflict.name}".`
+          });
+          continue;
+        }
+      }
+
+      // 4. MAC Address redundancy check
+      if (rawMac && rawMac.trim()) {
+        const cleanMac = rawMac.trim().toLowerCase();
+        if (seenMacsInBatch.has(cleanMac)) {
+          errors.push({ row: i + 1, message: `Redundant MAC: "${rawMac}" appears multiple times in this CSV.` });
+          continue;
+        }
+        seenMacsInBatch.add(cleanMac);
+
+        const dbMacConflict = existingAssets.find(
+          a => a.macAddress?.trim().toLowerCase() === cleanMac
+        );
+        if (dbMacConflict) {
+          errors.push({ row: i + 1, message: `Redundant MAC: "${rawMac}" is already assigned to "${dbMacConflict.name}".` });
+          continue;
+        }
+      }
+
+      // 5. IMEI redundancy check
+      if (rawImei && rawImei.trim()) {
+        const cleanImei = rawImei.trim().toLowerCase();
+        if (seenImeisInBatch.has(cleanImei)) {
+          errors.push({ row: i + 1, message: `Redundant IMEI: "${rawImei}" appears multiple times in this CSV.` });
+          continue;
+        }
+        seenImeisInBatch.add(cleanImei);
+
+        const dbImeiConflict = existingAssets.find(
+          a => a.imeiNumber?.trim().toLowerCase() === cleanImei
+        );
+        if (dbImeiConflict) {
+          errors.push({ row: i + 1, message: `Redundant IMEI: "${rawImei}" is already assigned to "${dbImeiConflict.name}".` });
+          continue;
+        }
+      }
 
       // Historical purchase date handling for preexisting assets
       let rawDate = dateIdx !== -1 ? cols[dateIdx] : undefined;
@@ -222,10 +329,12 @@ export class AssetService {
         branchName,
         categoryId,
         categoryName,
-        assetCode: `BULK-${tagPrefix}-${Math.floor(1000 + Math.random() * 9000)}`,
+        assetCode: rawTag ? rawTag.trim() : `BULK-${tagPrefix}-${Math.floor(1000 + Math.random() * 9000)}`,
         name,
         model,
         serialNumber: serial,
+        macAddress: rawMac?.trim() || undefined,
+        imeiNumber: rawImei?.trim() || undefined,
         phoneNumber: phoneVal || undefined,
         registeredEmail: emailVal || undefined,
         status: 'ACTIVE',

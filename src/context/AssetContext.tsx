@@ -315,11 +315,55 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // Asset CRUD: Primary TiDB Execution with Fallback Queue
   const handleAddAsset = async (newAst: Asset) => {
+    // Redundancy check in local state first:
+    const tagConflict = assets.find(
+      a => a.id !== newAst.id && a.assetCode.trim().toLowerCase() === newAst.assetCode.trim().toLowerCase()
+    );
+    if (tagConflict) {
+      addNotification({
+        orgId: currentOrg.id,
+        type: 'WARNING',
+        title: 'Duplicate Asset Tag Detected',
+        message: `Asset tag ${newAst.assetCode} is already registered to "${tagConflict.name}". Please assign a unique tag.`,
+        read: false
+      });
+      throw new Error(`Asset tag "${newAst.assetCode}" is already in use by "${tagConflict.name}".`);
+    }
+
+    if (newAst.serialNumber && newAst.serialNumber.trim()) {
+      const serialConflict = assets.find(
+        a => a.id !== newAst.id && a.serialNumber && a.serialNumber.trim().toLowerCase() === newAst.serialNumber.trim().toLowerCase()
+      );
+      if (serialConflict) {
+        addNotification({
+          orgId: currentOrg.id,
+          type: 'WARNING',
+          title: 'Duplicate Serial Number Detected',
+          message: `Chassis serial ${newAst.serialNumber} is already registered to "${serialConflict.name}" (${serialConflict.assetCode}).`,
+          read: false
+        });
+        throw new Error(`Serial number "${newAst.serialNumber}" is already registered to "${serialConflict.name}".`);
+      }
+    }
+
     const updatedAssets = [newAst, ...assets];
     setAssets(updatedAssets);
 
-    // 1. Direct Server & TiDB Database Persist
-    await persistAsset(newAst, updatedAssets, false);
+    try {
+      // 1. Direct Server & TiDB Database Persist
+      await persistAsset(newAst, updatedAssets, false);
+    } catch (err: any) {
+      // Rollback optimistic state if server rejects with 409 or other error
+      setAssets(assets);
+      addNotification({
+        orgId: currentOrg.id,
+        type: 'WARNING',
+        title: 'Asset Registration Rejected',
+        message: err.message || 'Duplicate or redundant data rejected by the database.',
+        read: false
+      });
+      throw err;
+    }
 
     // 2. Audit trail
     const newLog = await commitAuditEvent({
@@ -384,18 +428,44 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   };
 
   const handleBulkAddAssets = async (newAssets: Asset[]) => {
-    const updatedAssets = [...newAssets, ...assets];
+    // Filter out duplicates within the incoming batch and against current assets
+    const existingTags = new Set(assets.map(a => a.assetCode.trim().toLowerCase()));
+    const existingSerials = new Set(assets.filter(a => a.serialNumber).map(a => a.serialNumber!.trim().toLowerCase()));
+
+    const uniqueBatch: Asset[] = [];
+    for (const ast of newAssets) {
+      const tagLower = ast.assetCode.trim().toLowerCase();
+      const serLower = ast.serialNumber ? ast.serialNumber.trim().toLowerCase() : '';
+      if (existingTags.has(tagLower)) continue;
+      if (serLower && existingSerials.has(serLower)) continue;
+      existingTags.add(tagLower);
+      if (serLower) existingSerials.add(serLower);
+      uniqueBatch.push(ast);
+    }
+
+    if (uniqueBatch.length === 0) {
+      addNotification({
+        orgId: currentOrg.id,
+        type: 'WARNING',
+        title: 'Bulk Import: Redundant Entries Omitted',
+        message: 'All assets in the batch had conflicting tags or serial numbers with existing inventory and were omitted.',
+        read: false
+      });
+      return;
+    }
+
+    const updatedAssets = [...uniqueBatch, ...assets];
     setAssets(updatedAssets);
 
-    await bulkPersistAssets(newAssets, updatedAssets);
+    await bulkPersistAssets(uniqueBatch, updatedAssets);
 
     const newLog = await commitAuditEvent({
       orgId: currentOrg.id,
       user: currentUser ? currentUser : { fullName: 'System Admin', role: 'ADMIN' },
       action: 'BULK_IMPORT',
       entityType: 'Asset',
-      entityName: `${newAssets.length} Assets`,
-      changes: `Bulk imported ${newAssets.length} hardware assets into TiDB primary ledger`
+      entityName: `${uniqueBatch.length} Assets`,
+      changes: `Bulk imported ${uniqueBatch.length} hardware assets into TiDB primary ledger (skipped ${newAssets.length - uniqueBatch.length} redundant)`
     });
 
     setAuditLogs(prev => [newLog, ...prev]);

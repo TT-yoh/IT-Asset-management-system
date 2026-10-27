@@ -16,7 +16,10 @@ import {
   ArrowRight,
   ArrowLeft,
   SlidersHorizontal,
-  Info
+  Info,
+  AlertTriangle,
+  RefreshCw,
+  CheckCircle2
 } from 'lucide-react';
 import { fetchHardwareSpecs } from '../../lib/ai/specs';
 import { AssetService } from '../../lib/asset-service';
@@ -85,6 +88,81 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
     const date = formData.purchaseDate || new Date().toISOString().split('T')[0]!;
     return AssetService.calculateCurrentValue(cost, date);
   }, [formData.purchaseCost, formData.purchaseDate]);
+
+  // Live Redundant Data & Duplicate Detection
+  const redundancyCheck = useMemo(() => {
+    if (!existingAssets || existingAssets.length === 0) {
+      return {
+        tagConflict: null as Asset | null,
+        serialConflict: null as Asset | null,
+        macConflict: null as Asset | null,
+        imeiConflict: null as Asset | null,
+        identicalModelCount: 0,
+        hasBlockingConflict: false
+      };
+    }
+
+    const currentId = editingAsset?.id;
+    const cleanCode = (formData.assetCode || '').trim().toLowerCase();
+    const cleanSerial = (formData.serialNumber || '').trim().toLowerCase();
+    const cleanMac = (formData.macAddress || '').trim().toLowerCase();
+    const cleanImei = (formData.imeiNumber || '').trim().toLowerCase();
+    const cleanModel = (formData.model || formData.name || '').trim().toLowerCase();
+
+    // 1. Asset Tag Conflict
+    const tagConflict = cleanCode ? existingAssets.find(
+      a => a.id !== currentId && a.assetCode?.trim().toLowerCase() === cleanCode
+    ) || null : null;
+
+    // 2. Chassis Serial Conflict (ignore auto-generated placeholder serials like SN-AST or SN-bulk)
+    const isAutoSerial = cleanSerial.startsWith('sn-ast') || cleanSerial.startsWith('sn-bulk') || cleanSerial.length <= 4;
+    const serialConflict = (cleanSerial && !isAutoSerial) ? existingAssets.find(
+      a => a.id !== currentId && a.serialNumber?.trim().toLowerCase() === cleanSerial
+    ) || null : null;
+
+    // 3. MAC Address Conflict
+    const macConflict = cleanMac ? existingAssets.find(
+      a => a.id !== currentId && a.macAddress?.trim().toLowerCase() === cleanMac
+    ) || null : null;
+
+    // 4. IMEI Conflict
+    const imeiConflict = cleanImei ? existingAssets.find(
+      a => a.id !== currentId && a.imeiNumber?.trim().toLowerCase() === cleanImei
+    ) || null : null;
+
+    // 5. Identical models in inventory count
+    const identicalModelCount = cleanModel ? existingAssets.filter(
+      a => a.id !== currentId && (
+        (a.model && a.model.trim().toLowerCase() === cleanModel) ||
+        (a.name && a.name.trim().toLowerCase() === cleanModel)
+      )
+    ).length : 0;
+
+    const hasBlockingConflict = Boolean(tagConflict || serialConflict || macConflict || imeiConflict);
+
+    return {
+      tagConflict,
+      serialConflict,
+      macConflict,
+      imeiConflict,
+      identicalModelCount,
+      hasBlockingConflict
+    };
+  }, [formData.assetCode, formData.serialNumber, formData.macAddress, formData.imeiNumber, formData.model, formData.name, existingAssets, editingAsset]);
+
+  const generateUniqueTag = () => {
+    let newTag = '';
+    let isUnique = false;
+    let attempts = 0;
+    while (!isUnique && attempts < 100) {
+      attempts++;
+      newTag = `AST-${Math.floor(1000 + Math.random() * 9000)}`;
+      if (!existingAssets || !existingAssets.some(a => a.assetCode?.toLowerCase() === newTag.toLowerCase())) {
+        isUnique = true;
+      }
+    }
+    setFormData(prev => ({ ...prev, assetCode: newTag }));
+  };
 
   useEffect(() => {
     if (editingAsset) {
@@ -194,26 +272,24 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
       return;
     }
 
-    if (existingAssets && existingAssets.length > 0) {
-      const cleanCode = formData.assetCode.trim().toLowerCase();
-      const codeDuplicate = existingAssets.find(
-        a => a.id !== editingAsset?.id && a.assetCode.trim().toLowerCase() === cleanCode
-      );
-      if (codeDuplicate) {
-        setFormError(`Asset Tag "${formData.assetCode.trim()}" is already assigned to "${codeDuplicate.name}". Each device must have a unique Asset Tag.`);
-        return;
-      }
+    if (redundancyCheck.tagConflict) {
+      setFormError(`Redundant Asset Tag: "${formData.assetCode?.trim()}" is already assigned to "${redundancyCheck.tagConflict.name}" (${redundancyCheck.tagConflict.branchName}). Click "Auto-Tag" or enter a unique barcode.`);
+      return;
+    }
 
-      const cleanSerial = formData.serialNumber?.trim().toLowerCase();
-      if (cleanSerial && !cleanSerial.startsWith('sn-')) {
-        const serialDuplicate = existingAssets.find(
-          a => a.id !== editingAsset?.id && a.serialNumber?.trim().toLowerCase() === cleanSerial
-        );
-        if (serialDuplicate) {
-          setFormError(`Serial Number "${formData.serialNumber?.trim()}" is already registered to "${serialDuplicate.name}". Each physical machine must have a unique factory serial number.`);
-          return;
-        }
-      }
+    if (redundancyCheck.serialConflict) {
+      setFormError(`Redundant Serial Number: "${formData.serialNumber?.trim()}" is already registered to "${redundancyCheck.serialConflict.name}" (Tag: ${redundancyCheck.serialConflict.assetCode}). Factory chassis serial numbers must be unique.`);
+      return;
+    }
+
+    if (redundancyCheck.macConflict) {
+      setFormError(`Redundant MAC Address: "${formData.macAddress?.trim()}" is already assigned to "${redundancyCheck.macConflict.name}" (Tag: ${redundancyCheck.macConflict.assetCode}).`);
+      return;
+    }
+
+    if (redundancyCheck.imeiConflict) {
+      setFormError(`Redundant IMEI Number: "${formData.imeiNumber?.trim()}" is already assigned to "${redundancyCheck.imeiConflict.name}" (Tag: ${redundancyCheck.imeiConflict.assetCode}).`);
+      return;
     }
 
     const branch = branches.find(b => b.id === formData.branchId) || branches[0]!;
@@ -390,18 +466,51 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-slate-300 font-semibold mb-1">
-                        Asset Tag / Barcode <span className="text-rose-400">*</span>
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-slate-300 font-semibold">
+                          Asset Tag / Barcode <span className="text-rose-400">*</span>
+                        </label>
+                        {redundancyCheck.tagConflict && (
+                          <button
+                            type="button"
+                            onClick={generateUniqueTag}
+                            className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-semibold transition cursor-pointer"
+                          >
+                            <RefreshCw className="w-2.5 h-2.5" /> Auto-Tag
+                          </button>
+                        )}
+                      </div>
                       <input
                         type="text"
                         required
                         value={formData.assetCode || ''}
                         onChange={(e) => setFormData({ ...formData, assetCode: e.target.value })}
                         placeholder="e.g. AST-1042"
-                        className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl font-mono text-emerald-400 focus:outline-none focus:border-emerald-500"
+                        className={`w-full px-3 py-2 bg-slate-950 border rounded-xl font-mono text-emerald-400 focus:outline-none transition ${
+                          redundancyCheck.tagConflict
+                            ? 'border-amber-500/80 bg-amber-950/20 focus:border-amber-400'
+                            : 'border-slate-700 focus:border-emerald-500'
+                        }`}
                       />
-                      <p className="text-[10px] text-slate-400 mt-0.5">Unique barcode/sticker tag for this specific unit.</p>
+                      {redundancyCheck.tagConflict ? (
+                        <div className="mt-1.5 p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 truncate">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span className="truncate">
+                              Tag in use by <strong>{redundancyCheck.tagConflict.name}</strong> ({redundancyCheck.tagConflict.branchName})
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={generateUniqueTag}
+                            className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-[10px] font-semibold shrink-0 cursor-pointer transition"
+                          >
+                            New Tag
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-slate-400 mt-0.5">Unique barcode/sticker tag for this specific unit.</p>
+                      )}
                     </div>
 
                     <div>
@@ -413,9 +522,22 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                         value={formData.serialNumber || ''}
                         onChange={(e) => setFormData({ ...formData, serialNumber: e.target.value })}
                         placeholder="e.g. 7X9K2M3 or C02G8..."
-                        className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
+                        className={`w-full px-3 py-2 bg-slate-950 border rounded-xl font-mono text-slate-100 focus:outline-none transition ${
+                          redundancyCheck.serialConflict
+                            ? 'border-rose-500/80 bg-rose-950/20 focus:border-rose-400'
+                            : 'border-slate-700 focus:border-emerald-500'
+                        }`}
                       />
-                      <p className="text-[10px] text-slate-400 mt-0.5">Factory chassis S/N or Service Tag underneath.</p>
+                      {redundancyCheck.serialConflict ? (
+                        <div className="mt-1.5 p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] flex items-start gap-1.5">
+                          <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                          <div>
+                            <strong>Duplicate Serial:</strong> In use by <strong>{redundancyCheck.serialConflict.name}</strong> (Tag: {redundancyCheck.serialConflict.assetCode}). Factory serial numbers must be unique.
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-slate-400 mt-0.5">Factory chassis S/N or Service Tag underneath.</p>
+                      )}
                     </div>
                   </div>
 
@@ -436,15 +558,29 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                   </div>
 
                   {/* Differentiating Identical Units Guidance Callout */}
-                  <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-start gap-2.5 text-xs text-blue-200">
-                    <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-                    <div>
-                      <span className="font-semibold text-blue-300">Enrolling multiple identical laptops?</span>
-                      <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
-                        Identical laptops can have the exact same Model and Name. The system distinguishes them using their unique <strong>Asset Tag</strong> (the barcode sticker you attach) and manufacturer <strong>Serial Number</strong> (from the chassis).
-                      </p>
+                  {redundancyCheck.identicalModelCount > 0 ? (
+                    <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-start gap-2.5 text-xs text-blue-200">
+                      <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-semibold text-blue-300">
+                          Identical Model Fleet Notice ({redundancyCheck.identicalModelCount} existing in inventory)
+                        </span>
+                        <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                          You already have {redundancyCheck.identicalModelCount} other <strong>{formData.model || formData.name}</strong> unit(s) enrolled. The system distinguishes identical machines through their distinct <strong>Asset Tag</strong> and <strong>Chassis Serial Number</strong>.
+                        </p>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-start gap-2.5 text-xs text-blue-200">
+                      <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-semibold text-blue-300">Enrolling multiple identical laptops?</span>
+                        <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                          Identical laptops can have the exact same Model and Name. The system distinguishes them using their unique <strong>Asset Tag</strong> (the barcode sticker you attach) and manufacturer <strong>Serial Number</strong> (from the chassis).
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="pt-3 flex justify-end">
                     <button
@@ -452,6 +588,14 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                       onClick={() => {
                         if (!formData.name?.trim()) {
                           setFormError('Please enter a device model or name.');
+                          return;
+                        }
+                        if (redundancyCheck.tagConflict) {
+                          setFormError(`Asset Tag "${formData.assetCode}" is already in use by "${redundancyCheck.tagConflict.name}". Please generate or enter a distinct tag.`);
+                          return;
+                        }
+                        if (redundancyCheck.serialConflict) {
+                          setFormError(`Serial Number "${formData.serialNumber}" is already in use by "${redundancyCheck.serialConflict.name}".`);
                           return;
                         }
                         setFormError('');
@@ -718,18 +862,51 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">
-                      Asset Tag / Barcode <span className="text-rose-400">*</span>
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-slate-300 font-semibold">
+                        Asset Tag / Barcode <span className="text-rose-400">*</span>
+                      </label>
+                      {redundancyCheck.tagConflict && (
+                        <button
+                          type="button"
+                          onClick={generateUniqueTag}
+                          className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-semibold transition cursor-pointer"
+                        >
+                          <RefreshCw className="w-2.5 h-2.5" /> Auto-Tag
+                        </button>
+                      )}
+                    </div>
                     <input
                       type="text"
                       required
                       value={formData.assetCode || ''}
                       placeholder="e.g. AST-1042"
                       onChange={(e) => setFormData({ ...formData, assetCode: e.target.value })}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl font-mono text-emerald-400 focus:outline-none focus:border-emerald-500"
+                      className={`w-full px-3 py-2 bg-slate-900 border rounded-xl font-mono text-emerald-400 focus:outline-none transition ${
+                        redundancyCheck.tagConflict
+                          ? 'border-amber-500/80 bg-amber-950/20 focus:border-amber-400'
+                          : 'border-slate-700 focus:border-emerald-500'
+                      }`}
                     />
-                    <p className="text-[10px] text-slate-400 mt-0.5">Unique organization barcode tag code for this unit.</p>
+                    {redundancyCheck.tagConflict ? (
+                      <div className="mt-1.5 p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 truncate">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          <span className="truncate">
+                            Tag in use by <strong>{redundancyCheck.tagConflict.name}</strong> ({redundancyCheck.tagConflict.branchName})
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={generateUniqueTag}
+                          className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-[10px] font-semibold shrink-0 cursor-pointer transition"
+                        >
+                          New Tag
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-slate-400 mt-0.5">Unique organization barcode tag code for this unit.</p>
+                    )}
                   </div>
 
                   <div className="sm:col-span-2">
@@ -739,9 +916,22 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                       value={formData.serialNumber || ''}
                       placeholder="e.g. 7X9K2M3 or C02G8..."
                       onChange={(e) => setFormData({ ...formData, serialNumber: e.target.value })}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
+                      className={`w-full px-3 py-2 bg-slate-900 border rounded-xl font-mono text-slate-100 focus:outline-none transition ${
+                        redundancyCheck.serialConflict
+                          ? 'border-rose-500/80 bg-rose-950/20 focus:border-rose-400'
+                          : 'border-slate-700 focus:border-emerald-500'
+                      }`}
                     />
-                    <p className="text-[10px] text-slate-400 mt-0.5">Factory hardware serial number or Dell Service Tag from chassis.</p>
+                    {redundancyCheck.serialConflict ? (
+                      <div className="mt-1.5 p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] flex items-start gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                        <div>
+                          <strong>Duplicate Serial:</strong> Already registered to <strong>{redundancyCheck.serialConflict.name}</strong> (Tag: {redundancyCheck.serialConflict.assetCode}). Factory serial numbers must be unique.
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-slate-400 mt-0.5">Factory hardware serial number or Dell Service Tag from chassis.</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -944,9 +1134,22 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                       value={formData.macAddress || ''}
                       onChange={(e) => setFormData({ ...formData, macAddress: e.target.value })}
                       placeholder="00:1A:2B:3C:4D:5E"
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
+                      className={`w-full px-3 py-2 bg-slate-900 border rounded-xl font-mono text-slate-100 focus:outline-none transition ${
+                        redundancyCheck.macConflict
+                          ? 'border-rose-500/80 bg-rose-950/20 focus:border-rose-400'
+                          : 'border-slate-700 focus:border-emerald-500'
+                      }`}
                     />
-                    <p className="text-[10px] text-slate-400 mt-0.5">Physical Wi-Fi or Ethernet MAC address.</p>
+                    {redundancyCheck.macConflict ? (
+                      <div className="mt-1.5 p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] flex items-center gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                        <span>
+                          MAC in use by <strong>{redundancyCheck.macConflict.name}</strong> ({redundancyCheck.macConflict.assetCode}).
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-slate-400 mt-0.5">Physical Wi-Fi or Ethernet MAC address.</p>
+                    )}
                   </div>
 
                   <div>
@@ -956,9 +1159,22 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                       value={formData.imeiNumber || ''}
                       onChange={(e) => setFormData({ ...formData, imeiNumber: e.target.value })}
                       placeholder="e.g. 354892091234567"
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
+                      className={`w-full px-3 py-2 bg-slate-900 border rounded-xl font-mono text-slate-100 focus:outline-none transition ${
+                        redundancyCheck.imeiConflict
+                          ? 'border-rose-500/80 bg-rose-950/20 focus:border-rose-400'
+                          : 'border-slate-700 focus:border-emerald-500'
+                      }`}
                     />
-                    <p className="text-[10px] text-slate-400 mt-0.5">For cellular LTE laptops, tablets, or phones.</p>
+                    {redundancyCheck.imeiConflict ? (
+                      <div className="mt-1.5 p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] flex items-center gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                        <span>
+                          IMEI in use by <strong>{redundancyCheck.imeiConflict.name}</strong> ({redundancyCheck.imeiConflict.assetCode}).
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-slate-400 mt-0.5">For cellular LTE laptops, tablets, or phones.</p>
+                    )}
                   </div>
 
                   <div className="sm:col-span-2">

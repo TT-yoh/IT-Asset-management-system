@@ -413,8 +413,6 @@ export function resetToCleanSlate(adminUser: User): SystemDataPayload {
 export async function persistAsset(asset: Asset, allAssets?: Asset[], isUpdate = false): Promise<boolean> {
   const current = allAssets || loadFromStorage<Asset[]>(STORAGE_KEYS.ASSETS, INITIAL_ASSETS);
   const exists = isUpdate || current.some(a => a.id === asset.id);
-  const updated = exists ? current.map(a => (a.id === asset.id ? asset : a)) : [asset, ...current];
-  saveToStorage(STORAGE_KEYS.ASSETS, updated);
 
   try {
     const row = mapAssetToTiDBRow(asset);
@@ -427,10 +425,21 @@ export async function persistAsset(asset: Asset, allAssets?: Asset[], isUpdate =
       body: JSON.stringify(row)
     });
     if (res.ok) {
+      const updated = exists ? current.map(a => (a.id === asset.id ? asset : a)) : [asset, ...current];
+      saveToStorage(STORAGE_KEYS.ASSETS, updated);
       updateLastTiDBSyncTime();
+      return true;
+    } else if (res.status === 409) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || 'Duplicate or redundant asset data detected.');
     }
-  } catch {
-    // Offline queued in sync layer
+  } catch (err: any) {
+    if (err?.message?.includes('Redundant') || err?.message?.includes('Duplicate') || err?.message?.includes('Conflict')) {
+      throw err;
+    }
+    // Offline or network fallback: save locally for offline-first replay
+    const updated = exists ? current.map(a => (a.id === asset.id ? asset : a)) : [asset, ...current];
+    saveToStorage(STORAGE_KEYS.ASSETS, updated);
   }
   return true;
 }
