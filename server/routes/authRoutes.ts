@@ -404,10 +404,78 @@ authRouter.post('/2fa/disable', authenticate, async (req: Request, res: Response
 
 
 /**
+ * GET /api/auth/invite/:token
+ * Validates an invitation token and returns preview information (user + org)
+ */
+authRouter.get('/invite/:token', async (req: Request, res: Response) => {
+  const token = String(req.params.token || '').trim();
+  if (!token) {
+    res.status(400).json({ valid: false, error: 'Invitation token is required.' });
+    return;
+  }
+
+  const users = await query<any>(
+    'SELECT `id`, `org_id`, `email`, `full_name`, `role`, `department_name`, `branch_name`, `status`, `invited_at` FROM `users` WHERE `invite_token` = ? LIMIT 1;',
+    [token]
+  );
+
+  if (users.length === 0) {
+    res.status(404).json({ valid: false, error: 'Invitation token not found. Please verify the link or request a new invite from your administrator.' });
+    return;
+  }
+
+  const user = users[0]!;
+  if (user.status !== 'INVITED') {
+    res.status(409).json({ valid: false, error: 'This invitation token has already been activated. Please sign in with your password.' });
+    return;
+  }
+
+  if (user.invited_at) {
+    const inviteTime = new Date(user.invited_at).getTime();
+    if (!isNaN(inviteTime) && Date.now() - inviteTime > 48 * 3600 * 1000) {
+      res.status(410).json({ valid: false, error: 'Invitation token has expired (48 hour validity limit). Please request a new invite from your administrator.' });
+      return;
+    }
+  }
+
+  // Fetch company/org branding
+  const orgs = await query<any>(
+    'SELECT `id`, `name`, `type`, `branding_color` FROM `organizations` WHERE `id` = ? LIMIT 1;',
+    [user.org_id]
+  );
+  const organization = orgs.length > 0 ? orgs[0] : {
+    id: user.org_id,
+    name: 'Enterprise Organization',
+    brandingColor: '#0ea5e9'
+  };
+
+  res.json({
+    valid: true,
+    user: {
+      id: user.id,
+      orgId: user.org_id,
+      email: user.email,
+      fullName: user.full_name,
+      role: user.role,
+      departmentName: user.department_name,
+      branchName: user.branch_name,
+      invitedAt: user.invited_at
+    },
+    organization: {
+      id: organization.id,
+      name: organization.name,
+      brandingColor: organization.branding_color || organization.brandingColor || '#0ea5e9'
+    }
+  });
+});
+
+/**
  * Activate Invited Account with Single-Use Token
  */
 authRouter.post('/activate', async (req: Request, res: Response) => {
-  const { inviteToken, newPassword } = req.body;
+  const inviteToken = req.body.inviteToken || req.body.invite_token;
+  const newPassword = req.body.newPassword || req.body.password;
+  const twoFactorEnabled = Boolean(req.body.twoFactorEnabled || req.body.two_factor_enabled);
 
   if (!inviteToken || !newPassword) {
     res.status(400).json({ error: 'Invite token and new password are required.' });
@@ -420,9 +488,10 @@ authRouter.post('/activate', async (req: Request, res: Response) => {
   }
 
   // Parameterized token lookup
+  const cleanToken = String(inviteToken).trim();
   const users = await query<any>(
     'SELECT * FROM `users` WHERE `invite_token` = ? AND `status` = "INVITED" LIMIT 1;',
-    [String(inviteToken).trim()]
+    [cleanToken]
   );
 
   if (users.length === 0) {
@@ -445,11 +514,66 @@ authRouter.post('/activate', async (req: Request, res: Response) => {
 
   // Consume token and activate account
   await query(
-    'UPDATE `users` SET `password_hash` = ?, `status` = "ACTIVE", `invite_token` = NULL WHERE `id` = ?;',
-    [hashedPassword, user.id]
+    'UPDATE `users` SET `password_hash` = ?, `status` = "ACTIVE", `two_factor_enabled` = ?, `invite_token` = NULL WHERE `id` = ?;',
+    [hashedPassword, twoFactorEnabled ? 1 : 0, user.id]
   );
 
-  res.json({ success: true, message: 'Account successfully activated. You may now sign in.' });
+  // Issue session token so user is automatically authenticated upon activation!
+  const tokenPayload = {
+    userId: user.id,
+    orgId: user.org_id,
+    email: user.email,
+    fullName: user.full_name,
+    role: user.role,
+    branchId: user.branch_id || 'br-main',
+    branchName: user.branch_name || 'Main Campus'
+  };
+
+  const sessionToken = createSessionToken(tokenPayload);
+
+  res.cookie('session_token', sessionToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: 2 * 60 * 60 * 1000 // 2 hours
+  });
+
+  // Fetch organization
+  const orgs = await query<any>(
+    'SELECT `id`, `name`, `type`, `branding_color` FROM `organizations` WHERE `id` = ? LIMIT 1;',
+    [user.org_id]
+  );
+  const organization = orgs.length > 0 ? orgs[0] : {
+    id: user.org_id,
+    name: 'Enterprise Organization',
+    brandingColor: '#0ea5e9'
+  };
+
+  const clientUser = {
+    id: user.id,
+    orgId: user.org_id,
+    email: user.email,
+    fullName: user.full_name,
+    role: user.role,
+    departmentId: user.department_id,
+    departmentName: user.department_name,
+    branchId: user.branch_id,
+    branchName: user.branch_name,
+    twoFactorEnabled,
+    avatar: user.avatar || '',
+    status: 'ACTIVE'
+  };
+
+  res.json({
+    success: true,
+    message: 'Account successfully activated.',
+    user: clientUser,
+    organization: {
+      id: organization.id,
+      name: organization.name,
+      brandingColor: organization.branding_color || organization.brandingColor || '#0ea5e9'
+    }
+  });
 });
 
 /**

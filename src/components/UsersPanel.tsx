@@ -26,7 +26,9 @@ import {
   UserCheck,
   AlertTriangle,
   X,
-  Shield
+  Shield,
+  RefreshCw,
+  Loader2
 } from 'lucide-react';
 import { DEPARTMENTS } from '../mockData';
 
@@ -39,6 +41,15 @@ interface UsersPanelProps {
   assets: Asset[];
   auditLogs: AuditLogItem[];
   onRegisterUser?: (newUser: User) => void;
+  onInviteUser?: (data: {
+    fullName: string;
+    email: string;
+    role: any;
+    departmentId?: string;
+    departmentName?: string;
+    branchId?: string;
+    branchName?: string;
+  }) => Promise<{ success: boolean; inviteToken?: string; user?: User; error?: string }>;
   onUpdateUser?: (updatedUser: User) => void;
   onDeleteUser?: (userId: string) => Promise<{ success: boolean; error?: string }>;
   onClearDummyUsers?: () => void;
@@ -53,6 +64,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
   assets = [],
   auditLogs = [],
   onRegisterUser,
+  onInviteUser,
   onUpdateUser,
   onDeleteUser,
   onClearDummyUsers
@@ -101,6 +113,8 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
   const [latestInviteToken, setLatestInviteToken] = useState('');
   const [latestInvitedUser, setLatestInvitedUser] = useState<User | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [isInviting, setIsInviting] = useState(false);
+  const [reinvitingId, setReinvitingId] = useState<string | null>(null);
 
   const orgUsers = users.filter(u => u.orgId === currentOrg.id);
   const isAdmin = currentUser?.role === 'ADMIN';
@@ -259,41 +273,121 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
     setUserToDelete(null);
   };
 
-  const handleInviteSubmit = (e: React.FormEvent) => {
+  const handleInviteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newFullName.trim() || !newEmail.trim() || !onRegisterUser) return;
+    if (!newFullName.trim() || !newEmail.trim()) return;
 
     const branch = branches.find(b => b.id === selectedBranchId) || branches[0];
     const dept = activeDepts.find(d => d.id === selectedDeptId) || activeDepts[0];
-    const token = 'inv-' + Math.random().toString(36).substring(2, 8) + Date.now().toString(36);
 
-    const newUser: User = {
-      id: `usr-${Date.now()}`,
-      orgId: currentOrg.id,
-      email: newEmail.trim().toLowerCase(),
-      fullName: newFullName.trim(),
-      role: newRole,
-      departmentId: dept ? dept.id : 'dept-gen',
-      departmentName: dept ? dept.name : 'General Operations',
-      branchId: branch ? branch.id : (branches[0]?.id || 'br-main'),
-      branchName: branch ? branch.name : (branches[0]?.name || 'Main Campus'),
-      twoFactorEnabled: false,
-      avatar: `https://images.unsplash.com/photo-${1534528741775 + (users.length % 10)}?w=100&auto=format&fit=crop&q=80`,
-      status: 'INVITED',
-      inviteToken: token,
-      invitedAt: new Date().toISOString()
-    };
+    setIsInviting(true);
+    try {
+      if (onInviteUser) {
+        const res = await onInviteUser({
+          fullName: newFullName.trim(),
+          email: newEmail.trim().toLowerCase(),
+          role: newRole,
+          departmentId: dept ? dept.id : 'dept-gen',
+          departmentName: dept ? dept.name : 'General Operations',
+          branchId: branch ? branch.id : (branches[0]?.id || 'br-main'),
+          branchName: branch ? branch.name : (branches[0]?.name || 'Main Campus')
+        });
 
-    onRegisterUser(newUser);
-    setLatestInviteToken(token);
-    setLatestInvitedUser(newUser);
-    setShowInviteSuccessModal(true);
-    setShowInviteModal(false);
+        if (res.success && res.inviteToken) {
+          setLatestInviteToken(res.inviteToken);
+          if (res.user) setLatestInvitedUser(res.user);
+          setShowInviteSuccessModal(true);
+          setShowInviteModal(false);
+          setNewFullName('');
+          setNewEmail('');
+          setNewRole('USER');
+          showToast(`Verified invitation token created for ${res.user?.fullName || newFullName}.`);
+          return;
+        } else {
+          showToast(res.error || 'Failed to create user invitation.');
+          return;
+        }
+      }
 
-    setNewFullName('');
-    setNewEmail('');
-    setNewRole('USER');
-    showToast(`Invitation created for ${newUser.fullName}.`);
+      // Direct fallback
+      const res = await fetch('/api/users/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          fullName: newFullName.trim(),
+          email: newEmail.trim().toLowerCase(),
+          role: newRole,
+          departmentId: dept ? dept.id : 'dept-gen',
+          departmentName: dept ? dept.name : 'General Operations',
+          branchId: branch ? branch.id : (branches[0]?.id || 'br-main'),
+          branchName: branch ? branch.name : (branches[0]?.name || 'Main Campus')
+        })
+      });
+
+      const resData = await res.json();
+      if (!res.ok) {
+        showToast(resData.error || 'Failed to invite user.');
+        return;
+      }
+
+      const token = resData.inviteToken;
+      const newUser: User = {
+        id: resData.userId || `usr-${Date.now()}`,
+        orgId: currentOrg.id,
+        email: newEmail.trim().toLowerCase(),
+        fullName: newFullName.trim(),
+        role: newRole,
+        departmentId: dept ? dept.id : 'dept-gen',
+        departmentName: dept ? dept.name : 'General Operations',
+        branchId: branch ? branch.id : (branches[0]?.id || 'br-main'),
+        branchName: branch ? branch.name : (branches[0]?.name || 'Main Campus'),
+        twoFactorEnabled: false,
+        avatar: `https://images.unsplash.com/photo-${1534528741775 + (users.length % 10)}?w=100&auto=format&fit=crop&q=80`,
+        status: 'INVITED',
+        inviteToken: token,
+        invitedAt: new Date().toISOString()
+      };
+
+      if (onRegisterUser) onRegisterUser(newUser);
+      setLatestInviteToken(token);
+      setLatestInvitedUser(newUser);
+      setShowInviteSuccessModal(true);
+      setShowInviteModal(false);
+
+      setNewFullName('');
+      setNewEmail('');
+      setNewRole('USER');
+      showToast(`Invitation created for ${newUser.fullName}.`);
+    } catch (err: any) {
+      showToast(err.message || 'Error creating user invitation.');
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
+  const handleReinvite = async (targetUser: User) => {
+    setReinvitingId(targetUser.id);
+    try {
+      const res = await fetch(`/api/users/${encodeURIComponent(targetUser.id)}/reinvite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include'
+      });
+      const data = await res.json();
+      if (res.ok && data.inviteToken) {
+        const updated = { ...targetUser, inviteToken: data.inviteToken, invitedAt: data.invitedAt };
+        if (onUpdateUser) onUpdateUser(updated);
+        copyInviteLink(data.inviteToken);
+        showToast(`Fresh invitation generated & link copied for ${targetUser.fullName}!`);
+      } else {
+        showToast(data.error || 'Failed to regenerate invitation link.');
+      }
+    } catch {
+      showToast('Network error while requesting fresh invite.');
+    } finally {
+      setReinvitingId(null);
+    }
   };
 
   const copyInviteLink = (token: string) => {
@@ -616,16 +710,34 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                       {/* Actions */}
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          {isInvited && user.inviteToken && (
-                            <button
-                              type="button"
-                              onClick={() => copyInviteLink(user.inviteToken!)}
-                              className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg text-[10px] font-bold flex items-center gap-1 transition cursor-pointer"
-                              title="Copy Invitation Link"
-                            >
-                              <Copy className="w-3 h-3" />
-                              <span className="hidden sm:inline">Copy Link</span>
-                            </button>
+                          {isInvited && (
+                            <>
+                              {user.inviteToken ? (
+                                <button
+                                  type="button"
+                                  onClick={() => copyInviteLink(user.inviteToken!)}
+                                  className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg text-[10px] font-bold flex items-center gap-1 transition cursor-pointer"
+                                  title="Copy Invitation Link"
+                                >
+                                  <Copy className="w-3 h-3" />
+                                  <span className="hidden sm:inline">Copy Link</span>
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => handleReinvite(user)}
+                                disabled={reinvitingId === user.id}
+                                className="px-2.5 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded-lg text-[10px] font-bold flex items-center gap-1 transition cursor-pointer disabled:opacity-50"
+                                title="Re-issue a fresh invitation token"
+                              >
+                                {reinvitingId === user.id ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <RefreshCw className="w-3 h-3" />
+                                )}
+                                <span className="hidden sm:inline">Re-Invite</span>
+                              </button>
+                            </>
                           )}
 
                           {isAdmin && (

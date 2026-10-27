@@ -68,7 +68,7 @@ app.get('/api/init', authenticate, async (req: Request, res: Response) => {
       query('SELECT m.* FROM `maintenances` m INNER JOIN `assets` a ON m.asset_id = a.id WHERE a.org_id = ? ORDER BY m.created_at DESC;', [effectiveOrgId]),
       query('SELECT * FROM `budgets` WHERE `org_id` = ?;', [effectiveOrgId]),
       query('SELECT * FROM `branches` WHERE `org_id` = ?;', [effectiveOrgId]),
-      query('SELECT `id`, `org_id`, `email`, `full_name`, `role`, `department_id`, `department_name`, `branch_id`, `branch_name`, `two_factor_enabled`, `avatar`, `status` FROM `users` WHERE `org_id` = ?;', [effectiveOrgId]),
+      query('SELECT `id`, `org_id`, `email`, `full_name`, `role`, `department_id`, `department_name`, `branch_id`, `branch_name`, `two_factor_enabled`, `avatar`, `status`, `invite_token`, `invited_at` FROM `users` WHERE `org_id` = ?;', [effectiveOrgId]),
       query('SELECT * FROM `departments` WHERE `org_id` = ? ORDER BY `name` ASC;', [effectiveOrgId]),
       query('SELECT * FROM `organizations` ORDER BY `name` ASC;')
     ]);
@@ -78,6 +78,7 @@ app.get('/api/init', authenticate, async (req: Request, res: Response) => {
       auditLogs = await query('SELECT * FROM `audit_logs` WHERE `org_id` = ? ORDER BY `timestamp` DESC LIMIT 200;', [effectiveOrgId]);
     }
 
+    const isAdminOrDirector = role === 'ADMIN' || role === 'DIRECTOR';
     const sanitizedUsers = rawUsers.map((u: any) => ({
       id: u.id,
       orgId: u.org_id,
@@ -90,7 +91,9 @@ app.get('/api/init', authenticate, async (req: Request, res: Response) => {
       branchName: u.branch_name,
       twoFactorEnabled: Boolean(u.two_factor_enabled),
       avatar: u.avatar || '',
-      status: u.status || 'ACTIVE'
+      status: u.status || 'ACTIVE',
+      inviteToken: isAdminOrDirector ? u.invite_token || undefined : undefined,
+      invitedAt: u.invited_at || undefined
     }));
 
     const sanitizedOrgs = (rawOrgs || []).map((o: any) => ({

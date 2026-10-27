@@ -46,6 +46,7 @@ function AppShell() {
     handleLoginSuccess,
     handleRegisterOrganization,
     handleActivateUser,
+    handleInviteUser,
     handleRegisterUser,
     handleUpdateUser,
     handleDeleteUser,
@@ -372,6 +373,7 @@ function AppShell() {
               assets={filteredAssets}
               auditLogs={filteredAuditLogs}
               onRegisterUser={handleRegisterUser}
+              onInviteUser={handleInviteUser}
               onUpdateUser={handleUpdateUser}
               onDeleteUser={handleDeleteUser}
               onClearDummyUsers={handleClearDummyUsers}

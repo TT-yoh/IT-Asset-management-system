@@ -24,7 +24,7 @@ interface LoginPortalProps {
   users: User[];
   onLoginSuccess: (user: User, org: Organization) => void;
   onRegisterOrganization?: (data: RegisterCompanyData) => void;
-  onActivateUser?: (inviteToken: string, newPassword: string, twoFactorEnabled: boolean) => void;
+  onActivateUser?: (inviteToken: string, newPassword: string, twoFactorEnabled: boolean) => Promise<any> | any;
 }
 
 export const LoginPortal: React.FC<LoginPortalProps> = ({
@@ -109,25 +109,27 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
     }
   };
 
-  // When activationTokenInput changes, find matching user
+  // When activationTokenInput changes, find matching user locally or via server API
   useEffect(() => {
     if (!activationTokenInput.trim()) {
       setMatchedInvitedUser(null);
       setMatchedInvitedOrg(null);
+      setError(null);
       return;
     }
     const cleanToken = activationTokenInput.trim();
-    // Match on inviteToken ONLY (never on u.id)
-    const foundUser = users.find(u => u.inviteToken === cleanToken);
-    if (foundUser) {
-      if (foundUser.status !== 'INVITED') {
+
+    // 1. Instant check in client state if available
+    const localUser = users.find(u => u.inviteToken === cleanToken);
+    if (localUser) {
+      if (localUser.status !== 'INVITED') {
         setMatchedInvitedUser(null);
         setMatchedInvitedOrg(null);
         setError('This invitation token has already been activated.');
         return;
       }
-      if (foundUser.invitedAt) {
-        const inviteTime = new Date(foundUser.invitedAt).getTime();
+      if (localUser.invitedAt) {
+        const inviteTime = new Date(localUser.invitedAt).getTime();
         const maxAgeMs = 48 * 60 * 60 * 1000;
         if (!isNaN(inviteTime) && Date.now() - inviteTime > maxAgeMs) {
           setMatchedInvitedUser(null);
@@ -136,14 +138,42 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
           return;
         }
       }
-      setMatchedInvitedUser(foundUser);
-      const foundOrg = organizations.find(o => o.id === foundUser.orgId) || organizations[0]!;
+      setMatchedInvitedUser(localUser);
+      const foundOrg = organizations.find(o => o.id === localUser.orgId) || organizations[0]!;
       setMatchedInvitedOrg(foundOrg);
       setError(null);
-    } else {
-      setMatchedInvitedUser(null);
-      setMatchedInvitedOrg(null);
+      return;
     }
+
+    // 2. Query TiDB Backend endpoint for real-time verification (for external devices / incognito)
+    let isCancelled = false;
+    const verifyTokenOnServer = async () => {
+      try {
+        const res = await fetch(`/api/auth/invite/${encodeURIComponent(cleanToken)}`);
+        if (isCancelled) return;
+        const data = await res.json();
+        if (res.ok && data.valid && data.user) {
+          setMatchedInvitedUser(data.user);
+          setMatchedInvitedOrg(data.organization || organizations[0]!);
+          setError(null);
+        } else {
+          setMatchedInvitedUser(null);
+          setMatchedInvitedOrg(null);
+          setError(data.error || 'Invalid or expired invitation token.');
+        }
+      } catch {
+        if (!isCancelled) {
+          // Network offline notice only if we don't already have local match
+          setError('Could not verify invitation token with server. Please verify your connection.');
+        }
+      }
+    };
+
+    verifyTokenOnServer();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [activationTokenInput, users, organizations]);
 
   const handleQuickFill = (emailVal: string, passVal: string) => {
@@ -233,7 +263,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
     }, 400);
   };
 
-  const handleActivateSubmit = (e: React.FormEvent) => {
+  const handleActivateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activationTokenInput.trim()) {
       setError('Please enter your invitation activation token.');
@@ -255,23 +285,45 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
     setIsLoading(true);
     setError(null);
 
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
       if (onActivateUser) {
-        onActivateUser(activationTokenInput.trim(), activationPassword, twoFactorActivation);
+        const res = await onActivateUser(activationTokenInput.trim(), activationPassword, twoFactorActivation);
+        if (typeof res === 'object' && res !== null && !res.success) {
+          setError(res.error || 'Activation failed. Please request a new invite.');
+          setIsLoading(false);
+          return;
+        }
       } else {
-        // Fallback local activation
-        const updatedUser: User = {
+        // Direct API activation fallback
+        const res = await fetch('/api/auth/activate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            inviteToken: activationTokenInput.trim(),
+            newPassword: activationPassword,
+            twoFactorEnabled: twoFactorActivation
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || 'Failed to activate account.');
+          setIsLoading(false);
+          return;
+        }
+        const updatedUser: User = data.user || {
           ...matchedInvitedUser,
-          password: activationPassword,
           status: 'ACTIVE',
-          twoFactorEnabled: twoFactorActivation,
-          inviteToken: undefined
+          twoFactorEnabled: twoFactorActivation
         };
-        const org = matchedInvitedOrg || organizations[0]!;
+        const org = data.organization || matchedInvitedOrg || organizations[0]!;
         onLoginSuccess(updatedUser, org);
       }
-    }, 400);
+    } catch (err: any) {
+      setError(err.message || 'Error occurred during account activation.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
