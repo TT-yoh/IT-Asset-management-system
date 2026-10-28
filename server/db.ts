@@ -6,8 +6,8 @@ dotenv.config();
 
 const host = process.env.TIDB_HOST || 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com';
 const port = Number(process.env.TIDB_PORT || 4000);
-const user = process.env.TIDB_USER || '';
-const password = process.env.TIDB_PASSWORD || '';
+const user = process.env.TIDB_USER || 'pcTx68ZcUHQq15E.root';
+const password = process.env.TIDB_PASSWORD || 'Fyxzmx2p19g5mL5j';
 const database = process.env.TIDB_DATABASE || 'it_asset_ledger';
 const ssl = process.env.TIDB_SSL !== 'false';
 

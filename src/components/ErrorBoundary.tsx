@@ -5,6 +5,7 @@ interface Props {
   children: ReactNode;
   fallbackTitle?: string;
   onReset?: () => void;
+  key?: any;
 }
 
 interface State {
@@ -14,6 +15,10 @@ interface State {
 }
 
 export class ErrorBoundary extends Component<Props, State> {
+  declare state: State;
+  declare props: Props;
+  declare setState: any;
+
   constructor(props: Props) {
     super(props);
     this.state = {

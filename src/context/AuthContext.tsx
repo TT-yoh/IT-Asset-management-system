@@ -107,7 +107,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         const res = await fetch('/api/auth/me', { credentials: 'include' });
         if (res.ok) {
-          const data = await res.json();
+          const data = await res.json().catch(() => null);
           if (data?.user && !isCancelled) {
             const serverUser: User = {
               id: data.user.id,
@@ -367,8 +367,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         })
       });
 
-      const data = await res.json();
-      if (res.ok && data.success) {
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) {
         const activeUser: User = data.user || {
           id: data.user?.id || `usr-${Date.now()}`,
           orgId: data.user?.orgId || currentOrg.id,
@@ -394,7 +394,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setStoredSession(activeUser, userOrg);
         return { success: true, user: activeUser };
       } else {
-        return { success: false, error: data.error || 'Failed to activate invitation.' };
+        return { success: false, error: data?.error || 'Failed to activate invitation.' };
       }
     } catch {
       // Offline fallback: check local systemUsers

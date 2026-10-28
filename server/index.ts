@@ -14,13 +14,31 @@ import { query } from './db';
 
 export const app = express();
 
+// Global CORS Middleware supporting credentials & preflight OPTIONS
+app.use((req: Request, res: Response, next) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Org-Id, Idempotency-Key');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  next();
+});
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParserMiddleware);
 app.use(idempotencyMiddleware);
 
-// Health check endpoint
-app.get('/api/health', (_req: Request, res: Response) => {
+// Health check endpoint (both /api/health and /health)
+app.get(['/api/health', '/health'], (_req: Request, res: Response) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -28,23 +46,30 @@ app.get('/api/health', (_req: Request, res: Response) => {
   });
 });
 
-// Mount modular sub-routers
-app.use('/api/auth', authRouter);
-app.use('/api/assets', assetRouter);
-app.use('/api/checkouts', checkoutRouter);
-app.use('/api/maintenance', maintenanceRouter);
-app.use('/api/maintenances', maintenanceRouter);
-app.use('/api/budgets', budgetRouter);
-app.use('/api/branches', branchRouter);
-app.use('/api/departments', departmentRouter);
-app.use('/api/users', userRouter);
-app.use('/api/audit-logs', auditRouter);
+// Mount modular sub-routers with both /api and root prefixes for Vercel/Node portability
+const subRouters = [
+  { path: 'auth', router: authRouter },
+  { path: 'assets', router: assetRouter },
+  { path: 'checkouts', router: checkoutRouter },
+  { path: 'maintenance', router: maintenanceRouter },
+  { path: 'maintenances', router: maintenanceRouter },
+  { path: 'budgets', router: budgetRouter },
+  { path: 'branches', router: branchRouter },
+  { path: 'departments', router: departmentRouter },
+  { path: 'users', router: userRouter },
+  { path: 'audit-logs', router: auditRouter },
+];
+
+for (const { path: routePath, router } of subRouters) {
+  app.use(`/api/${routePath}`, router);
+  app.use(`/${routePath}`, router);
+}
 
 /**
  * Aggregated initial dataset for zero-roundtrip client initialization
  * Scoped strictly to authenticated user's organization!
  */
-app.get('/api/init', authenticate, async (req: Request, res: Response) => {
+app.get(['/api/init', '/init'], authenticate, async (req: Request, res: Response) => {
   const { orgId, role, branchId } = req.auth!;
 
   let effectiveOrgId = orgId;

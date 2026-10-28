@@ -151,15 +151,15 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
       try {
         const res = await fetch(`/api/auth/invite/${encodeURIComponent(cleanToken)}`);
         if (isCancelled) return;
-        const data = await res.json();
-        if (res.ok && data.valid && data.user) {
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.valid && data?.user) {
           setMatchedInvitedUser(data.user);
           setMatchedInvitedOrg(data.organization || organizations[0]!);
           setError(null);
         } else {
           setMatchedInvitedUser(null);
           setMatchedInvitedOrg(null);
-          setError(data.error || 'Invalid or expired invitation token.');
+          setError(data?.error || (res.status === 404 ? 'Invitation token not found or already consumed.' : 'Invalid or expired invitation token.'));
         }
       } catch {
         if (!isCancelled) {
@@ -305,18 +305,18 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
             twoFactorEnabled: twoFactorActivation
           })
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => null);
         if (!res.ok) {
-          setError(data.error || 'Failed to activate account.');
+          setError(data?.error || `Failed to activate account (HTTP ${res.status}).`);
           setIsLoading(false);
           return;
         }
-        const updatedUser: User = data.user || {
+        const updatedUser: User = data?.user || {
           ...matchedInvitedUser,
           status: 'ACTIVE',
           twoFactorEnabled: twoFactorActivation
         };
-        const org = data.organization || matchedInvitedOrg || organizations[0]!;
+        const org = data?.organization || matchedInvitedOrg || organizations[0]!;
         onLoginSuccess(updatedUser, org);
       }
     } catch (err: any) {

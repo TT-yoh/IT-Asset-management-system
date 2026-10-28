@@ -8,6 +8,7 @@ import {
   INITIAL_AUDIT_LOGS
 } from '../mockData';
 import {
+  STORAGE_KEYS,
   loadInitialData,
   persistAsset,
   deleteAssetFromDb,
