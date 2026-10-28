@@ -32,6 +32,9 @@ interface ColumnMapping {
   name: string;
   assetCode: string;
   serialNumber: string;
+  imeiNumber: string;
+  macAddress: string;
+  phoneNumber: string;
   category: string;
   purchaseCost: string;
   purchaseDate: string;
@@ -49,6 +52,9 @@ interface ParsedRow {
     name: string;
     assetCode: string;
     serialNumber: string;
+    imeiNumber: string;
+    macAddress: string;
+    phoneNumber: string;
     category: string;
     purchaseCost: number;
     purchaseDate: string;
@@ -62,6 +68,8 @@ interface ParsedRow {
   errors: string[];
   isDuplicateSerial: boolean;
   isDuplicateTag: boolean;
+  isDuplicateImei: boolean;
+  isDuplicateMac: boolean;
 }
 
 export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
@@ -84,6 +92,9 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
     name: '',
     assetCode: '',
     serialNumber: '',
+    imeiNumber: '',
+    macAddress: '',
+    phoneNumber: '',
     category: '',
     purchaseCost: '',
     purchaseDate: '',
@@ -112,6 +123,9 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
       name: findBestHeader(['model', 'devicename', 'assetname', 'name', 'item', 'description']),
       assetCode: findBestHeader(['assettag', 'assetcode', 'tag', 'barcode', 'assetid']),
       serialNumber: findBestHeader(['serialnumber', 'serialno', 'serial', 'sn']),
+      imeiNumber: findBestHeader(['imei', 'imeinumber', 'meid', 'cellularid', 'simimei']),
+      macAddress: findBestHeader(['macaddress', 'mac', 'ethernetmac', 'wifimac', 'physicaladdress']),
+      phoneNumber: findBestHeader(['phonenumber', 'phone', 'mobile', 'msisdn', 'line', 'cell', 'simnumber']),
       category: findBestHeader(['category', 'type', 'classtype', 'assetcategory']),
       purchaseCost: findBestHeader(['purchasecost', 'cost', 'price', 'purchaseprice', 'amount', 'value']),
       purchaseDate: findBestHeader(['purchasedate', 'acquired', 'acquisitiondate', 'date']),
@@ -167,6 +181,9 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
         'Asset Name': 'MacBook Pro 16" M3 Max',
         'Asset Tag': 'OMNI-LPT-901',
         'Serial Number': 'C02G8901M3X',
+        'IMEI': '',
+        'MAC Address': '3c:22:fb:1a:88:90',
+        'Phone Line': '',
         'Category': 'Laptops',
         'Purchase Cost': 3499.00,
         'Purchase Date': '2024-01-15',
@@ -177,9 +194,44 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
         'Condition': 'NEW'
       },
       {
+        'Asset Name': 'iPhone 15 Pro 256GB',
+        'Asset Tag': 'OMNI-PHN-204',
+        'Serial Number': '',
+        'IMEI': '359245108920194',
+        'MAC Address': 'f4:34:f0:88:91:ab',
+        'Phone Line': '+1 (555) 392-8192',
+        'Category': 'Phones & Tablets',
+        'Purchase Cost': 1199.00,
+        'Purchase Date': '2024-02-10',
+        'Location': branches[0]?.name || 'Main HQ',
+        'Department': 'Executive',
+        'Assigned To': 'ceo@omnicorp.com',
+        'Status': 'ACTIVE',
+        'Condition': 'NEW'
+      },
+      {
+        'Asset Name': 'Cisco Catalyst 9300 Switch',
+        'Asset Tag': 'OMNI-NET-801',
+        'Serial Number': 'FOC2439L901',
+        'IMEI': '',
+        'MAC Address': '00:1A:2B:3C:4D:5E',
+        'Phone Line': '',
+        'Category': 'Networking',
+        'Purchase Cost': 3200.00,
+        'Purchase Date': '2023-08-05',
+        'Location': branches[0]?.name || 'Main HQ',
+        'Department': 'IT Operations',
+        'Assigned To': '',
+        'Status': 'ACTIVE',
+        'Condition': 'GOOD'
+      },
+      {
         'Asset Name': 'Dell UltraSharp 27" 4K',
         'Asset Tag': 'OMNI-MON-442',
         'Serial Number': 'CN-0Y3K2M-12',
+        'IMEI': '',
+        'MAC Address': '',
+        'Phone Line': '',
         'Category': 'Monitors',
         'Purchase Cost': 580.00,
         'Purchase Date': '2023-11-20',
@@ -190,17 +242,20 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
         'Condition': 'GOOD'
       },
       {
-        'Asset Name': 'Cisco Catalyst 9300 Switch',
-        'Asset Tag': 'OMNI-NET-801',
-        'Serial Number': 'FOC2439L901',
-        'Category': 'Networking',
-        'Purchase Cost': 3200.00,
-        'Purchase Date': '2023-08-05',
+        'Asset Name': 'Logitech MX Master 3S Bundle',
+        'Asset Tag': 'OMNI-PER-301',
+        'Serial Number': '',
+        'IMEI': '',
+        'MAC Address': '',
+        'Phone Line': '',
+        'Category': 'Peripherals',
+        'Purchase Cost': 199.00,
+        'Purchase Date': '2024-03-01',
         'Location': branches[0]?.name || 'Main HQ',
-        'Department': 'IT Operations',
+        'Department': 'Engineering',
         'Assigned To': '',
-        'Status': 'ACTIVE',
-        'Condition': 'GOOD'
+        'Status': 'SPARE',
+        'Condition': 'NEW'
       }
     ];
 
@@ -228,6 +283,9 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
     }
 
     const serialNumber = String(row[mapping.serialNumber] || '').trim();
+    const imeiNumber = String(row[mapping.imeiNumber] || '').trim();
+    const macAddress = String(row[mapping.macAddress] || '').trim();
+    const phoneNumber = String(row[mapping.phoneNumber] || '').trim();
 
     // Check duplicates against existing assets
     const isDuplicateSerial = Boolean(
@@ -236,6 +294,16 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
 
     const isDuplicateTag = existingAssets.some(
       a => a.assetCode.toLowerCase() === assetCode.toLowerCase()
+    );
+
+    const cleanImei = imeiNumber.replace(/[^0-9]/g, '');
+    const isDuplicateImei = Boolean(
+      cleanImei && existingAssets.some(a => a.imeiNumber && a.imeiNumber.replace(/[^0-9]/g, '') === cleanImei)
+    );
+
+    const cleanMac = macAddress.toLowerCase().replace(/[^a-f0-9]/g, '');
+    const isDuplicateMac = Boolean(
+      cleanMac && existingAssets.some(a => a.macAddress && a.macAddress.toLowerCase().replace(/[^a-f0-9]/g, '') === cleanMac)
     );
 
     // Number conversion for cost
@@ -272,6 +340,9 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
         name,
         assetCode,
         serialNumber,
+        imeiNumber,
+        macAddress,
+        phoneNumber,
         category,
         purchaseCost,
         purchaseDate,
@@ -284,13 +355,15 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
       isValid: errors.length === 0,
       errors,
       isDuplicateSerial,
-      isDuplicateTag
+      isDuplicateTag,
+      isDuplicateImei,
+      isDuplicateMac
     };
   });
 
   // Count summaries
-  const validCount = parsedRows.filter(r => r.isValid && !r.isDuplicateSerial && !r.isDuplicateTag).length;
-  const duplicateCount = parsedRows.filter(r => r.isDuplicateSerial || r.isDuplicateTag).length;
+  const validCount = parsedRows.filter(r => r.isValid && !r.isDuplicateSerial && !r.isDuplicateTag && !r.isDuplicateImei && !r.isDuplicateMac).length;
+  const duplicateCount = parsedRows.filter(r => r.isDuplicateSerial || r.isDuplicateTag || r.isDuplicateImei || r.isDuplicateMac).length;
   const invalidCount = parsedRows.filter(r => !r.isValid).length;
 
   // Final batch commit
@@ -304,7 +377,7 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
         return;
       }
 
-      const hasDuplicateConflict = row.isDuplicateSerial || row.isDuplicateTag;
+      const hasDuplicateConflict = row.isDuplicateSerial || row.isDuplicateTag || row.isDuplicateImei || row.isDuplicateMac;
       if (hasDuplicateConflict) {
         if (duplicateStrategy === 'SKIP') {
           skipped++;
@@ -320,6 +393,18 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
       const matchedCat = categories.find(c => c.name.toLowerCase() === row.mapped.category.toLowerCase()) || categories[0] || { id: 'cat-laptops', name: 'Laptops' };
       const matchedBranch = branches.find(b => b.name.toLowerCase() === row.mapped.branchName.toLowerCase()) || branches[0] || { id: 'b1', name: 'Main HQ' };
 
+      // Category-aware fallback serial number
+      let fallbackSerial = row.mapped.serialNumber;
+      if (!fallbackSerial) {
+        if (row.mapped.imeiNumber) {
+          fallbackSerial = `IMEI-${row.mapped.imeiNumber}`;
+        } else if (row.mapped.macAddress) {
+          fallbackSerial = `MAC-${row.mapped.macAddress.replace(/[^a-zA-Z0-9]/g, '')}`;
+        } else {
+          fallbackSerial = `TAG-${finalCode}`;
+        }
+      }
+
       const newAsset: Asset = {
         id: `ast-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 5)}`,
         orgId: organization.id,
@@ -329,7 +414,10 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
         categoryName: matchedCat.name,
         category: matchedCat.name,
         assetCode: finalCode,
-        serialNumber: row.mapped.serialNumber || `SN-${finalCode}`,
+        serialNumber: fallbackSerial,
+        imeiNumber: row.mapped.imeiNumber || undefined,
+        macAddress: row.mapped.macAddress || undefined,
+        phoneNumber: row.mapped.phoneNumber || undefined,
         status: row.mapped.status,
         condition: row.mapped.condition,
         purchaseCost: row.mapped.purchaseCost,
@@ -472,8 +560,11 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5 max-h-[340px] overflow-y-auto pr-1">
               {[
                 { key: 'name', label: 'Device Model / Name', required: true },
-                { key: 'assetCode', label: 'Asset Tag / Code', required: false, hint: 'Auto-generated if empty' },
-                { key: 'serialNumber', label: 'Hardware Serial #', required: false },
+                { key: 'assetCode', label: 'Asset Tag / Code', required: false },
+                { key: 'serialNumber', label: 'Hardware Serial # (PCs/Laptops)', required: false },
+                { key: 'imeiNumber', label: 'Cellular IMEI (Phones/Tablets)', required: false },
+                { key: 'phoneNumber', label: 'Corporate SIM / Phone #', required: false },
+                { key: 'macAddress', label: 'Network MAC Address (Switches/APs)', required: false },
                 { key: 'category', label: 'Hardware Category', required: false },
                 { key: 'purchaseCost', label: 'Purchase Cost / Price', required: false },
                 { key: 'purchaseDate', label: 'Purchase Date', required: false },
@@ -593,7 +684,7 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
                     <th className="p-2.5">Row</th>
                     <th className="p-2.5">Device Name</th>
                     <th className="p-2.5">Asset Tag</th>
-                    <th className="p-2.5">Serial #</th>
+                    <th className="p-2.5">Hardware Identifier</th>
                     <th className="p-2.5">Category</th>
                     <th className="p-2.5">Branch</th>
                     <th className="p-2.5">Cost</th>
@@ -606,14 +697,27 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
                       <td className="p-2.5 font-mono text-slate-500">#{row.index}</td>
                       <td className="p-2.5 font-bold text-slate-200">{row.mapped.name}</td>
                       <td className="p-2.5 font-mono text-emerald-400">{row.mapped.assetCode}</td>
-                      <td className="p-2.5 font-mono text-slate-300">{row.mapped.serialNumber || '-'}</td>
+                      <td className="p-2.5 font-mono text-slate-300">
+                        {row.mapped.imeiNumber ? (
+                          <div className="text-amber-400 font-semibold">IMEI: {row.mapped.imeiNumber}</div>
+                        ) : row.mapped.macAddress ? (
+                          <div className="text-cyan-400 font-semibold">MAC: {row.mapped.macAddress}</div>
+                        ) : row.mapped.serialNumber ? (
+                          <div>S/N: {row.mapped.serialNumber}</div>
+                        ) : (
+                          <div className="text-slate-500 italic">Tag Tracked</div>
+                        )}
+                        {row.mapped.phoneNumber && (
+                          <div className="text-[10px] text-slate-400 font-sans">📞 {row.mapped.phoneNumber}</div>
+                        )}
+                      </td>
                       <td className="p-2.5 text-slate-400">{row.mapped.category}</td>
                       <td className="p-2.5 text-slate-400">{row.mapped.branchName}</td>
                       <td className="p-2.5 font-mono text-slate-300">${row.mapped.purchaseCost.toFixed(2)}</td>
                       <td className="p-2.5">
-                        {row.isDuplicateSerial || row.isDuplicateTag ? (
+                        {row.isDuplicateSerial || row.isDuplicateTag || row.isDuplicateImei || row.isDuplicateMac ? (
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                            Duplicate
+                            Duplicate {row.isDuplicateImei ? 'IMEI' : row.isDuplicateMac ? 'MAC' : row.isDuplicateSerial ? 'S/N' : 'Tag'}
                           </span>
                         ) : !row.isValid ? (
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">

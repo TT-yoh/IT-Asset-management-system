@@ -10,9 +10,25 @@
  * 7. Consumed token cannot be reused (single-use enforcement).
  */
 
-const BASE_URL = 'http://localhost:3001';
+import app from '../server/index';
+
+let BASE_URL = 'http://localhost:3001';
+let serverInstance: any = null;
 
 async function run() {
+  try {
+    const probe = await fetch('http://localhost:3001/api/health', { signal: AbortSignal.timeout(600) });
+    if (!probe.ok) {
+      serverInstance = app.listen(0);
+      const address = serverInstance.address() as any;
+      BASE_URL = `http://127.0.0.1:${address.port}`;
+    }
+  } catch {
+    serverInstance = app.listen(0);
+    const address = serverInstance.address() as any;
+    BASE_URL = `http://127.0.0.1:${address.port}`;
+  }
+
   console.log('=== Starting User Invitation & Activation Lifecycle Test Suite ===');
   let adminCookie = '';
 
@@ -197,7 +213,13 @@ async function run() {
   console.log('======================================================\n');
 }
 
-run().catch(err => {
-  console.error('Test failed with error:', err);
-  process.exit(1);
-});
+run()
+  .catch(err => {
+    console.error('Test failed with error:', err);
+    process.exit(1);
+  })
+  .finally(() => {
+    if (serverInstance) {
+      serverInstance.close();
+    }
+  });

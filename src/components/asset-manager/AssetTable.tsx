@@ -130,7 +130,19 @@ export const AssetTable: React.FC<AssetTableProps> = ({
                   <td className="p-3">
                     <div className="font-semibold text-slate-100">{asset.name || 'Hardware Asset'}</div>
                     <div className="text-[11px] text-slate-400 font-mono">
-                      {asset.model || 'N/A'} • S/N: {asset.serialNumber || 'N/A'}
+                      {asset.model && asset.model !== asset.name ? `${asset.model} • ` : ''}
+                      {asset.imeiNumber ? (
+                        <span className="text-emerald-400">IMEI: {asset.imeiNumber}</span>
+                      ) : asset.macAddress ? (
+                        <span className="text-cyan-400">MAC: {asset.macAddress}</span>
+                      ) : asset.serialNumber && !asset.serialNumber.toLowerCase().startsWith('sn-ast') && !asset.serialNumber.toLowerCase().startsWith('sn-bulk') ? (
+                        <span>S/N: {asset.serialNumber}</span>
+                      ) : (
+                        <span className="text-slate-500">Asset Tag Tracked</span>
+                      )}
+                      {asset.phoneNumber && (
+                        <span className="text-slate-400 ml-1.5">• Line: {asset.phoneNumber}</span>
+                      )}
                     </div>
                   </td>
 

@@ -100,6 +100,36 @@ export const PhysicalAuditModal: React.FC<PhysicalAuditModalProps> = ({
     } catch {}
   };
 
+  // Helper to match scanned barcode across Asset Code, S/N, IMEI, MAC, or Phone line
+  const findMatchingAsset = (code: string): Asset | undefined => {
+    const clean = code.trim().toLowerCase();
+    const stripped = clean.replace(/[^a-z0-9]/g, '');
+
+    return allAssets.find(a => {
+      if (a.assetCode.toLowerCase() === clean) return true;
+      if (a.serialNumber && a.serialNumber.toLowerCase() === clean) return true;
+      if (a.imeiNumber && a.imeiNumber.replace(/[^a-z0-9]/g, '').toLowerCase() === stripped) return true;
+      if (a.macAddress && a.macAddress.replace(/[^a-z0-9]/g, '').toLowerCase() === stripped) return true;
+      if (a.phoneNumber && a.phoneNumber.replace(/[^0-9]/g, '') === stripped) return true;
+      return false;
+    });
+  };
+
+  const isAssetScanned = (a: Asset): boolean => {
+    if (scannedCodes.has(a.assetCode)) return true;
+    if (a.serialNumber && scannedCodes.has(a.serialNumber)) return true;
+    if (a.imeiNumber && scannedCodes.has(a.imeiNumber)) return true;
+    if (a.macAddress && scannedCodes.has(a.macAddress)) return true;
+    if (a.phoneNumber && scannedCodes.has(a.phoneNumber)) return true;
+
+    for (const code of scannedCodes) {
+      const stripped = code.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (a.imeiNumber && a.imeiNumber.replace(/[^a-z0-9]/g, '').toLowerCase() === stripped) return true;
+      if (a.macAddress && a.macAddress.replace(/[^a-z0-9]/g, '').toLowerCase() === stripped) return true;
+    }
+    return false;
+  };
+
   // Process a scanned code (assetCode or serialNumber or JSON payload)
   const processCode = (rawCode: string) => {
     const clean = rawCode.trim();
@@ -111,11 +141,8 @@ export const PhysicalAuditModal: React.FC<PhysicalAuditModalProps> = ({
       if (parsed.code) targetCode = parsed.code;
     } catch {}
 
-    // Check match in all assets
-    const matchedAsset = allAssets.find(
-      a => a.assetCode.toLowerCase() === targetCode.toLowerCase() || 
-           (a.serialNumber && a.serialNumber.toLowerCase() === targetCode.toLowerCase())
-    );
+    // Check match in all assets across all identifiers (Tag, S/N, IMEI, MAC)
+    const matchedAsset = findMatchingAsset(targetCode);
 
     setScannedCodes(prev => new Set(prev).add(targetCode));
 
@@ -189,27 +216,15 @@ export const PhysicalAuditModal: React.FC<PhysicalAuditModalProps> = ({
     };
   }, [isCameraActive, activeBranch.id]);
 
-  // Classification lists
-  const verifiedAssets = expectedAssets.filter(
-    a => scannedCodes.has(a.assetCode) || (a.serialNumber && scannedCodes.has(a.serialNumber))
-  );
-
-  const missingAssets = expectedAssets.filter(
-    a => !scannedCodes.has(a.assetCode) && (!a.serialNumber || !scannedCodes.has(a.serialNumber))
-  );
-
+  // Classification lists supporting all identifier formats
+  const verifiedAssets = expectedAssets.filter(isAssetScanned);
+  const missingAssets = expectedAssets.filter(a => !isAssetScanned(a));
   const displacedAssets = allAssets.filter(a => {
     const isAtOtherBranch = a.branchId !== activeBranch.id && a.branchName !== activeBranch.name;
-    const isScanned = scannedCodes.has(a.assetCode) || (a.serialNumber && scannedCodes.has(a.serialNumber));
-    return isAtOtherBranch && isScanned;
+    return isAtOtherBranch && isAssetScanned(a);
   });
 
-  const unregisteredCodes = Array.from(scannedCodes).filter((code: string) => {
-    return !allAssets.some(
-      a => a.assetCode.toLowerCase() === code.toLowerCase() || 
-           (a.serialNumber && a.serialNumber.toLowerCase() === code.toLowerCase())
-    );
-  });
+  const unregisteredCodes = Array.from(scannedCodes).filter((code: string) => !findMatchingAsset(code));
 
   const totalExpected = expectedAssets.length;
   const verifiedCount = verifiedAssets.length;
@@ -569,7 +584,16 @@ export const PhysicalAuditModal: React.FC<PhysicalAuditModalProps> = ({
                   <div key={ast.id} className="py-2.5 flex items-center justify-between">
                     <div>
                       <div className="font-bold text-slate-100">{ast.name}</div>
-                      <div className="text-[11px] font-mono text-emerald-400">{ast.assetCode} • S/N: {ast.serialNumber || 'N/A'}</div>
+                      <div className="text-[11px] font-mono text-emerald-400">
+                        {ast.assetCode}
+                        {ast.imeiNumber ? (
+                          <span className="text-slate-300"> • IMEI: {ast.imeiNumber}</span>
+                        ) : ast.macAddress ? (
+                          <span className="text-slate-300"> • MAC: {ast.macAddress}</span>
+                        ) : ast.serialNumber && !ast.serialNumber.toLowerCase().startsWith('sn-ast') ? (
+                          <span className="text-slate-300"> • S/N: {ast.serialNumber}</span>
+                        ) : null}
+                      </div>
                     </div>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                       Confirmed

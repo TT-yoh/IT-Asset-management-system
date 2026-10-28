@@ -57,6 +57,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
     serialNumber: '',
     macAddress: '',
     imeiNumber: '',
+    phoneNumber: '',
     categoryId: categories[0]?.id || 'cat-1',
     categoryName: categories[0]?.name || 'Laptop',
     branchId: branches[0]?.id || '',
@@ -88,6 +89,31 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
     const date = formData.purchaseDate || new Date().toISOString().split('T')[0]!;
     return AssetService.calculateCurrentValue(cost, date);
   }, [formData.purchaseCost, formData.purchaseDate]);
+
+  // Category-specific hardware identifier context
+  const isPhoneOrTablet = Boolean(
+    formData.categoryName?.toLowerCase().includes('phone') ||
+    formData.categoryName?.toLowerCase().includes('mobile') ||
+    formData.categoryName?.toLowerCase().includes('tablet') ||
+    formData.categoryName?.toLowerCase().includes('satcom')
+  );
+
+  const isNetworking = Boolean(
+    formData.categoryName?.toLowerCase().includes('network') ||
+    formData.categoryName?.toLowerCase().includes('switch') ||
+    formData.categoryName?.toLowerCase().includes('router') ||
+    formData.categoryName?.toLowerCase().includes('printer') ||
+    formData.categoryName?.toLowerCase().includes('firewall')
+  );
+
+  const isPeripheral = Boolean(
+    formData.categoryName?.toLowerCase().includes('keyboard') ||
+    formData.categoryName?.toLowerCase().includes('mouse') ||
+    formData.categoryName?.toLowerCase().includes('dock') ||
+    formData.categoryName?.toLowerCase().includes('periph') ||
+    formData.categoryName?.toLowerCase().includes('cable') ||
+    formData.categoryName?.toLowerCase().includes('accessory')
+  );
 
   // Live Redundant Data & Duplicate Detection
   const redundancyCheck = useMemo(() => {
@@ -176,6 +202,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
         serialNumber: '',
         macAddress: '',
         imeiNumber: '',
+        phoneNumber: '',
         categoryId: categories[0]?.id || 'cat-1',
         categoryName: categories[0]?.name || 'Laptop',
         branchId: branches[0]?.id || '',
@@ -301,9 +328,10 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
       name: formData.name.trim(),
       model: formData.model?.trim() || formData.name.trim(),
       assetCode: formData.assetCode.trim(),
-      serialNumber: formData.serialNumber?.trim() || `SN-${Date.now().toString().slice(-6)}`,
+      serialNumber: formData.serialNumber?.trim() || (formData.imeiNumber ? `IMEI-${formData.imeiNumber.trim()}` : `SN-${formData.assetCode.trim()}`),
       macAddress: formData.macAddress?.trim(),
       imeiNumber: formData.imeiNumber?.trim(),
+      phoneNumber: formData.phoneNumber?.trim(),
       categoryId: category.id,
       categoryName: category.name,
       branchId: branch.id,
@@ -910,11 +938,25 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                   </div>
 
                   <div className="sm:col-span-2">
-                    <label className="block text-slate-300 font-semibold mb-1">Manufacturer Serial Number (S/N)</label>
+                    <label className="block text-slate-300 font-semibold mb-1">
+                      {isPhoneOrTablet
+                        ? 'Manufacturer Serial Number (Optional for mobile phones)'
+                        : isNetworking
+                          ? 'Chassis Serial Number (Optional)'
+                          : isPeripheral
+                            ? 'Manufacturer Serial # (Optional - tracked by Asset Tag)'
+                            : 'Manufacturer Serial Number (S/N)'}
+                    </label>
                     <input
                       type="text"
                       value={formData.serialNumber || ''}
-                      placeholder="e.g. 7X9K2M3 or C02G8..."
+                      placeholder={
+                        isPhoneOrTablet
+                          ? 'Optional for phones (Identified by IMEI below)'
+                          : isPeripheral
+                            ? 'Optional (Tracked primarily by Asset Tag barcode/QR)'
+                            : 'e.g. 7X9K2M3 or C02G8...'
+                      }
                       onChange={(e) => setFormData({ ...formData, serialNumber: e.target.value })}
                       className={`w-full px-3 py-2 bg-slate-900 border rounded-xl font-mono text-slate-100 focus:outline-none transition ${
                         redundancyCheck.serialConflict
@@ -930,9 +972,87 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                         </div>
                       </div>
                     ) : (
-                      <p className="text-[10px] text-slate-400 mt-0.5">Factory hardware serial number or Dell Service Tag from chassis.</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        {isPhoneOrTablet
+                          ? 'Phones rarely feature external chassis serial numbers; the IMEI and cellular line below serve as primary identifiers.'
+                          : isPeripheral
+                            ? 'Keyboards, mice, and docks often share batch numbers or lack serials. The Asset Tag barcode / QR sticker serves as the primary identifier.'
+                            : 'Factory hardware serial number or Dell Service Tag from chassis.'}
+                      </p>
                     )}
                   </div>
+
+                  {/* Promoted Primary Cellular Identifiers for Phones & Tablets */}
+                  {isPhoneOrTablet && (
+                    <>
+                      <div>
+                        <label className="block text-slate-300 font-semibold mb-1">
+                          IMEI / Cellular ID <span className="text-emerald-400 font-mono text-[11px]">(Primary Phone Identifier)</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.imeiNumber || ''}
+                          onChange={(e) => setFormData({ ...formData, imeiNumber: e.target.value })}
+                          placeholder="e.g. 354892091234567"
+                          className={`w-full px-3 py-2 bg-slate-900 border rounded-xl font-mono text-slate-100 focus:outline-none transition ${
+                            redundancyCheck.imeiConflict
+                              ? 'border-rose-500/80 bg-rose-950/20 focus:border-rose-400'
+                              : 'border-slate-700 focus:border-emerald-500'
+                          }`}
+                        />
+                        {redundancyCheck.imeiConflict ? (
+                          <div className="mt-1.5 p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] flex items-center gap-1.5">
+                            <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                            <span>IMEI in use by <strong>{redundancyCheck.imeiConflict.name}</strong> ({redundancyCheck.imeiConflict.assetCode}).</span>
+                          </div>
+                        ) : (
+                          <p className="text-[10px] text-emerald-400/90 mt-0.5">15-digit hardware IMEI. Dial *#06# on device or scan box barcode.</p>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-300 font-semibold mb-1">
+                          Corporate SIM / Mobile Line
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.phoneNumber || ''}
+                          onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
+                          placeholder="e.g. +263 77 123 4567"
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
+                        />
+                        <p className="text-[10px] text-slate-400 mt-0.5">Corporate line number or SIM card assigned to handset.</p>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Promoted MAC Address for Networking Gear */}
+                  {isNetworking && (
+                    <div className="sm:col-span-2">
+                      <label className="block text-slate-300 font-semibold mb-1">
+                        Network MAC Address <span className="text-emerald-400 font-mono text-[11px]">(Primary Hardware Identifier)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.macAddress || ''}
+                        onChange={(e) => setFormData({ ...formData, macAddress: e.target.value })}
+                        placeholder="e.g. 00:1A:2B:3C:4D:5E"
+                        className={`w-full px-3 py-2 bg-slate-900 border rounded-xl font-mono text-slate-100 focus:outline-none transition ${
+                          redundancyCheck.macConflict
+                            ? 'border-rose-500/80 bg-rose-950/20 focus:border-rose-400'
+                            : 'border-slate-700 focus:border-emerald-500'
+                        }`}
+                      />
+                      {redundancyCheck.macConflict ? (
+                        <div className="mt-1.5 p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] flex items-center gap-1.5">
+                          <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                          <span>MAC in use by <strong>{redundancyCheck.macConflict.name}</strong> ({redundancyCheck.macConflict.assetCode}).</span>
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-emerald-400/90 mt-0.5">Physical MAC address from hardware chassis backplate or switch port 1.</p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 

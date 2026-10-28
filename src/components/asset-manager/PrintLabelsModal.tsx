@@ -17,6 +17,23 @@ import { jsPDF } from 'jspdf';
 
 export type LabelSheetFormat = 'avery5160' | 'avery5163' | 'thermalRoll' | 'compact21';
 
+// Dynamic smart identifier extractor: adapts for phones (IMEI), routers (MAC), or PCs (S/N)
+export function getPrimaryIdentifier(ast: Asset): { label: string; value: string } | null {
+  if (ast.imeiNumber) {
+    return { label: 'IMEI', value: ast.imeiNumber };
+  }
+  if (ast.macAddress) {
+    return { label: 'MAC', value: ast.macAddress };
+  }
+  if (ast.serialNumber && !ast.serialNumber.toLowerCase().startsWith('sn-ast') && !ast.serialNumber.toLowerCase().startsWith('sn-bulk')) {
+    return { label: 'S/N', value: ast.serialNumber };
+  }
+  if (ast.phoneNumber) {
+    return { label: 'Line', value: ast.phoneNumber };
+  }
+  return null;
+}
+
 interface LabelConfig {
   format: LabelSheetFormat;
   showOrgName: boolean;
@@ -136,8 +153,9 @@ export const PrintLabelsModal: React.FC<PrintLabelsModalProps> = ({
           pdf.setFont('helvetica', 'normal');
           pdf.setFontSize(6);
           pdf.text(ast.name.slice(0, 22), 22, 13);
-          if (config.showSerialNumber && ast.serialNumber) {
-            pdf.text(`S/N: ${ast.serialNumber.slice(0, 16)}`, 22, 17);
+          const ident = getPrimaryIdentifier(ast);
+          if (config.showSerialNumber && ident) {
+            pdf.text(`${ident.label}: ${ident.value.slice(0, 16)}`, 22, 17);
           }
           if (config.showBranch && ast.branchName) {
             pdf.text(`Loc: ${ast.branchName.slice(0, 16)}`, 22, 21);
@@ -225,11 +243,12 @@ export const PrintLabelsModal: React.FC<PrintLabelsModalProps> = ({
             currentY += is5163 ? 0.18 : 0.11;
           }
 
-          // Serial Number
-          if (config.showSerialNumber && ast.serialNumber) {
+          // Dynamic Primary Identifier (IMEI, MAC, or S/N)
+          const ident = getPrimaryIdentifier(ast);
+          if (config.showSerialNumber && ident) {
             pdf.setFontSize(is5163 ? 7.5 : 5.5);
             pdf.setTextColor(60, 60, 60);
-            pdf.text(`S/N: ${ast.serialNumber.slice(0, is5163 ? 24 : 16)}`, textX, currentY);
+            pdf.text(`${ident.label}: ${ident.value.slice(0, is5163 ? 24 : 16)}`, textX, currentY);
             currentY += is5163 ? 0.16 : 0.1;
           }
 
@@ -464,11 +483,15 @@ export const PrintLabelsModal: React.FC<PrintLabelsModalProps> = ({
                         </div>
                       )}
 
-                      {config.showSerialNumber && ast.serialNumber && (
-                        <div className="text-[10px] text-slate-600 font-mono truncate">
-                          S/N: <span className="font-semibold text-slate-900">{ast.serialNumber}</span>
-                        </div>
-                      )}
+                      {config.showSerialNumber && (() => {
+                        const ident = getPrimaryIdentifier(ast);
+                        if (!ident) return null;
+                        return (
+                          <div className="text-[10px] text-slate-600 font-mono truncate">
+                            {ident.label}: <span className="font-semibold text-slate-900">{ident.value}</span>
+                          </div>
+                        );
+                      })()}
 
                       {config.showBranch && ast.branchName && (
                         <div className="text-[9px] text-slate-500 truncate">
