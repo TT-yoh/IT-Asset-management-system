@@ -25530,8 +25530,9 @@ assetRouter.use(authenticate);
 assetRouter.get("/", requirePermission("assets:read"), async (req, res) => {
   const { orgId, role, branchId } = req.auth;
   let effectiveOrgId = orgId;
+  const isSuperAdmin = req.auth.userId === "usr-super-admin-ishmael";
   const requestedOrg = req.headers["x-org-id"] || req.query.orgId;
-  if (requestedOrg && (role === "ADMIN" || role === "DIRECTOR")) {
+  if (requestedOrg && isSuperAdmin) {
     effectiveOrgId = requestedOrg;
   }
   let sql = "SELECT * FROM `assets` WHERE `org_id` = ?";
@@ -25547,8 +25548,9 @@ assetRouter.get("/", requirePermission("assets:read"), async (req, res) => {
 assetRouter.get("/check-redundancy", async (req, res) => {
   const { orgId, role } = req.auth;
   let effectiveOrgId = orgId;
+  const isSuperAdmin = req.auth.userId === "usr-super-admin-ishmael";
   const requestedOrg = req.headers["x-org-id"] || req.query.orgId;
-  if (requestedOrg && (role === "ADMIN" || role === "DIRECTOR")) {
+  if (requestedOrg && isSuperAdmin) {
     effectiveOrgId = requestedOrg;
   }
   const assetCode = String(req.query.assetCode || "").trim();
@@ -25653,7 +25655,8 @@ assetRouter.post("/", requirePermission("assets:create"), async (req, res) => {
   const assetId = data.id || `ast-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
   const effectiveBranchId = role === "BRANCH_MANAGER" ? userBranchId : data.branchId || data.branch_id || userBranchId;
   const condition = normalizeCondition(data.condition || data.assetCondition || data.asset_condition);
-  const effectiveOrgId = (role === "ADMIN" || role === "DIRECTOR") && (data.orgId || data.org_id) ? data.orgId || data.org_id : orgId;
+  const isSuperAdmin = actorId === "usr-super-admin-ishmael";
+  const effectiveOrgId = isSuperAdmin && (data.orgId || data.org_id) ? data.orgId || data.org_id : orgId;
   const cleanCode = assetCode.trim();
   const cleanSerial = serialNumber.trim();
   const mac = (data.macAddress || data.mac_address || "").trim();
@@ -26964,7 +26967,8 @@ app.get(["/api/init", "/init"], authenticate, async (req, res) => {
   const { orgId, role, branchId } = req.auth;
   let effectiveOrgId = orgId;
   const requestedOrg = req.headers["x-org-id"] || req.query.orgId;
-  if (requestedOrg && (role === "ADMIN" || role === "DIRECTOR")) {
+  const isSuperAdmin = req.auth.userId === "usr-super-admin-ishmael";
+  if (requestedOrg && isSuperAdmin) {
     effectiveOrgId = requestedOrg;
   }
   try {

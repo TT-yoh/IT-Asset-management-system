@@ -11,7 +11,10 @@
  * - Logout Session Termination
  */
 
-const BASE_URL = 'http://localhost:3001';
+import app from '../server/index';
+
+let BASE_URL = 'http://localhost:3001';
+let serverInstance: any = null;
 
 interface TestStep {
   name: string;
@@ -436,20 +439,40 @@ test('18. User Logout (POST /api/auth/logout)', async () => {
 // Runner
 async function run() {
   console.log('🚀 Running OmniAsset 100% System Functionality Verification Suite...');
+
+  try {
+    const healthCheck = await fetch(`${BASE_URL}/api/health`).catch(() => null);
+    if (!healthCheck || !healthCheck.ok) {
+      serverInstance = app.listen(0);
+      const address = serverInstance.address() as any;
+      BASE_URL = `http://127.0.0.1:${address.port}`;
+    }
+  } catch {
+    serverInstance = app.listen(0);
+    const address = serverInstance.address() as any;
+    BASE_URL = `http://127.0.0.1:${address.port}`;
+  }
+
   console.log(`📡 Target API Gateway: ${BASE_URL}\n`);
 
   let passed = 0;
   let failed = 0;
 
-  for (const step of steps) {
-    try {
-      await step.fn();
-      console.log(`  ✅ PASS: ${step.name}`);
-      passed++;
-    } catch (err: any) {
-      console.error(`  ❌ FAIL: ${step.name}`);
-      console.error(`     Error: ${err.message}`);
-      failed++;
+  try {
+    for (const step of steps) {
+      try {
+        await step.fn();
+        console.log(`  ✅ PASS: ${step.name}`);
+        passed++;
+      } catch (err: any) {
+        console.error(`  ❌ FAIL: ${step.name}`);
+        console.error(`     Error: ${err.message}`);
+        failed++;
+      }
+    }
+  } finally {
+    if (serverInstance) {
+      serverInstance.close();
     }
   }
 

@@ -74,7 +74,8 @@ app.get(['/api/init', '/init'], authenticate, async (req: Request, res: Response
 
   let effectiveOrgId = orgId;
   const requestedOrg = (req.headers['x-org-id'] as string) || (req.query.orgId as string);
-  if (requestedOrg && (role === 'ADMIN' || role === 'DIRECTOR')) {
+  const isSuperAdmin = req.auth!.userId === 'usr-super-admin-ishmael';
+  if (requestedOrg && isSuperAdmin) {
     effectiveOrgId = requestedOrg;
   }
 

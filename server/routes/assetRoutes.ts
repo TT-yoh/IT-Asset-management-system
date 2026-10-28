@@ -14,8 +14,9 @@ assetRouter.get('/', requirePermission('assets:read'), async (req: Request, res:
   const { orgId, role, branchId } = req.auth!;
 
   let effectiveOrgId = orgId;
+  const isSuperAdmin = req.auth!.userId === 'usr-super-admin-ishmael';
   const requestedOrg = (req.headers['x-org-id'] as string) || (req.query.orgId as string);
-  if (requestedOrg && (role === 'ADMIN' || role === 'DIRECTOR')) {
+  if (requestedOrg && isSuperAdmin) {
     effectiveOrgId = requestedOrg;
   }
 
@@ -41,8 +42,9 @@ assetRouter.get('/', requirePermission('assets:read'), async (req: Request, res:
 assetRouter.get('/check-redundancy', async (req: Request, res: Response) => {
   const { orgId, role } = req.auth!;
   let effectiveOrgId = orgId;
+  const isSuperAdmin = req.auth!.userId === 'usr-super-admin-ishmael';
   const requestedOrg = (req.headers['x-org-id'] as string) || (req.query.orgId as string);
-  if (requestedOrg && (role === 'ADMIN' || role === 'DIRECTOR')) {
+  if (requestedOrg && isSuperAdmin) {
     effectiveOrgId = requestedOrg;
   }
 
@@ -168,7 +170,8 @@ assetRouter.post('/', requirePermission('assets:create'), async (req: Request, r
   // Enforce branch scoping: BRANCH_MANAGER can only create within their branch
   const effectiveBranchId = role === 'BRANCH_MANAGER' ? userBranchId : (data.branchId || data.branch_id || userBranchId);
   const condition = normalizeCondition(data.condition || data.assetCondition || data.asset_condition);
-  const effectiveOrgId = ((role === 'ADMIN' || role === 'DIRECTOR') && (data.orgId || data.org_id))
+  const isSuperAdmin = actorId === 'usr-super-admin-ishmael';
+  const effectiveOrgId = (isSuperAdmin && (data.orgId || data.org_id))
     ? (data.orgId || data.org_id)
     : orgId;
 

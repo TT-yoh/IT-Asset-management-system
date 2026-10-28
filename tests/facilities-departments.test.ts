@@ -6,7 +6,10 @@
  * - Role-based authorization & permission boundary enforcement
  */
 
-const BASE_URL = 'http://localhost:3001';
+import app from '../server/index';
+
+let BASE_URL = 'http://localhost:3001';
+let serverInstance: any = null;
 
 interface TestStep {
   name: string;
@@ -250,18 +253,38 @@ test('9. Immutable Audit Chain contains Department & Branch events', async () =>
 
 async function run() {
   console.log('🏛️ Running Admin Facilities & Department Management Tests...\n');
+
+  try {
+    const healthCheck = await fetch(`${BASE_URL}/api/health`).catch(() => null);
+    if (!healthCheck || !healthCheck.ok) {
+      serverInstance = app.listen(0);
+      const address = serverInstance.address() as any;
+      BASE_URL = `http://127.0.0.1:${address.port}`;
+    }
+  } catch {
+    serverInstance = app.listen(0);
+    const address = serverInstance.address() as any;
+    BASE_URL = `http://127.0.0.1:${address.port}`;
+  }
+
   let passed = 0;
   let failed = 0;
 
-  for (const step of steps) {
-    try {
-      await step.fn();
-      console.log(`  ✅ PASS: ${step.name}`);
-      passed++;
-    } catch (err: any) {
-      console.error(`  ❌ FAIL: ${step.name}`);
-      console.error(`     ${err.message}`);
-      failed++;
+  try {
+    for (const step of steps) {
+      try {
+        await step.fn();
+        console.log(`  ✅ PASS: ${step.name}`);
+        passed++;
+      } catch (err: any) {
+        console.error(`  ❌ FAIL: ${step.name}`);
+        console.error(`     ${err.message}`);
+        failed++;
+      }
+    }
+  } finally {
+    if (serverInstance) {
+      serverInstance.close();
     }
   }
 
