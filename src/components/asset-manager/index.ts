@@ -4,3 +4,6 @@ export * from './AssetDetailModal';
 export * from './AssetUpsertModal';
 export * from './AssetCheckOutModal';
 export * from './BatchActionToolbar';
+export * from './PrintLabelsModal';
+export * from './PhysicalAuditModal';
+export * from './ImportAssetsModal';

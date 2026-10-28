@@ -7,9 +7,11 @@ import {
   AssetDetailModal, 
   AssetUpsertModal, 
   AssetCheckOutModal, 
-  BatchActionToolbar 
+  BatchActionToolbar,
+  PrintLabelsModal,
+  PhysicalAuditModal,
+  ImportAssetsModal
 } from './asset-manager';
-import { BatchLabelPrinter } from './BatchLabelPrinter';
 import { exportToExcel } from '../lib/report-service';
 import { AssetService } from '../lib/asset-service';
 import {
@@ -27,7 +29,8 @@ import {
   Sparkles,
   Layers,
   X,
-  FileSpreadsheet
+  FileSpreadsheet,
+  ShieldCheck
 } from 'lucide-react';
 import { QuickScannerModal } from './QuickScannerModal';
 
@@ -137,6 +140,9 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
   const [checkoutModalAsset, setCheckoutModalAsset] = useState<Asset | null>(null);
   const [isScannerOpen, setIsScannerOpen] = useState<boolean>(false);
   const [isLabelPrinterOpen, setIsLabelPrinterOpen] = useState<boolean>(false);
+  const [isAuditWalkOpen, setIsAuditWalkOpen] = useState<boolean>(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
+  const [singleAssetToPrint, setSingleAssetToPrint] = useState<Asset | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importBanner, setImportBanner] = useState<{ message: string; isError: boolean } | null>(null);
 
@@ -359,46 +365,44 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
           {/* Scanner Button */}
           <button
             onClick={() => setIsScannerOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition-colors border border-slate-700"
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition-colors border border-slate-700 cursor-pointer"
+            title="Scan asset QR code or barcode to view passport"
           >
             <Camera className="w-4 h-4 text-emerald-400" />
             <span className="hidden sm:inline">Scan QR</span>
           </button>
 
+          {/* Physical Inventory Audit Walk */}
+          <button
+            onClick={() => setIsAuditWalkOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+            title="Start physical walk-around audit to reconcile inventory and detect misplaced devices"
+          >
+            <ShieldCheck className="w-4 h-4 text-indigo-400" />
+            <span className="hidden sm:inline">Audit Walk</span>
+          </button>
+
           {/* Batch Print Labels */}
           <button
-            onClick={() => setIsLabelPrinterOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition-colors border border-slate-700"
+            onClick={() => {
+              setSingleAssetToPrint(null);
+              setIsLabelPrinterOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition-colors border border-slate-700 cursor-pointer"
+            title="Generate precision printable labels for Avery sheets or thermal roll printers"
           >
             <Printer className="w-4 h-4 text-emerald-400" />
             <span className="hidden sm:inline">Print Labels</span>
           </button>
 
-          {/* Download CSV Template */}
+          {/* Import Excel / CSV */}
           <button
-            onClick={handleDownloadCSVTemplate}
+            onClick={() => setIsImportModalOpen(true)}
             className="flex items-center gap-1.5 px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 rounded-xl text-xs font-semibold transition-all border border-emerald-500/30 shadow-sm cursor-pointer"
-            title="Download blank / sample CSV template for bulk asset import"
-          >
-            <Download className="w-4 h-4 text-emerald-400" />
-            <span>Download Template</span>
-          </button>
-
-          {/* Import CSV */}
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileUpload}
-            accept=".csv"
-            className="hidden"
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition-colors border border-slate-700 cursor-pointer"
-            title="Import preexisting or historical assets via CSV spreadsheet"
+            title="Import preexisting assets from Excel (.xlsx) or CSV with interactive column mapping and duplicate check"
           >
             <Upload className="w-4 h-4 text-emerald-400" />
-            <span>Import CSV</span>
+            <span>Import Excel / CSV</span>
           </button>
 
           {/* Export Excel */}
@@ -641,16 +645,62 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
         }}
       />
 
-      {/* Batch Label Printer Modal */}
+      {/* Precision Label Studio Modal */}
       {isLabelPrinterOpen && (
-        <BatchLabelPrinter
+        <PrintLabelsModal
           assets={
-            selectedAssetIds.size > 0
-              ? assets.filter((a) => selectedAssetIds.has(a.id))
-              : filteredAssets
+            singleAssetToPrint
+              ? [singleAssetToPrint]
+              : selectedAssetIds.size > 0
+                ? assets.filter((a) => selectedAssetIds.has(a.id))
+                : filteredAssets
           }
           organization={currentOrg}
-          onClose={() => setIsLabelPrinterOpen(false)}
+          onClose={() => {
+            setIsLabelPrinterOpen(false);
+            setSingleAssetToPrint(null);
+          }}
+        />
+      )}
+
+      {/* Physical Inventory Walk & Reconciliation Modal */}
+      {isAuditWalkOpen && (
+        <PhysicalAuditModal
+          organization={currentOrg}
+          branches={branches}
+          allAssets={assets}
+          onBatchTransferBranch={onBatchTransferBranch}
+          onBatchUpdateStatus={onBatchUpdateStatus}
+          onRegisterUnfoundAsset={(tag) => {
+            setIsAuditWalkOpen(false);
+            setEditingAsset(null);
+            setPrefilledTag(tag);
+            setIsUpsertOpen(true);
+          }}
+          onClose={() => setIsAuditWalkOpen(false)}
+        />
+      )}
+
+      {/* Interactive Data Migration & Excel/CSV Importer Modal */}
+      {isImportModalOpen && (
+        <ImportAssetsModal
+          organization={currentOrg}
+          branches={branches}
+          categories={categories}
+          existingAssets={assets}
+          onBulkAddAssets={(newAssets) => {
+            if (onBulkAddAssets) {
+              onBulkAddAssets(newAssets);
+            } else if (onAddAsset) {
+              newAssets.forEach(a => onAddAsset(a));
+            }
+            setImportBanner({
+              message: `Successfully onboarded ${newAssets.length} assets into database!`,
+              isError: false
+            });
+            setTimeout(() => setImportBanner(null), 6000);
+          }}
+          onClose={() => setIsImportModalOpen(false)}
         />
       )}
     </div>
