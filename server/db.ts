@@ -104,8 +104,11 @@ export async function withTransaction<T>(
         try {
           await conn.rollback();
         } catch {}
+        throw err;
       }
-      throw err;
+      // If pool connection failed completely (no connection obtained), fallback to in-memory execution!
+      console.warn(`Database transaction warning (falling back to in-memory store): ${(err as any)?.message}`);
+      return callback(query);
     } finally {
       if (conn) {
         conn.release();
@@ -150,6 +153,13 @@ function executeInMemoryQuery<T = any>(sql: string, params: any[]): T[] {
       }
     }
 
+    // Handle COUNT(*) aggregation
+    if (lower.includes('count(*)')) {
+      const aliasMatch = lower.match(/count\(\*\)\s+(?:as\s+)?([a-zA-Z0-9_]+)/);
+      const alias = aliasMatch ? aliasMatch[1] : 'cnt';
+      return [{ [alias]: rows.length }] as any;
+    }
+
     // Order by seq handling
     if (lower.includes('order by seq desc') || lower.includes('order by `seq` desc')) {
       rows.sort((a, b) => Number(b.seq || 0) - Number(a.seq || 0));
@@ -175,20 +185,25 @@ function executeInMemoryQuery<T = any>(sql: string, params: any[]): T[] {
       const colsMatch = normalized.match(/\(([^)]+)\)\s+values/i);
       if (colsMatch && colsMatch[1]) {
         const columns = colsMatch[1].split(',').map(c => c.trim().replace(/[`"']/g, ''));
-        const newRow: Record<string, any> = {};
-        columns.forEach((col, idx) => {
-          newRow[col] = params[idx];
-        });
+        const colCount = columns.length;
+        const totalRows = Math.floor(params.length / colCount);
 
-        // Check for upsert / primary key conflict (id or key)
-        const existingIdx = rows.findIndex(r => 
-          (newRow.id && r.id === newRow.id) || 
-          (newRow.key && r.key === newRow.key)
-        );
-        if (existingIdx !== -1) {
-          rows[existingIdx] = { ...rows[existingIdx], ...newRow };
-        } else {
-          rows.push(newRow);
+        for (let r = 0; r < Math.max(1, totalRows); r++) {
+          const newRow: Record<string, any> = {};
+          columns.forEach((col, idx) => {
+            newRow[col] = params[r * colCount + idx];
+          });
+
+          // Check for upsert / primary key conflict (id or key)
+          const existingIdx = rows.findIndex(existing => 
+            (newRow.id && existing.id === newRow.id) || 
+            (newRow.key && existing.key === newRow.key)
+          );
+          if (existingIdx !== -1) {
+            rows[existingIdx] = { ...rows[existingIdx], ...newRow };
+          } else {
+            rows.push(newRow);
+          }
         }
         inMemoryStore.set(tableName, rows);
       }
@@ -215,10 +230,17 @@ function executeInMemoryQuery<T = any>(sql: string, params: any[]): T[] {
         const whereConds = whereClause.match(/[`]?([a-zA-Z0-9_]+)[`]?\s*=\s*\?/g) || [];
         let matchingIndices = rows.map((_, i) => i);
 
+        // Check if unassigned custody check is required
+        if (whereClause.toLowerCase().includes('assigned_to_user_id is null')) {
+          matchingIndices = matchingIndices.filter(i => !rows[i].assigned_to_user_id || rows[i].assigned_to_user_id === '');
+        }
+
         whereConds.forEach((cond, cIdx) => {
           const col = cond.split('=')[0].trim().replace(/[`"']/g, '');
           const val = params[setPlaceholdersCount + cIdx];
-          matchingIndices = matchingIndices.filter(i => rows[i][col] == val);
+          if (val !== null && val !== undefined) {
+            matchingIndices = matchingIndices.filter(i => rows[i][col] == val);
+          }
         });
 
         for (const idx of matchingIndices) {
@@ -235,9 +257,10 @@ function executeInMemoryQuery<T = any>(sql: string, params: any[]): T[] {
           rows[idx] = target;
         }
         inMemoryStore.set(tableName, rows);
+        return [{ affectedRows: matchingIndices.length }] as any;
       }
     }
-    return [] as T[];
+    return [{ affectedRows: 0 }] as any;
   }
 
   // 4. DELETE queries

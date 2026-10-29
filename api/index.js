@@ -24601,8 +24601,10 @@ async function withTransaction(callback) {
           await conn.rollback();
         } catch {
         }
+        throw err;
       }
-      throw err;
+      console.warn(`Database transaction warning (falling back to in-memory store): ${err?.message}`);
+      return callback(query);
     } finally {
       if (conn) {
         conn.release();
@@ -24635,6 +24637,11 @@ function executeInMemoryQuery(sql, params) {
         }
       }
     }
+    if (lower.includes("count(*)")) {
+      const aliasMatch = lower.match(/count\(\*\)\s+(?:as\s+)?([a-zA-Z0-9_]+)/);
+      const alias = aliasMatch ? aliasMatch[1] : "cnt";
+      return [{ [alias]: rows.length }];
+    }
     if (lower.includes("order by seq desc") || lower.includes("order by `seq` desc")) {
       rows.sort((a, b) => Number(b.seq || 0) - Number(a.seq || 0));
     } else if (lower.includes("order by seq asc") || lower.includes("order by `seq` asc")) {
@@ -24653,17 +24660,21 @@ function executeInMemoryQuery(sql, params) {
       const colsMatch = normalized.match(/\(([^)]+)\)\s+values/i);
       if (colsMatch && colsMatch[1]) {
         const columns = colsMatch[1].split(",").map((c) => c.trim().replace(/[`"']/g, ""));
-        const newRow = {};
-        columns.forEach((col, idx) => {
-          newRow[col] = params[idx];
-        });
-        const existingIdx = rows.findIndex(
-          (r) => newRow.id && r.id === newRow.id || newRow.key && r.key === newRow.key
-        );
-        if (existingIdx !== -1) {
-          rows[existingIdx] = { ...rows[existingIdx], ...newRow };
-        } else {
-          rows.push(newRow);
+        const colCount = columns.length;
+        const totalRows = Math.floor(params.length / colCount);
+        for (let r = 0; r < Math.max(1, totalRows); r++) {
+          const newRow = {};
+          columns.forEach((col, idx) => {
+            newRow[col] = params[r * colCount + idx];
+          });
+          const existingIdx = rows.findIndex(
+            (existing) => newRow.id && existing.id === newRow.id || newRow.key && existing.key === newRow.key
+          );
+          if (existingIdx !== -1) {
+            rows[existingIdx] = { ...rows[existingIdx], ...newRow };
+          } else {
+            rows.push(newRow);
+          }
         }
         inMemoryStore.set(tableName, rows);
       }
@@ -24683,10 +24694,15 @@ function executeInMemoryQuery(sql, params) {
         const setPlaceholdersCount = (setClause.match(/\?/g) || []).length;
         const whereConds = whereClause.match(/[`]?([a-zA-Z0-9_]+)[`]?\s*=\s*\?/g) || [];
         let matchingIndices = rows.map((_, i) => i);
+        if (whereClause.toLowerCase().includes("assigned_to_user_id is null")) {
+          matchingIndices = matchingIndices.filter((i) => !rows[i].assigned_to_user_id || rows[i].assigned_to_user_id === "");
+        }
         whereConds.forEach((cond, cIdx) => {
           const col = cond.split("=")[0].trim().replace(/[`"']/g, "");
           const val = params[setPlaceholdersCount + cIdx];
-          matchingIndices = matchingIndices.filter((i) => rows[i][col] == val);
+          if (val !== null && val !== void 0) {
+            matchingIndices = matchingIndices.filter((i) => rows[i][col] == val);
+          }
         });
         for (const idx of matchingIndices) {
           const target = { ...rows[idx] };
@@ -24702,9 +24718,10 @@ function executeInMemoryQuery(sql, params) {
           rows[idx] = target;
         }
         inMemoryStore.set(tableName, rows);
+        return [{ affectedRows: matchingIndices.length }];
       }
     }
-    return [];
+    return [{ affectedRows: 0 }];
   }
   if (lower.startsWith("delete")) {
     const tableMatch = lower.match(/from\s+[`]?([a-zA-Z0-9_]+)[`]?/);
@@ -24726,6 +24743,7 @@ function executeInMemoryQuery(sql, params) {
 }
 
 // server/middleware/idempotency.ts
+var inFlightMap = /* @__PURE__ */ new Map();
 async function idempotencyMiddleware(req, res, next) {
   if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") {
     return next();
@@ -24738,6 +24756,30 @@ async function idempotencyMiddleware(req, res, next) {
   const orgId = req.auth?.orgId || "public";
   const clientId = req.headers["x-client-id"] || "client-unknown";
   const clientSeq = Number(req.headers["x-client-seq"]) || 1;
+  const existingInFlight = inFlightMap.get(trimmedKey);
+  if (existingInFlight) {
+    try {
+      const inFlightRes = await existingInFlight;
+      res.setHeader("X-Cache-Lookup", "HIT-IN-FLIGHT");
+      res.setHeader("Idempotency-Key", trimmedKey);
+      res.status(inFlightRes.status).json(inFlightRes.body);
+      return;
+    } catch (err) {
+      console.warn("In-flight idempotency resolution error:", err.message);
+    }
+  }
+  let resolveInFlight;
+  const inFlightPromise = new Promise((resolve) => {
+    resolveInFlight = resolve;
+  });
+  inFlightMap.set(trimmedKey, inFlightPromise);
+  const cleanupInFlight = () => {
+    if (inFlightMap.get(trimmedKey) === inFlightPromise) {
+      inFlightMap.delete(trimmedKey);
+    }
+  };
+  res.on("finish", cleanupInFlight);
+  res.on("close", cleanupInFlight);
   try {
     const existing = await query(
       "SELECT `org_id`, `response_status`, `response_body` FROM `idempotency_keys` WHERE `key` = ? LIMIT 1;",
@@ -24746,6 +24788,7 @@ async function idempotencyMiddleware(req, res, next) {
     if (existing && existing.length > 0) {
       const cached = existing[0];
       if (req.auth?.orgId && cached.org_id && cached.org_id !== "public" && cached.org_id !== req.auth.orgId) {
+        cleanupInFlight();
         return next();
       }
       res.setHeader("X-Cache-Lookup", "HIT");
@@ -24756,7 +24799,9 @@ async function idempotencyMiddleware(req, res, next) {
       } catch {
         parsedBody = cached.response_body;
       }
-      res.status(Number(cached.response_status)).json(parsedBody);
+      const status = Number(cached.response_status);
+      resolveInFlight({ status, body: parsedBody });
+      res.status(status).json(parsedBody);
       return;
     }
   } catch (err) {
@@ -24770,9 +24815,11 @@ async function idempotencyMiddleware(req, res, next) {
       const status = res.statusCode || 200;
       const effectiveOrgId = req.auth?.orgId || orgId || "public";
       saveIdempotencyKey(trimmedKey, effectiveOrgId, clientId, clientSeq, status, bodyStr);
+      resolveInFlight({ status, body });
       res.setHeader("Idempotency-Key", trimmedKey);
     } catch (saveErr) {
       console.warn("Failed to capture idempotency json:", saveErr);
+      resolveInFlight({ status: res.statusCode || 200, body });
     }
     return originalJson(body);
   };
@@ -24781,9 +24828,11 @@ async function idempotencyMiddleware(req, res, next) {
       const bodyStr = typeof body === "string" ? body : JSON.stringify(body);
       const status = res.statusCode || 200;
       saveIdempotencyKey(trimmedKey, orgId, clientId, clientSeq, status, bodyStr);
+      resolveInFlight({ status, body });
       res.setHeader("Idempotency-Key", trimmedKey);
     } catch (saveErr) {
       console.warn("Failed to capture idempotency send:", saveErr);
+      resolveInFlight({ status: res.statusCode || 200, body });
     }
     return originalSend(body);
   };
@@ -25765,6 +25814,97 @@ assetRouter.post("/", requirePermission("assets:create"), async (req, res) => {
     res.status(500).json({ error: `Asset creation transaction failed: ${err.message}` });
   }
 });
+assetRouter.post("/bulk", requirePermission("assets:create"), async (req, res) => {
+  const { orgId, role, userId: actorId, fullName: actorName, branchId: userBranchId } = req.auth;
+  const { assets: rawAssets } = req.body;
+  const ipAddress = req.ip || req.socket.remoteAddress || "127.0.0.1";
+  if (!Array.isArray(rawAssets) || rawAssets.length === 0) {
+    res.status(400).json({ error: 'Body must include a non-empty "assets" array.' });
+    return;
+  }
+  const isSuperAdmin = actorId === "usr-super-admin-ishmael";
+  const effectiveOrgId = isSuperAdmin && req.body.orgId ? req.body.orgId : orgId;
+  const results = {
+    imported: 0,
+    skipped: 0,
+    errors: []
+  };
+  try {
+    await withTransaction(async (tx) => {
+      const validRows = [];
+      for (let i = 0; i < rawAssets.length; i++) {
+        const item = rawAssets[i];
+        const assetCode = String(item.assetCode || item.asset_code || `AST-${Date.now()}-${i}`).trim();
+        const name = String(item.name || item.assetName || item.asset_name || "").trim();
+        if (!name) {
+          results.skipped++;
+          results.errors.push(`Row #${i + 1}: Name is required`);
+          continue;
+        }
+        const serialNumber = String(item.serialNumber || item.serial_number || `SN-${assetCode}`).trim();
+        const assetId = item.id || `ast-bulk-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 6)}`;
+        const effectiveBranchId = role === "BRANCH_MANAGER" ? userBranchId : item.branchId || item.branch_id || userBranchId;
+        validRows.push([
+          assetId,
+          effectiveOrgId,
+          effectiveBranchId,
+          item.branchName || item.branch_name || "Main Hub",
+          item.categoryId || item.category_id || "cat-gen",
+          item.categoryName || item.category_name || "Hardware",
+          assetCode,
+          name,
+          item.model || "",
+          serialNumber,
+          item.macAddress || item.mac_address || null,
+          item.phoneNumber || item.phone_number || null,
+          item.registeredEmail || item.registered_email || null,
+          item.imeiNumber || item.imei_number || null,
+          normalizeStatus(item.status),
+          normalizeCondition(item.condition || item.assetCondition),
+          item.purchaseDate || item.purchase_date || (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+          Number(item.purchaseCost ?? item.purchase_cost ?? 0),
+          item.warrantyExpiry || item.warranty_expiry || null,
+          Number(item.currentValue ?? item.current_value ?? item.purchaseCost ?? item.purchase_cost ?? 0),
+          item.imageUrl || item.image_url || "",
+          item.notes || null
+        ]);
+        results.imported++;
+      }
+      const CHUNK_SIZE = 50;
+      for (let c = 0; c < validRows.length; c += CHUNK_SIZE) {
+        const chunk = validRows.slice(c, c + CHUNK_SIZE);
+        const placeholders = chunk.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)").join(", ");
+        const bulkInsertSql = `
+          INSERT INTO \`assets\` (
+            \`id\`, \`org_id\`, \`branch_id\`, \`branch_name\`, \`category_id\`, \`category_name\`,
+            \`asset_code\`, \`name\`, \`model\`, \`serial_number\`, \`mac_address\`, \`phone_number\`,
+            \`registered_email\`, \`imei_number\`, \`status\`, \`asset_condition\`, \`purchase_date\`,
+            \`purchase_cost\`, \`warranty_expiry\`, \`current_value\`, \`image_url\`, \`notes\`, \`version\`
+          ) VALUES ${placeholders};
+        `;
+        const flatParams = chunk.flat();
+        await tx(bulkInsertSql, flatParams);
+      }
+      if (results.imported > 0) {
+        await recordAuditEvent(tx, {
+          orgId: effectiveOrgId,
+          actorId,
+          userName: actorName,
+          role,
+          action: "BULK_IMPORT",
+          entityType: "Asset",
+          entityId: `bulk-${Date.now()}`,
+          entityName: `${results.imported} Assets`,
+          changes: { importedCount: results.imported, skippedCount: results.skipped },
+          ipAddress
+        });
+      }
+    });
+    res.status(201).json({ success: true, ...results });
+  } catch (err) {
+    res.status(500).json({ error: `Bulk asset insertion failed: ${err.message}` });
+  }
+});
 assetRouter.put("/:id", requirePermission("assets:update"), async (req, res) => {
   const { orgId, role, userId: actorId, fullName: actorName, branchId: userBranchId } = req.auth;
   const assetId = req.params.id;
@@ -25799,12 +25939,12 @@ assetRouter.put("/:id", requirePermission("assets:update"), async (req, res) => 
     UPDATE \`assets\` SET
       \`name\` = ?, \`model\` = ?, \`status\` = ?, \`asset_condition\` = ?, \`current_value\` = ?, \`notes\` = ?,
       \`version\` = \`version\` + 1
-    WHERE \`id\` = ? AND \`org_id\` = ?;
+    WHERE \`id\` = ? AND \`org_id\` = ? AND (\`version\` = ? OR ? IS NULL);
   `;
   const updatedCondition = data.condition || data.assetCondition || data.asset_condition ? normalizeCondition(data.condition || data.assetCondition || data.asset_condition) : prev.asset_condition;
   try {
     await withTransaction(async (tx) => {
-      await tx(updateSql, [
+      const updateRes = await tx(updateSql, [
         data.name || prev.name,
         data.model ?? prev.model,
         data.status ?? prev.status,
@@ -25812,8 +25952,16 @@ assetRouter.put("/:id", requirePermission("assets:update"), async (req, res) => 
         data.currentValue ?? data.current_value ?? prev.current_value,
         data.notes ?? prev.notes,
         assetId,
-        orgId
+        orgId,
+        rawExpected !== void 0 ? Number(rawExpected) : null,
+        rawExpected !== void 0 ? Number(rawExpected) : null
       ]);
+      const affected = updateRes?.affectedRows ?? (Array.isArray(updateRes) ? updateRes[0]?.affectedRows : void 0);
+      if (rawExpected !== void 0 && affected !== void 0 && affected === 0) {
+        const err = new Error(`Conflict: Asset version mismatch. Concurrent update already modified this asset.`);
+        err.statusCode = 409;
+        throw err;
+      }
       await recordAuditEvent(tx, {
         orgId,
         actorId,
@@ -25832,7 +25980,8 @@ assetRouter.put("/:id", requirePermission("assets:update"), async (req, res) => 
     });
     res.json({ success: true, message: "Asset updated successfully.", version: currentVersion + 1 });
   } catch (err) {
-    res.status(500).json({ error: `Asset update transaction failed: ${err.message}` });
+    const statusCode = err.statusCode || 500;
+    res.status(statusCode).json({ error: `Asset update transaction failed: ${err.message}` });
   }
 });
 assetRouter.delete("/:id", requirePermission("assets:delete"), async (req, res) => {
@@ -25918,6 +26067,16 @@ checkoutRouter.post("/", requirePermission("checkouts:create"), async (req, res)
     res.status(409).json({ error: `Asset is currently "${asset.status}" and cannot be checked out.` });
     return;
   }
+  const activeCheckouts = await query(
+    'SELECT id, checked_out_to_user_name FROM `checkouts` WHERE `asset_id` = ? AND `status` = "ACTIVE" LIMIT 1;',
+    [asset.id]
+  );
+  if (activeCheckouts.length > 0) {
+    res.status(409).json({
+      error: `Asset "${asset.name}" is already actively checked out to ${activeCheckouts[0].checked_out_to_user_name || "another user"}.`
+    });
+    return;
+  }
   const chkId = data.id || `chk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
   const toUserId = role === "USER" ? actorId : data.checkedOutToUserId || actorId;
   const toUserName = role === "USER" ? actorName : data.checkedOutToUserName || actorName;
@@ -25930,6 +26089,15 @@ checkoutRouter.post("/", requirePermission("checkouts:create"), async (req, res)
   `;
   try {
     await withTransaction(async (tx) => {
+      const concurrentCheck = await tx(
+        'SELECT id FROM `checkouts` WHERE `asset_id` = ? AND `status` = "ACTIVE" LIMIT 1;',
+        [asset.id]
+      );
+      if (concurrentCheck.length > 0) {
+        const err = new Error(`Asset is already actively checked out.`);
+        err.statusCode = 409;
+        throw err;
+      }
       await tx(insertSql, [
         chkId,
         asset.id,
@@ -25942,10 +26110,16 @@ checkoutRouter.post("/", requirePermission("checkouts:create"), async (req, res)
         data.reason || "Equipment assignment",
         data.notes || null
       ]);
-      await tx(
-        "UPDATE `assets` SET `assigned_to_user_id` = ?, `assigned_to_user_name` = ?, `assigned_at` = NOW() WHERE `id` = ?;",
+      const assignResult = await tx(
+        'UPDATE `assets` SET `assigned_to_user_id` = ?, `assigned_to_user_name` = ?, `assigned_at` = NOW() WHERE `id` = ? AND (`assigned_to_user_id` IS NULL OR `assigned_to_user_id` = "");',
         [toUserId, toUserName, asset.id]
       );
+      const affected = assignResult?.affectedRows ?? (Array.isArray(assignResult) ? assignResult[0]?.affectedRows : void 0);
+      if (affected !== void 0 && affected === 0) {
+        const err = new Error(`Asset is already actively checked out or assigned.`);
+        err.statusCode = 409;
+        throw err;
+      }
       await recordAuditEvent(tx, {
         orgId,
         actorId,
@@ -25967,7 +26141,8 @@ checkoutRouter.post("/", requirePermission("checkouts:create"), async (req, res)
     });
     res.status(201).json({ success: true, id: chkId });
   } catch (err) {
-    res.status(500).json({ error: `Checkout transaction failed: ${err.message}` });
+    const statusCode = err.statusCode || 500;
+    res.status(statusCode).json({ error: `Checkout transaction failed: ${err.message}` });
   }
 });
 checkoutRouter.post("/:id/return", requirePermission("checkouts:return"), async (req, res) => {

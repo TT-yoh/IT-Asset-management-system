@@ -10,6 +10,7 @@
     "build": "vite build && node scripts/build-server.mjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
+    "test:stress": "tsx tests/stress-test.ts",
     "lint": "tsc --noEmit",
     "test:security": "tsx tests/security-scoping.test.ts",
     "test:audit": "tsx tests/audit-integrity.test.ts",

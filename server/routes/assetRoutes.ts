@@ -295,6 +295,114 @@ assetRouter.post('/', requirePermission('assets:create'), async (req: Request, r
 });
 
 /**
+ * POST /api/assets/bulk
+ * High-throughput batch ingestion of multiple assets in a single database transaction
+ */
+assetRouter.post('/bulk', requirePermission('assets:create'), async (req: Request, res: Response) => {
+  const { orgId, role, userId: actorId, fullName: actorName, branchId: userBranchId } = req.auth!;
+  const { assets: rawAssets } = req.body;
+  const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
+
+  if (!Array.isArray(rawAssets) || rawAssets.length === 0) {
+    res.status(400).json({ error: 'Body must include a non-empty "assets" array.' });
+    return;
+  }
+
+  const isSuperAdmin = actorId === 'usr-super-admin-ishmael';
+  const effectiveOrgId = (isSuperAdmin && req.body.orgId) ? req.body.orgId : orgId;
+
+  const results: { imported: number; skipped: number; errors: string[] } = {
+    imported: 0,
+    skipped: 0,
+    errors: []
+  };
+
+  try {
+    await withTransaction(async (tx) => {
+      const validRows: any[][] = [];
+
+      for (let i = 0; i < rawAssets.length; i++) {
+        const item = rawAssets[i];
+        const assetCode = String(item.assetCode || item.asset_code || `AST-${Date.now()}-${i}`).trim();
+        const name = String(item.name || item.assetName || item.asset_name || '').trim();
+        if (!name) {
+          results.skipped++;
+          results.errors.push(`Row #${i + 1}: Name is required`);
+          continue;
+        }
+
+        const serialNumber = String(item.serialNumber || item.serial_number || `SN-${assetCode}`).trim();
+        const assetId = item.id || `ast-bulk-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 6)}`;
+        const effectiveBranchId = role === 'BRANCH_MANAGER' ? userBranchId : (item.branchId || item.branch_id || userBranchId);
+
+        validRows.push([
+          assetId,
+          effectiveOrgId,
+          effectiveBranchId,
+          item.branchName || item.branch_name || 'Main Hub',
+          item.categoryId || item.category_id || 'cat-gen',
+          item.categoryName || item.category_name || 'Hardware',
+          assetCode,
+          name,
+          item.model || '',
+          serialNumber,
+          item.macAddress || item.mac_address || null,
+          item.phoneNumber || item.phone_number || null,
+          item.registeredEmail || item.registered_email || null,
+          item.imeiNumber || item.imei_number || null,
+          normalizeStatus(item.status),
+          normalizeCondition(item.condition || item.assetCondition),
+          item.purchaseDate || item.purchase_date || new Date().toISOString().split('T')[0],
+          Number(item.purchaseCost ?? item.purchase_cost ?? 0),
+          item.warrantyExpiry || item.warranty_expiry || null,
+          Number(item.currentValue ?? item.current_value ?? item.purchaseCost ?? item.purchase_cost ?? 0),
+          item.imageUrl || item.image_url || '',
+          item.notes || null
+        ]);
+
+        results.imported++;
+      }
+
+      // Execute in batch chunks of 50 to maximize throughput and minimize network round trips
+      const CHUNK_SIZE = 50;
+      for (let c = 0; c < validRows.length; c += CHUNK_SIZE) {
+        const chunk = validRows.slice(c, c + CHUNK_SIZE);
+        const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)').join(', ');
+        const bulkInsertSql = `
+          INSERT INTO \`assets\` (
+            \`id\`, \`org_id\`, \`branch_id\`, \`branch_name\`, \`category_id\`, \`category_name\`,
+            \`asset_code\`, \`name\`, \`model\`, \`serial_number\`, \`mac_address\`, \`phone_number\`,
+            \`registered_email\`, \`imei_number\`, \`status\`, \`asset_condition\`, \`purchase_date\`,
+            \`purchase_cost\`, \`warranty_expiry\`, \`current_value\`, \`image_url\`, \`notes\`, \`version\`
+          ) VALUES ${placeholders};
+        `;
+        const flatParams = chunk.flat();
+        await tx(bulkInsertSql, flatParams);
+      }
+
+      if (results.imported > 0) {
+        await recordAuditEvent(tx, {
+          orgId: effectiveOrgId,
+          actorId,
+          userName: actorName,
+          role,
+          action: 'BULK_IMPORT',
+          entityType: 'Asset',
+          entityId: `bulk-${Date.now()}`,
+          entityName: `${results.imported} Assets`,
+          changes: { importedCount: results.imported, skippedCount: results.skipped },
+          ipAddress
+        });
+      }
+    });
+
+    res.status(201).json({ success: true, ...results });
+  } catch (err: any) {
+    res.status(500).json({ error: `Bulk asset insertion failed: ${err.message}` });
+  }
+});
+
+/**
  * PUT /api/assets/:id
  * Updates asset and records UPDATE_ASSET in the same DB transaction!
  */
@@ -338,7 +446,7 @@ assetRouter.put('/:id', requirePermission('assets:update'), async (req: Request,
     UPDATE \`assets\` SET
       \`name\` = ?, \`model\` = ?, \`status\` = ?, \`asset_condition\` = ?, \`current_value\` = ?, \`notes\` = ?,
       \`version\` = \`version\` + 1
-    WHERE \`id\` = ? AND \`org_id\` = ?;
+    WHERE \`id\` = ? AND \`org_id\` = ? AND (\`version\` = ? OR ? IS NULL);
   `;
 
   const updatedCondition = (data.condition || data.assetCondition || data.asset_condition)
@@ -347,7 +455,7 @@ assetRouter.put('/:id', requirePermission('assets:update'), async (req: Request,
 
   try {
     await withTransaction(async (tx) => {
-      await tx(updateSql, [
+      const updateRes = await tx(updateSql, [
         data.name || prev.name,
         data.model ?? prev.model,
         data.status ?? prev.status,
@@ -355,8 +463,17 @@ assetRouter.put('/:id', requirePermission('assets:update'), async (req: Request,
         data.currentValue ?? data.current_value ?? prev.current_value,
         data.notes ?? prev.notes,
         assetId,
-        orgId
+        orgId,
+        rawExpected !== undefined ? Number(rawExpected) : null,
+        rawExpected !== undefined ? Number(rawExpected) : null
       ]);
+
+      const affected = (updateRes as any)?.affectedRows ?? (Array.isArray(updateRes) ? (updateRes as any)[0]?.affectedRows : undefined);
+      if (rawExpected !== undefined && affected !== undefined && affected === 0) {
+        const err: any = new Error(`Conflict: Asset version mismatch. Concurrent update already modified this asset.`);
+        err.statusCode = 409;
+        throw err;
+      }
 
       await recordAuditEvent(tx, {
         orgId,
@@ -377,7 +494,8 @@ assetRouter.put('/:id', requirePermission('assets:update'), async (req: Request,
 
     res.json({ success: true, message: 'Asset updated successfully.', version: currentVersion + 1 });
   } catch (err: any) {
-    res.status(500).json({ error: `Asset update transaction failed: ${err.message}` });
+    const statusCode = err.statusCode || 500;
+    res.status(statusCode).json({ error: `Asset update transaction failed: ${err.message}` });
   }
 });
 

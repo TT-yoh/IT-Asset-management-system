@@ -59,6 +59,18 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), async (req: Requ
     return;
   }
 
+  // Pre-flight check: Verify asset does not already have an active checkout
+  const activeCheckouts = await query<any>(
+    'SELECT id, checked_out_to_user_name FROM `checkouts` WHERE `asset_id` = ? AND `status` = "ACTIVE" LIMIT 1;',
+    [asset.id]
+  );
+  if (activeCheckouts.length > 0) {
+    res.status(409).json({
+      error: `Asset "${asset.name}" is already actively checked out to ${activeCheckouts[0].checked_out_to_user_name || 'another user'}.`
+    });
+    return;
+  }
+
   const chkId = data.id || `chk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
   const toUserId = role === 'USER' ? actorId : (data.checkedOutToUserId || actorId);
   const toUserName = role === 'USER' ? actorName : (data.checkedOutToUserName || actorName);
@@ -73,6 +85,17 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), async (req: Requ
 
   try {
     await withTransaction(async (tx) => {
+      // Atomic concurrency guard: verify under transaction lock to prevent race condition double-checkout
+      const concurrentCheck = await tx(
+        'SELECT id FROM `checkouts` WHERE `asset_id` = ? AND `status` = "ACTIVE" LIMIT 1;',
+        [asset.id]
+      );
+      if (concurrentCheck.length > 0) {
+        const err: any = new Error(`Asset is already actively checked out.`);
+        err.statusCode = 409;
+        throw err;
+      }
+
       await tx(insertSql, [
         chkId,
         asset.id,
@@ -86,11 +109,18 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), async (req: Requ
         data.notes || null
       ]);
 
-      // Update asset assignment
-      await tx(
-        'UPDATE `assets` SET `assigned_to_user_id` = ?, `assigned_to_user_name` = ?, `assigned_at` = NOW() WHERE `id` = ?;',
+      // Update asset assignment atomically ensuring asset is currently unassigned
+      const assignResult = await tx(
+        'UPDATE `assets` SET `assigned_to_user_id` = ?, `assigned_to_user_name` = ?, `assigned_at` = NOW() WHERE `id` = ? AND (`assigned_to_user_id` IS NULL OR `assigned_to_user_id` = "");',
         [toUserId, toUserName, asset.id]
       );
+
+      const affected = (assignResult as any)?.affectedRows ?? (Array.isArray(assignResult) ? (assignResult as any)[0]?.affectedRows : undefined);
+      if (affected !== undefined && affected === 0) {
+        const err: any = new Error(`Asset is already actively checked out or assigned.`);
+        err.statusCode = 409;
+        throw err;
+      }
 
       await recordAuditEvent(tx, {
         orgId,
@@ -114,7 +144,8 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), async (req: Requ
 
     res.status(201).json({ success: true, id: chkId });
   } catch (err: any) {
-    res.status(500).json({ error: `Checkout transaction failed: ${err.message}` });
+    const statusCode = err.statusCode || 500;
+    res.status(statusCode).json({ error: `Checkout transaction failed: ${err.message}` });
   }
 });
 
