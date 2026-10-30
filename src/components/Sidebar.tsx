@@ -35,7 +35,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'checkout', label: 'Checkouts', icon: <ArrowLeftRight className="w-4 h-4" /> },
     { id: 'repair', label: 'Maintenance', icon: <Wrench className="w-4 h-4" />, badge: repairCount > 0 ? repairCount : undefined },
     { id: 'users', label: 'Staff & Users', icon: <Users className="w-4 h-4" />, badge: userCount },
-    { id: 'branches', label: 'Facilities & Branches', icon: <Building2 className="w-4 h-4" />, badge: branchesCount },
+    { id: 'branches', label: 'Facilities & Departments', icon: <Building2 className="w-4 h-4" />, badge: branchesCount },
     { id: 'reports', label: 'Reports', icon: <BarChart3 className="w-4 h-4" /> },
     { id: 'budget', label: 'Budgets', icon: <PieChart className="w-4 h-4" /> },
     { id: 'audit', label: 'Audit & Access', icon: <ShieldAlert className="w-4 h-4" /> }
@@ -50,9 +50,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     } else if (currentUser.role === 'FINANCE') {
       filteredItems = navItems.filter(item => ['dashboard', 'assets', 'reports', 'budget'].includes(item.id));
     } else if (currentUser.role === 'IT_SUPPORT') {
-      filteredItems = navItems.filter(item => ['dashboard', 'assets', 'checkout', 'repair', 'users', 'audit'].includes(item.id));
+      filteredItems = navItems.filter(item => ['dashboard', 'assets', 'checkout', 'repair', 'users', 'branches', 'audit'].includes(item.id));
     } else if (currentUser.role === 'BRANCH_MANAGER') {
-      filteredItems = navItems.filter(item => ['dashboard', 'assets', 'checkout', 'repair', 'branches', 'budget'].includes(item.id));
+      filteredItems = navItems.filter(item => ['dashboard', 'assets', 'checkout', 'repair', 'users', 'branches', 'budget'].includes(item.id));
     } else if (currentUser.role === 'USER') {
       filteredItems = navItems.filter(item => ['dashboard', 'assets', 'checkout', 'repair'].includes(item.id));
     }

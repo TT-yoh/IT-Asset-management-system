@@ -250,7 +250,9 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return assets.filter(a => {
       if (a.orgId !== currentOrg.id) return false;
       if (isBranchRestricted && currentUser) {
-        if (a.branchId !== currentUser.branchId) return false;
+        const matchesBranchId = Boolean(currentUser.branchId && a.branchId === currentUser.branchId);
+        const matchesBranchName = Boolean(currentUser.branchName && a.branchName && a.branchName.toLowerCase() === currentUser.branchName.toLowerCase());
+        if (!matchesBranchId && !matchesBranchName) return false;
       }
       if (!searchQuery.trim()) return true;
       const q = searchQuery.toLowerCase();
@@ -270,7 +272,9 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       const asset = assets.find(a => a.id === c.assetId);
       if (!asset || asset.orgId !== currentOrg.id) return false;
       if (isBranchRestricted && currentUser) {
-        return asset.branchId === currentUser.branchId;
+        const matchesBranchId = Boolean(currentUser.branchId && asset.branchId === currentUser.branchId);
+        const matchesBranchName = Boolean(currentUser.branchName && asset.branchName && asset.branchName.toLowerCase() === currentUser.branchName.toLowerCase());
+        return matchesBranchId || matchesBranchName;
       }
       return true;
     });
@@ -281,7 +285,9 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       const asset = assets.find(a => a.id === m.assetId);
       if (!asset || asset.orgId !== currentOrg.id) return false;
       if (isBranchRestricted && currentUser) {
-        return asset.branchId === currentUser.branchId;
+        const matchesBranchId = Boolean(currentUser.branchId && asset.branchId === currentUser.branchId);
+        const matchesBranchName = Boolean(currentUser.branchName && asset.branchName && asset.branchName.toLowerCase() === currentUser.branchName.toLowerCase());
+        return matchesBranchId || matchesBranchName;
       }
       return true;
     });

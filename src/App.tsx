@@ -237,6 +237,23 @@ function AppShell() {
     );
   }
 
+  const [facilitiesSubTab, setFacilitiesSubTab] = useState<'branches' | 'departments'>('branches');
+
+  // Enforce branch boundary for branch managers and restricted users
+  const isBranchRestricted = currentUser?.role === 'BRANCH_MANAGER' || currentUser?.role === 'USER';
+
+  const filteredUsers = React.useMemo(() => {
+    return systemUsers.filter(u => {
+      if (u.orgId && u.orgId !== currentOrg.id) return false;
+      if (isBranchRestricted && currentUser) {
+        const matchesBranchId = Boolean(currentUser.branchId && u.branchId === currentUser.branchId);
+        const matchesBranchName = Boolean(currentUser.branchName && u.branchName && u.branchName.toLowerCase() === currentUser.branchName.toLowerCase());
+        return matchesBranchId || matchesBranchName || u.id === currentUser.id;
+      }
+      return true;
+    });
+  }, [systemUsers, currentOrg.id, currentUser, isBranchRestricted]);
+
   const orgAssetsCount = filteredAssets.length;
   const orgRepairsCount = filteredMaintenances.filter(m => m.status === 'IN_PROGRESS').length;
 
@@ -245,7 +262,7 @@ function AppShell() {
       {/* Top Navigation Bar */}
       <Navbar
         currentOrg={currentOrg}
-        users={systemUsers}
+        users={filteredUsers}
         currentUser={currentUser}
         onSelectUser={handleSwitchUser}
         notifications={notifications.filter(n => !n.orgId || n.orgId === currentOrg.id)}
@@ -277,7 +294,7 @@ function AppShell() {
           }}
           assetCount={orgAssetsCount}
           repairCount={orgRepairsCount}
-          userCount={systemUsers.filter(u => u.orgId === currentOrg.id).length}
+          userCount={filteredUsers.length}
           branchesCount={currentOrgBranches.length}
           currentUser={currentUser}
           isMobileDrawerOpen={isMobileMenuOpen}
@@ -349,7 +366,7 @@ function AppShell() {
             <CheckoutPanel
               checkouts={filteredCheckouts}
               assets={filteredAssets}
-              users={systemUsers.filter(u => u.orgId === currentOrg.id)}
+              users={filteredUsers}
               currentUser={currentUser}
               branches={currentOrgBranches}
               onNewCheckout={handleNewCheckout}
@@ -361,7 +378,7 @@ function AppShell() {
             <MaintenancePanel
               maintenances={filteredMaintenances}
               assets={filteredAssets}
-              users={systemUsers.filter(u => u.orgId === currentOrg.id)}
+              users={filteredUsers}
               currentUser={currentUser}
               onReportIssue={handleReportIssue}
               onUpdateTicket={handleUpdateTicket}
@@ -404,8 +421,9 @@ function AppShell() {
               currentUser={currentUser}
               branches={currentOrgBranches}
               departments={currentOrgDepartments}
-              users={systemUsers.filter(u => u.orgId === currentOrg.id)}
+              users={filteredUsers}
               assets={filteredAssets}
+              initialSubTab={facilitiesSubTab}
               onRegisterBranch={handleRegisterBranch}
               onUpdateBranch={handleUpdateBranch}
               onDeleteBranch={handleDeleteBranch}
@@ -419,7 +437,7 @@ function AppShell() {
           {activeTab === 'users' && (
             <UsersPanel
               currentOrg={currentOrg}
-              users={systemUsers}
+              users={filteredUsers}
               currentUser={currentUser}
               branches={currentOrgBranches}
               departments={currentOrgDepartments}
@@ -430,6 +448,10 @@ function AppShell() {
               onUpdateUser={handleUpdateUser}
               onDeleteUser={handleDeleteUser}
               onClearDummyUsers={handleClearDummyUsers}
+              onNavigateToDepartments={() => {
+                setFacilitiesSubTab('departments');
+                navigateToTab('branches');
+              }}
             />
           )}
             </ErrorBoundary>

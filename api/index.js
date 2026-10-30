@@ -24421,7 +24421,8 @@ var ROLE_PERMISSIONS = {
     "maintenance:create",
     "users:read",
     "branches:read",
-    "departments:read"
+    "departments:read",
+    "departments:manage"
   ],
   IT_SUPPORT: [
     "assets:read",
@@ -24438,6 +24439,7 @@ var ROLE_PERMISSIONS = {
     "users:read",
     "branches:read",
     "departments:read",
+    "departments:manage",
     "audit:read"
   ],
   FINANCE: [
@@ -26774,15 +26776,21 @@ var import_express8 = __toESM(require_express2(), 1);
 var userRouter = (0, import_express8.Router)();
 userRouter.use(authenticate);
 userRouter.get("/", requirePermission("users:read"), async (req, res) => {
-  const { orgId } = req.auth;
-  const rows = await query(`
+  const { orgId, role, branchId, userId } = req.auth;
+  let sql = `
     SELECT \`id\`, \`org_id\`, \`email\`, \`full_name\`, \`role\`, \`department_id\`,
            \`department_name\`, \`branch_id\`, \`branch_name\`, \`two_factor_enabled\`,
            \`avatar\`, \`status\`, \`invite_token\`, \`invited_at\`, \`created_at\`
     FROM \`users\`
     WHERE \`org_id\` = ?
-    ORDER BY \`full_name\` ASC;
-  `, [orgId]);
+  `;
+  const params = [orgId];
+  if ((role === "BRANCH_MANAGER" || role === "USER") && branchId) {
+    sql += " AND (`branch_id` = ? OR `id` = ?)";
+    params.push(branchId, userId);
+  }
+  sql += " ORDER BY `full_name` ASC;";
+  const rows = await query(sql, params);
   const isAdminOrDirector = req.auth?.role === "ADMIN" || req.auth?.role === "DIRECTOR";
   const sanitized = rows.map((u) => ({
     id: u.id,

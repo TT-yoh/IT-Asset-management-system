@@ -138,6 +138,7 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
   const canEditAsset = isITTeam || currentUser.role === 'BRANCH_MANAGER';
   const canDeleteAsset = isITTeam;
   const canImportAssets = isITTeam;
+  const isBranchRestricted = currentUser.role === 'BRANCH_MANAGER' || currentUser.role === 'USER';
 
   // Modals state
   const [isUpsertOpen, setIsUpsertOpen] = useState<boolean>(false);
@@ -512,18 +513,24 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
         {/* Branch Filter */}
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-400 font-medium">Branch:</span>
-          <select
-            value={branchFilter}
-            onChange={(e) => setBranchFilter(e.target.value)}
-            className="px-3 py-1.5 text-xs bg-slate-950 border border-slate-700 rounded-xl text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
-          >
-            <option value="ALL">All Facilities</option>
-            {branches.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
+          {isBranchRestricted ? (
+            <span className="px-3 py-1.5 text-xs bg-slate-900 border border-slate-800 rounded-xl text-emerald-400 font-semibold font-mono">
+              {currentUser.branchName || 'Assigned Branch'}
+            </span>
+          ) : (
+            <select
+              value={branchFilter}
+              onChange={(e) => setBranchFilter(e.target.value)}
+              className="px-3 py-1.5 text-xs bg-slate-950 border border-slate-700 rounded-xl text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
+            >
+              <option value="ALL">All Facilities</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         {/* Reset Filters */}
@@ -619,6 +626,7 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
         branches={branches}
         categories={categories}
         currentOrg={currentOrg}
+        currentUser={currentUser}
         onClose={() => {
           setIsUpsertOpen(false);
           setEditingAsset(null);

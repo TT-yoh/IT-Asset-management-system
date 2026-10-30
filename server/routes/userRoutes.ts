@@ -12,16 +12,26 @@ userRouter.use(authenticate);
  * Returns sanitized users ONLY for the authenticated org. Never leaks other tenants or password fields!
  */
 userRouter.get('/', requirePermission('users:read'), async (req: Request, res: Response) => {
-  const { orgId } = req.auth!;
+  const { orgId, role, branchId, userId } = req.auth!;
 
-  const rows = await query<any>(`
+  let sql = `
     SELECT \`id\`, \`org_id\`, \`email\`, \`full_name\`, \`role\`, \`department_id\`,
            \`department_name\`, \`branch_id\`, \`branch_name\`, \`two_factor_enabled\`,
            \`avatar\`, \`status\`, \`invite_token\`, \`invited_at\`, \`created_at\`
     FROM \`users\`
     WHERE \`org_id\` = ?
-    ORDER BY \`full_name\` ASC;
-  `, [orgId]);
+  `;
+  const params: any[] = [orgId];
+
+  // Enforce branch boundary for BRANCH_MANAGER and USER
+  if ((role === 'BRANCH_MANAGER' || role === 'USER') && branchId) {
+    sql += ' AND (`branch_id` = ? OR `id` = ?)';
+    params.push(branchId, userId);
+  }
+
+  sql += ' ORDER BY `full_name` ASC;';
+
+  const rows = await query<any>(sql, params);
 
   const isAdminOrDirector = req.auth?.role === 'ADMIN' || req.auth?.role === 'DIRECTOR';
   const sanitized = rows.map(u => ({

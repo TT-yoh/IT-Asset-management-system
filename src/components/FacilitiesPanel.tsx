@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Branch, Department, Organization, User, Asset } from '../types';
 import { 
   Building2, 
@@ -28,6 +28,7 @@ interface FacilitiesPanelProps {
   departments: Department[];
   users: User[];
   assets: Asset[];
+  initialSubTab?: 'branches' | 'departments';
   onRegisterBranch: (newBranch: Branch) => void;
   onUpdateBranch: (branchId: string, updatedFields: Partial<Branch>) => void;
   onDeleteBranch: (branchId: string) => Promise<{ success: boolean; error?: string }>;
@@ -44,6 +45,7 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
   departments,
   users,
   assets,
+  initialSubTab,
   onRegisterBranch,
   onUpdateBranch,
   onDeleteBranch,
@@ -53,9 +55,32 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
   onNavigateToTab
 }) => {
   const isAdmin = currentUser?.role === 'ADMIN';
+  const canManageDepartments = currentUser?.role === 'ADMIN' || currentUser?.role === 'IT_SUPPORT' || currentUser?.role === 'BRANCH_MANAGER';
 
   // Sub-tab: 'branches' | 'departments'
-  const [activeTab, setActiveTab] = useState<'branches' | 'departments'>('branches');
+  const [activeTab, setActiveTab] = useState<'branches' | 'departments'>(() => {
+    if (typeof window !== 'undefined' && window.location.hash.toLowerCase().includes('department')) {
+      return 'departments';
+    }
+    return initialSubTab || 'branches';
+  });
+
+  useEffect(() => {
+    if (initialSubTab) {
+      setActiveTab(initialSubTab);
+    }
+  }, [initialSubTab]);
+
+  useEffect(() => {
+    const handleHashCheck = () => {
+      if (typeof window !== 'undefined' && window.location.hash.toLowerCase().includes('department')) {
+        setActiveTab('departments');
+      }
+    };
+    window.addEventListener('hashchange', handleHashCheck);
+    return () => window.removeEventListener('hashchange', handleHashCheck);
+  }, []);
+
   const [searchQuery, setSearchQuery] = useState('');
 
   // Toast / notification feedback
@@ -344,7 +369,7 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
               </button>
             )}
 
-            {isAdmin && activeTab === 'departments' && (
+            {canManageDepartments && activeTab === 'departments' && (
               <button
                 type="button"
                 onClick={handleOpenCreateDept}
@@ -601,7 +626,7 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
                     </div>
                   </div>
 
-                  {isAdmin && (
+                  {canManageDepartments && (
                     <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between">
                       <div className="text-[10px] text-slate-500">
                         ID: <span className="font-mono text-slate-400">{dept.id}</span>
@@ -611,18 +636,21 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
                         <button
                           type="button"
                           onClick={() => handleOpenEditDept(dept)}
-                          className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                          className="px-3 py-1.5 bg-slate-800 hover:bg-purple-600/30 text-purple-300 border border-slate-700 hover:border-purple-500/50 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-sm"
                         >
-                          <Edit2 className="w-3.5 h-3.5 text-slate-400" />
+                          <Edit2 className="w-3.5 h-3.5 text-purple-400" />
                           <span>Edit</span>
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => handleRequestDeleteDept(dept)}
-                          className="p-1.5 hover:bg-rose-500/10 text-slate-500 hover:text-rose-400 rounded-xl transition cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => handleRequestDeleteDept(dept)}
+                            className="p-1.5 hover:bg-rose-500/10 text-slate-500 hover:text-rose-400 rounded-xl transition cursor-pointer"
+                            title="Delete Department"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}

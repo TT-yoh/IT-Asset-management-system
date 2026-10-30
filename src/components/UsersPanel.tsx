@@ -23,6 +23,7 @@ import {
   Edit2,
   Trash2,
   Ban,
+  Briefcase,
   UserCheck,
   AlertTriangle,
   X,
@@ -53,6 +54,7 @@ interface UsersPanelProps {
   onUpdateUser?: (updatedUser: User) => void;
   onDeleteUser?: (userId: string) => Promise<{ success: boolean; error?: string }>;
   onClearDummyUsers?: () => void;
+  onNavigateToDepartments?: () => void;
 }
 
 export const UsersPanel: React.FC<UsersPanelProps> = ({
@@ -67,7 +69,8 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
   onInviteUser,
   onUpdateUser,
   onDeleteUser,
-  onClearDummyUsers
+  onClearDummyUsers,
+  onNavigateToDepartments
 }) => {
   const activeDepts = departments && departments.length > 0 ? departments : DEPARTMENTS;
 
@@ -460,9 +463,25 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
               </button>
             )}
 
-            {isAdmin && (
+            {onNavigateToDepartments && (
               <button
-                onClick={() => setShowInviteModal(true)}
+                onClick={onNavigateToDepartments}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/30 rounded-xl text-xs font-semibold transition cursor-pointer"
+                title="Manage and edit organizational departments, cost centers, and budgets"
+              >
+                <Briefcase className="w-4 h-4 text-purple-400" />
+                <span>Manage Departments</span>
+              </button>
+            )}
+
+            {(isAdmin || currentUser?.role === 'IT_SUPPORT' || currentUser?.role === 'BRANCH_MANAGER') && (
+              <button
+                onClick={() => {
+                  if (currentUser?.role === 'BRANCH_MANAGER' && currentUser.branchId) {
+                    setSelectedBranchId(currentUser.branchId);
+                  }
+                  setShowInviteModal(true);
+                }}
                 className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 transition cursor-pointer"
               >
                 <UserPlus className="w-4 h-4" />
@@ -555,16 +574,22 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
         {/* Branch Filter */}
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-slate-400">Facility:</span>
-          <select
-            value={branchFilter}
-            onChange={(e) => setBranchFilter(e.target.value)}
-            className="px-2.5 py-1.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
-          >
-            <option value="ALL">All Facilities</option>
-            {branches.map(b => (
-              <option key={b.id} value={b.id}>{b.name}</option>
-            ))}
-          </select>
+          {currentUser?.role === 'BRANCH_MANAGER' ? (
+            <span className="px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-emerald-400 font-semibold font-mono">
+              {currentUser.branchName || 'Assigned Branch'}
+            </span>
+          ) : (
+            <select
+              value={branchFilter}
+              onChange={(e) => setBranchFilter(e.target.value)}
+              className="px-2.5 py-1.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
+            >
+              <option value="ALL">All Facilities</option>
+              {branches.map(b => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 
@@ -1064,15 +1089,21 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                   <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1">
                     Facility Branch *
                   </label>
-                  <select
-                    value={selectedBranchId}
-                    onChange={(e) => setSelectedBranchId(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500 cursor-pointer"
-                  >
-                    {branches.map(b => (
-                      <option key={b.id} value={b.id}>{b.name}</option>
-                    ))}
-                  </select>
+                  {currentUser?.role === 'BRANCH_MANAGER' ? (
+                    <div className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-emerald-400 font-mono font-semibold">
+                      {currentUser.branchName || 'Assigned Branch'}
+                    </div>
+                  ) : (
+                    <select
+                      value={selectedBranchId}
+                      onChange={(e) => setSelectedBranchId(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                    >
+                      {branches.map(b => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               </div>
 

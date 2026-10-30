@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Asset, Branch, AssetCategory, Organization } from '../../types';
+import { Asset, Branch, AssetCategory, Organization, User } from '../../types';
 import { 
   X, 
   Sparkles, 
@@ -32,6 +32,7 @@ interface AssetUpsertModalProps {
   branches: Branch[];
   categories: AssetCategory[];
   currentOrg: Organization;
+  currentUser?: User;
   onClose: () => void;
   onSave: (asset: Asset) => void;
 }
@@ -44,6 +45,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
   branches,
   categories,
   currentOrg,
+  currentUser,
   onClose,
   onSave
 }) => {
@@ -203,6 +205,10 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
       setFormData(editingAsset);
     } else {
       const generatedCode = prefilledTag || `AST-${Math.floor(1000 + Math.random() * 9000)}`;
+      const defaultBranch = (currentUser?.role === 'BRANCH_MANAGER' && currentUser.branchId)
+        ? (branches.find(b => b.id === currentUser.branchId) || { id: currentUser.branchId, name: currentUser.branchName || '' })
+        : (branches[0] || { id: '', name: '' });
+
       setFormData({
         name: '',
         model: '',
@@ -213,8 +219,8 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
         phoneNumber: '',
         categoryId: categories[0]?.id || 'cat-1',
         categoryName: categories[0]?.name || 'Laptop',
-        branchId: branches[0]?.id || '',
-        branchName: branches[0]?.name || '',
+        branchId: defaultBranch.id,
+        branchName: defaultBranch.name,
         status: 'ACTIVE',
         condition: 'NEW',
         purchaseDate: new Date().toISOString().split('T')[0],
@@ -649,18 +655,24 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                       <label className="block text-slate-300 font-semibold mb-1">
                         Operating Branch Location
                       </label>
-                      <select
-                        value={formData.branchId}
-                        onChange={(e) => {
-                          const b = branches.find(br => br.id === e.target.value);
-                          setFormData({ ...formData, branchId: e.target.value, branchName: b?.name || '' });
-                        }}
-                        className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
-                      >
-                        {branches.map(b => (
-                          <option key={b.id} value={b.id}>{b.name}</option>
-                        ))}
-                      </select>
+                      {currentUser?.role === 'BRANCH_MANAGER' ? (
+                        <div className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-emerald-400 font-mono text-xs font-semibold">
+                          {currentUser.branchName || formData.branchName || 'Assigned Branch'}
+                        </div>
+                      ) : (
+                        <select
+                          value={formData.branchId}
+                          onChange={(e) => {
+                            const b = branches.find(br => br.id === e.target.value);
+                            setFormData({ ...formData, branchId: e.target.value, branchName: b?.name || '' });
+                          }}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
+                        >
+                          {branches.map(b => (
+                            <option key={b.id} value={b.id}>{b.name}</option>
+                          ))}
+                        </select>
+                      )}
                     </div>
 
                     <div>
@@ -1072,18 +1084,24 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-slate-300 font-semibold mb-1">Branch Facility</label>
-                    <select
-                      value={formData.branchId}
-                      onChange={(e) => {
-                        const b = branches.find(br => br.id === e.target.value);
-                        setFormData({ ...formData, branchId: e.target.value, branchName: b?.name || '' });
-                      }}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
-                    >
-                      {branches.map(b => (
-                        <option key={b.id} value={b.id}>{b.name} ({b.code})</option>
-                      ))}
-                    </select>
+                    {currentUser?.role === 'BRANCH_MANAGER' ? (
+                      <div className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-emerald-400 font-mono text-xs font-semibold">
+                        {currentUser.branchName || formData.branchName || 'Assigned Branch'}
+                      </div>
+                    ) : (
+                      <select
+                        value={formData.branchId}
+                        onChange={(e) => {
+                          const b = branches.find(br => br.id === e.target.value);
+                          setFormData({ ...formData, branchId: e.target.value, branchName: b?.name || '' });
+                        }}
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
+                      >
+                        {branches.map(b => (
+                          <option key={b.id} value={b.id}>{b.name} ({b.code})</option>
+                        ))}
+                      </select>
+                    )}
                   </div>
 
                   <div>

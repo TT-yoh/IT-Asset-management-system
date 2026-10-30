@@ -84,7 +84,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly PermissionAction[]> = {
     'maintenance:create',
     'users:read',
     'branches:read',
-    'departments:read'
+    'departments:read',
+    'departments:manage'
   ],
   IT_SUPPORT: [
     'assets:read',
@@ -101,6 +102,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly PermissionAction[]> = {
     'users:read',
     'branches:read',
     'departments:read',
+    'departments:manage',
     'audit:read'
   ],
   FINANCE: [
