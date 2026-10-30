@@ -248,11 +248,12 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // Filtered Assets based on Active Tenant, Branch Restriction, and Global Search
   const filteredAssets = useMemo(() => {
     return assets.filter(a => {
-      if (a.orgId !== currentOrg.id) return false;
+      if (a.orgId && a.orgId !== currentOrg.id) return false;
       if (isBranchRestricted && currentUser) {
         const matchesBranchId = Boolean(currentUser.branchId && a.branchId === currentUser.branchId);
         const matchesBranchName = Boolean(currentUser.branchName && a.branchName && a.branchName.toLowerCase() === currentUser.branchName.toLowerCase());
-        if (!matchesBranchId && !matchesBranchName) return false;
+        const isAssignedToUser = Boolean(a.assignedToUserId && a.assignedToUserId === currentUser.id);
+        if (!matchesBranchId && !matchesBranchName && !isAssignedToUser) return false;
       }
       if (!searchQuery.trim()) return true;
       const q = searchQuery.toLowerCase();

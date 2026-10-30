@@ -267,17 +267,50 @@ export const loadInitialData = async (orgId?: string): Promise<SystemDataPayload
       const data = await res.json();
       if (data && data.assets) {
         const mappedAssets: Asset[] = data.assets.map(mapTiDBRowToAsset);
-        saveToStorage(STORAGE_KEYS.ASSETS, mappedAssets);
-        if (data.checkouts) saveToStorage(STORAGE_KEYS.CHECKOUTS, data.checkouts);
-        if (data.maintenances) saveToStorage(STORAGE_KEYS.MAINTENANCES, data.maintenances);
+
+        // Safeguard: Merge with any existing cached assets so that locally created
+        // assets aren't blown away if the server returns empty or a partial list
+        const cachedAssets = loadFromStorage<Asset[]>(STORAGE_KEYS.ASSETS, []);
+        const mergedAssetsMap = new Map<string, Asset>();
+        cachedAssets.forEach(a => mergedAssetsMap.set(a.id, a));
+        mappedAssets.forEach(a => mergedAssetsMap.set(a.id, a));
+        const finalAssets = Array.from(mergedAssetsMap.values());
+
+        saveToStorage(STORAGE_KEYS.ASSETS, finalAssets);
+        if (data.checkouts) {
+          const cachedCheckouts = loadFromStorage<CheckoutRecord[]>(STORAGE_KEYS.CHECKOUTS, []);
+          const mergedChks = new Map<string, CheckoutRecord>();
+          cachedCheckouts.forEach(c => mergedChks.set(c.id, c));
+          data.checkouts.forEach((c: CheckoutRecord) => mergedChks.set(c.id, c));
+          saveToStorage(STORAGE_KEYS.CHECKOUTS, Array.from(mergedChks.values()));
+        }
+        if (data.maintenances) {
+          const cachedMaints = loadFromStorage<MaintenanceRecord[]>(STORAGE_KEYS.MAINTENANCES, []);
+          const mergedMaints = new Map<string, MaintenanceRecord>();
+          cachedMaints.forEach(m => mergedMaints.set(m.id, m));
+          data.maintenances.forEach((m: MaintenanceRecord) => mergedMaints.set(m.id, m));
+          saveToStorage(STORAGE_KEYS.MAINTENANCES, Array.from(mergedMaints.values()));
+        }
         if (data.budgets) saveToStorage(STORAGE_KEYS.BUDGETS, data.budgets);
         if (data.auditLogs) saveToStorage(STORAGE_KEYS.AUDIT_LOGS, data.auditLogs);
-        if (data.users) saveToStorage(STORAGE_KEYS.USERS, data.users);
-        if (data.branches) saveToStorage(STORAGE_KEYS.BRANCHES, data.branches);
+        if (data.users) {
+          const cachedUsers = loadFromStorage<User[]>(STORAGE_KEYS.USERS, []);
+          const mergedUsers = new Map<string, User>();
+          cachedUsers.forEach(u => mergedUsers.set(u.id, u));
+          data.users.forEach((u: User) => mergedUsers.set(u.id, u));
+          saveToStorage(STORAGE_KEYS.USERS, Array.from(mergedUsers.values()));
+        }
+        if (data.branches) {
+          const cachedBranches = loadFromStorage<Branch[]>(STORAGE_KEYS.BRANCHES, []);
+          const mergedBranches = new Map<string, Branch>();
+          cachedBranches.forEach(b => mergedBranches.set(b.id, b));
+          data.branches.forEach((b: Branch) => mergedBranches.set(b.id, b));
+          saveToStorage(STORAGE_KEYS.BRANCHES, Array.from(mergedBranches.values()));
+        }
         if (data.organizations) saveToStorage(STORAGE_KEYS.ORGANIZATIONS, data.organizations);
 
         return {
-          assets: mappedAssets,
+          assets: finalAssets,
           checkouts: data.checkouts || [],
           maintenances: data.maintenances || [],
           budgets: data.budgets || [],
@@ -413,6 +446,10 @@ export function resetToCleanSlate(adminUser: User): SystemDataPayload {
 export async function persistAsset(asset: Asset, allAssets?: Asset[], isUpdate = false): Promise<boolean> {
   const current = allAssets || loadFromStorage<Asset[]>(STORAGE_KEYS.ASSETS, INITIAL_ASSETS);
   const exists = isUpdate || current.some(a => a.id === asset.id);
+  const updated = exists ? current.map(a => (a.id === asset.id ? asset : a)) : [asset, ...current];
+
+  // Guaranteed immediate local persistence so the asset is NEVER lost if server is unreachable or errors
+  saveToStorage(STORAGE_KEYS.ASSETS, updated);
 
   try {
     const row = mapAssetToTiDBRow(asset);
@@ -425,21 +462,19 @@ export async function persistAsset(asset: Asset, allAssets?: Asset[], isUpdate =
       body: JSON.stringify(row)
     });
     if (res.ok) {
-      const updated = exists ? current.map(a => (a.id === asset.id ? asset : a)) : [asset, ...current];
-      saveToStorage(STORAGE_KEYS.ASSETS, updated);
       updateLastTiDBSyncTime();
       return true;
     } else if (res.status === 409) {
       const errData = await res.json().catch(() => ({}));
+      // Revert local optimistic storage on conflict error
+      saveToStorage(STORAGE_KEYS.ASSETS, current);
       throw new Error(errData.error || 'Duplicate or redundant asset data detected.');
     }
   } catch (err: any) {
     if (err?.message?.includes('Redundant') || err?.message?.includes('Duplicate') || err?.message?.includes('Conflict')) {
       throw err;
     }
-    // Offline or network fallback: save locally for offline-first replay
-    const updated = exists ? current.map(a => (a.id === asset.id ? asset : a)) : [asset, ...current];
-    saveToStorage(STORAGE_KEYS.ASSETS, updated);
+    // Network or proxy error: local persistence is already established above
   }
   return true;
 }
