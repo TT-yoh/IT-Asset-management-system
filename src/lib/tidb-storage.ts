@@ -202,7 +202,7 @@ const loadFromStorage = <T>(key: string, fallback: T): T => {
   }
 };
 
-const saveToStorage = <T>(key: string, value: T): void => {
+export const saveToStorage = <T>(key: string, value: T): void => {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch (err) {

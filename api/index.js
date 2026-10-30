@@ -27026,19 +27026,11 @@ userRouter.delete("/:id", requirePermission("users:delete"), async (req, res) =>
     return;
   }
   const existing = users[0];
-  const activeCheckouts = await query(
-    'SELECT COUNT(*) as cnt FROM `checkouts` WHERE `checked_out_to_user_id` = ? AND `status` = "ACTIVE";',
-    [targetUserId]
-  );
-  if (activeCheckouts[0]?.cnt > 0) {
-    res.status(409).json({
-      error: `Cannot remove user who currently holds custody of ${activeCheckouts[0].cnt} checked-out asset(s). Return items first.`
-    });
-    return;
-  }
   try {
     await withTransaction(async (tx) => {
-      await tx('UPDATE `users` SET `status` = "SUSPENDED" WHERE `id` = ? AND `org_id` = ?;', [targetUserId, orgId]);
+      await tx('UPDATE `checkouts` SET `status` = "RETURNED", `notes` = "Auto-closed on staff account deletion" WHERE `checked_out_to_user_id` = ? AND `status` = "ACTIVE";', [targetUserId]);
+      await tx("UPDATE `assets` SET `assigned_to_user_id` = NULL, `assigned_to_user_name` = NULL, `assigned_to_user_avatar` = NULL, `assigned_at` = NULL WHERE `assigned_to_user_id` = ? AND `org_id` = ?;", [targetUserId, orgId]);
+      await tx("DELETE FROM `users` WHERE `id` = ? AND `org_id` = ?;", [targetUserId, orgId]);
       await recordAuditEvent(tx, {
         orgId,
         actorId,
@@ -27048,11 +27040,11 @@ userRouter.delete("/:id", requirePermission("users:delete"), async (req, res) =>
         entityType: "User",
         entityId: targetUserId,
         entityName: existing.full_name,
-        changes: { previousStatus: existing.status, updatedStatus: "SUSPENDED" },
+        changes: { deletedUserId: targetUserId, email: existing.email, role: existing.role },
         ipAddress
       });
     });
-    res.json({ success: true, message: "User suspended and access revoked." });
+    res.json({ success: true, message: "User account permanently removed." });
   } catch (err) {
     res.status(500).json({ error: `User deletion transaction failed: ${err.message}` });
   }

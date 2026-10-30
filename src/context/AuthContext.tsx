@@ -10,7 +10,9 @@ import {
   deleteDepartmentFromStorage,
   getStoredSession,
   setStoredSession,
-  clearStoredSession
+  clearStoredSession,
+  saveToStorage,
+  STORAGE_KEYS
 } from '../lib/tidb-storage';
 import { clearOfflineStoreOnLogout } from '../lib/offline-sync';
 import { RegisterCompanyData } from '../components/RegisterCompanyModal';
@@ -666,11 +668,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const handleClearDummyUsers = () => {
-    // Only allowed in DEV mode, never in production builds
-    if (!import.meta.env.DEV) {
-      return;
-    }
-    setSystemUsers(prev => prev.filter(u => u.id === currentUser?.id || u.status === 'ACTIVE'));
+    setSystemUsers(prev => {
+      const remaining = prev.filter(u => u.id === currentUser?.id || u.id === 'usr-super-admin-ishmael');
+      saveToStorage(STORAGE_KEYS.USERS, remaining);
+      return remaining;
+    });
   };
 
   const hasRole = (roles: UserRole | UserRole[]): boolean => {

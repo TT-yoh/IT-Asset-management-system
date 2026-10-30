@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { User, Organization, Branch, Asset, AuditLogItem, Department } from '../types';
 import { 
   Users, 
@@ -53,6 +53,7 @@ interface UsersPanelProps {
   }) => Promise<{ success: boolean; inviteToken?: string; user?: User; error?: string }>;
   onUpdateUser?: (updatedUser: User) => void;
   onDeleteUser?: (userId: string) => Promise<{ success: boolean; error?: string }>;
+  onUpdateAsset?: (asset: Asset) => void;
   onClearDummyUsers?: () => void;
   onNavigateToDepartments?: () => void;
 }
@@ -69,6 +70,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
   onInviteUser,
   onUpdateUser,
   onDeleteUser,
+  onUpdateAsset,
   onClearDummyUsers,
   onNavigateToDepartments
 }) => {
@@ -118,6 +120,59 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
   const [copiedLink, setCopiedLink] = useState(false);
   const [isInviting, setIsInviting] = useState(false);
   const [reinvitingId, setReinvitingId] = useState<string | null>(null);
+
+  // Viewport & Auto-Focus Refs
+  const deleteConfirmBtnRef = useRef<HTMLButtonElement>(null);
+  const deleteModalContainerRef = useRef<HTMLDivElement>(null);
+  const editModalContainerRef = useRef<HTMLDivElement>(null);
+  const editNameInputRef = useRef<HTMLInputElement>(null);
+  const inviteModalContainerRef = useRef<HTMLDivElement>(null);
+  const inviteNameInputRef = useRef<HTMLInputElement>(null);
+  const copyInviteBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Dynamic Auto-focus & Scroll to top when Delete Confirmation Modal opens
+  useEffect(() => {
+    if (userToDelete) {
+      deleteModalContainerRef.current?.scrollTo({ top: 0, behavior: 'instant' });
+      const timer = setTimeout(() => {
+        deleteConfirmBtnRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [userToDelete]);
+
+  // Dynamic Auto-focus & Scroll to top when Edit Staff Modal opens
+  useEffect(() => {
+    if (editingUser) {
+      editModalContainerRef.current?.scrollTo({ top: 0, behavior: 'instant' });
+      const timer = setTimeout(() => {
+        editNameInputRef.current?.focus();
+        editNameInputRef.current?.select();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [editingUser]);
+
+  // Dynamic Auto-focus & Scroll to top when Invite Modal opens
+  useEffect(() => {
+    if (showInviteModal) {
+      inviteModalContainerRef.current?.scrollTo({ top: 0, behavior: 'instant' });
+      const timer = setTimeout(() => {
+        inviteNameInputRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [showInviteModal]);
+
+  // Dynamic Auto-focus when Invite Success Modal opens
+  useEffect(() => {
+    if (showInviteSuccessModal) {
+      const timer = setTimeout(() => {
+        copyInviteBtnRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [showInviteSuccessModal]);
 
   const orgUsers = users.filter(u => u.orgId === currentOrg.id);
   const isAdmin = currentUser?.role === 'ADMIN';
@@ -244,15 +299,6 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
       return;
     }
 
-    const userAssets = getUserAssets(u.id);
-    if (userAssets.length > 0) {
-      showToast(
-        `Cannot remove ${u.fullName}: user currently holds custody of ${userAssets.length} asset(s). Return or reassign equipment first.`,
-        'error'
-      );
-      return;
-    }
-
     setUserToDelete(u);
     setDeleteError(null);
   };
@@ -263,6 +309,20 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
 
     setIsDeleting(true);
     setDeleteError(null);
+
+    // If user holds assets, release them cleanly back to unassigned inventory in client state
+    const heldAssets = getUserAssets(userToDelete.id);
+    if (heldAssets.length > 0 && onUpdateAsset) {
+      heldAssets.forEach(ast => {
+        onUpdateAsset({
+          ...ast,
+          assignedToUserId: undefined,
+          assignedToUserName: undefined,
+          assignedToUserAvatar: undefined,
+          assignedAt: undefined
+        });
+      });
+    }
 
     const res = await onDeleteUser(userToDelete.id);
     setIsDeleting(false);
@@ -819,7 +879,10 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
 
       {/* Edit Staff Modal */}
       {editingUser && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
+        <div
+          ref={editModalContainerRef}
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 overflow-y-auto flex justify-center items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150"
+        >
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between pb-4 border-b border-slate-800">
               <div className="flex items-center gap-2">
@@ -847,6 +910,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                   Full Name *
                 </label>
                 <input
+                  ref={editNameInputRef}
                   autoFocus
                   type="text"
                   required
@@ -949,20 +1013,37 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setEditingUser(null)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 cursor-pointer"
-                >
-                  Save Modifications
-                </button>
+              <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+                {currentUser?.id !== editingUser.id ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = editingUser;
+                      setEditingUser(null);
+                      handleRequestDelete(target);
+                    }}
+                    className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition"
+                    title="Delete Staff Account"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Staff</span>
+                  </button>
+                ) : <div />}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingUser(null)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 cursor-pointer"
+                  >
+                    Save Modifications
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -971,7 +1052,13 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
 
       {/* Delete User Confirmation Modal */}
       {userToDelete && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
+        <div 
+          ref={deleteModalContainerRef}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setUserToDelete(null);
+          }}
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 overflow-y-auto flex justify-center items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150"
+        >
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-150 space-y-4">
             <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 mx-auto">
               <Trash2 className="w-6 h-6" />
@@ -991,6 +1078,19 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
               </div>
             )}
 
+            {/* Equipment Custody Notice */}
+            {getUserAssets(userToDelete.id).length > 0 && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-300 space-y-1 text-left">
+                <div className="font-bold flex items-center gap-1.5 text-amber-400">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>Active Equipment Custody ({getUserAssets(userToDelete.id).length})</span>
+                </div>
+                <p className="text-[11px] text-amber-300/90 leading-relaxed">
+                  This staff member currently holds custody of {getUserAssets(userToDelete.id).length} equipment unit(s). Confirming deletion will automatically unassign this equipment and return it to available facility inventory.
+                </p>
+              </div>
+            )}
+
             <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-[11px] text-slate-400 space-y-1">
               <div><strong className="text-slate-300">Role:</strong> {userToDelete.role}</div>
               <div><strong className="text-slate-300">Facility:</strong> {userToDelete.branchName}</div>
@@ -1007,10 +1107,12 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                 Cancel
               </button>
               <button
+                ref={deleteConfirmBtnRef}
+                autoFocus
                 type="button"
                 disabled={isDeleting}
                 onClick={handleConfirmDelete}
-                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-rose-600/20"
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-rose-600/20 focus:outline-none focus:ring-2 focus:ring-rose-400"
               >
                 {isDeleting ? 'Removing...' : 'Confirm Delete'}
               </button>
@@ -1021,7 +1123,13 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
 
       {/* Invite Modal */}
       {showInviteModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
+        <div 
+          ref={inviteModalContainerRef}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setShowInviteModal(false);
+          }}
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 overflow-y-auto flex justify-center items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150"
+        >
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between pb-4 border-b border-slate-800">
               <div className="flex items-center gap-2">
@@ -1044,6 +1152,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                   Full Name *
                 </label>
                 <input
+                  ref={inviteNameInputRef}
                   autoFocus
                   type="text"
                   required
@@ -1146,7 +1255,12 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
 
       {/* Success Invitation Modal */}
       {showInviteSuccessModal && latestInvitedUser && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
+        <div 
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setShowInviteSuccessModal(false);
+          }}
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 overflow-y-auto flex justify-center items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150"
+        >
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-150 space-y-4">
             <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mx-auto">
               <Check className="w-6 h-6" />
@@ -1168,9 +1282,11 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
 
             <div className="flex gap-2">
               <button
+                ref={copyInviteBtnRef}
+                autoFocus
                 type="button"
                 onClick={() => copyInviteLink(latestInviteToken)}
-                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-400"
               >
                 {copiedLink ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                 <span>{copiedLink ? 'Copied to Clipboard!' : 'Copy Activation Link'}</span>

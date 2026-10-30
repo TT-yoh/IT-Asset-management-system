@@ -318,23 +318,17 @@ userRouter.delete('/:id', requirePermission('users:delete'), async (req: Request
 
   const existing = users[0]!;
 
-  // Check if user has active checkouts
-  const activeCheckouts = await query<any>(
-    'SELECT COUNT(*) as cnt FROM \`checkouts\` WHERE \`checked_out_to_user_id\` = ? AND \`status\` = "ACTIVE";',
-    [targetUserId]
-  );
-
-  if (activeCheckouts[0]?.cnt > 0) {
-    res.status(409).json({
-      error: `Cannot remove user who currently holds custody of ${activeCheckouts[0].cnt} checked-out asset(s). Return items first.`
-    });
-    return;
-  }
-
+  // Automatically handle active checkouts or custody during deletion
   try {
     await withTransaction(async (tx) => {
-      // Soft-delete by setting status to SUSPENDED
-      await tx('UPDATE \`users\` SET \`status\` = "SUSPENDED" WHERE \`id\` = ? AND \`org_id\` = ?;', [targetUserId, orgId]);
+      // 1. Gracefully close any active equipment checkouts held by this user
+      await tx('UPDATE \`checkouts\` SET \`status\` = "RETURNED", \`notes\` = "Auto-closed on staff account deletion" WHERE \`checked_out_to_user_id\` = ? AND \`status\` = "ACTIVE";', [targetUserId]);
+
+      // 2. Clear assigned equipment custody so assets return to available inventory
+      await tx('UPDATE \`assets\` SET \`assigned_to_user_id\` = NULL, \`assigned_to_user_name\` = NULL, \`assigned_to_user_avatar\` = NULL, \`assigned_at\` = NULL WHERE \`assigned_to_user_id\` = ? AND \`org_id\` = ?;', [targetUserId, orgId]);
+
+      // 3. Permanently remove the staff user record from database
+      await tx('DELETE FROM \`users\` WHERE \`id\` = ? AND \`org_id\` = ?;', [targetUserId, orgId]);
 
       await recordAuditEvent(tx, {
         orgId,
@@ -345,12 +339,12 @@ userRouter.delete('/:id', requirePermission('users:delete'), async (req: Request
         entityType: 'User',
         entityId: targetUserId,
         entityName: existing.full_name,
-        changes: { previousStatus: existing.status, updatedStatus: 'SUSPENDED' },
+        changes: { deletedUserId: targetUserId, email: existing.email, role: existing.role },
         ipAddress
       });
     });
 
-    res.json({ success: true, message: 'User suspended and access revoked.' });
+    res.json({ success: true, message: 'User account permanently removed.' });
   } catch (err: any) {
     res.status(500).json({ error: `User deletion transaction failed: ${err.message}` });
   }

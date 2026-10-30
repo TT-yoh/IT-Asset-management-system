@@ -467,6 +467,7 @@ function AppShell() {
               onInviteUser={handleInviteUser}
               onUpdateUser={handleUpdateUser}
               onDeleteUser={handleDeleteUser}
+              onUpdateAsset={handleUpdateAsset}
               onClearDummyUsers={handleClearDummyUsers}
               onNavigateToDepartments={() => {
                 setFacilitiesSubTab('departments');
