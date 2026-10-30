@@ -12,7 +12,8 @@ import { UsersPanel } from './components/UsersPanel';
 import { FacilitiesPanel } from './components/FacilitiesPanel';
 import { LoginPortal } from './components/auth/LoginPortal';
 import { TiDBSyncModal } from './components/TiDBSyncModal';
-import { QuickScannerModal } from './components/QuickScannerModal';
+import { QuickScannerModal, resolveAssetFromScan } from './components/QuickScannerModal';
+import { AssetDetailModal } from './components/asset-manager/AssetDetailModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { CATEGORIES } from './mockData';
 import {
@@ -98,7 +99,50 @@ function AppShell() {
   const [initialAssetStatusFilter, setInitialAssetStatusFilter] = useState<string>('ALL');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   const [isGlobalScannerOpen, setIsGlobalScannerOpen] = useState<boolean>(false);
+  const [inspectingAsset, setInspectingAsset] = useState<Asset | null>(null);
   const mainViewportRef = React.useRef<HTMLElement>(null);
+
+  // Deep-link & Scanned QR code inspector: resolves ?asset=, ?code=, or ?tag= from physical stickers
+  useEffect(() => {
+    if (!currentUser || filteredAssets.length === 0) return;
+
+    const checkScannedUrl = () => {
+      let targetCode: string | null = null;
+      if (typeof window !== 'undefined') {
+        const urlParams = new URLSearchParams(window.location.search);
+        targetCode = urlParams.get('asset') || urlParams.get('code') || urlParams.get('tag');
+
+        if (!targetCode && window.location.hash.includes('?')) {
+          const hashQuery = window.location.hash.substring(window.location.hash.indexOf('?'));
+          const hashParams = new URLSearchParams(hashQuery);
+          targetCode = hashParams.get('asset') || hashParams.get('code') || hashParams.get('tag');
+        }
+
+        // Check if there was a saved redirect from pre-auth scan
+        if (!targetCode) {
+          try {
+            targetCode = sessionStorage.getItem('omni_redirect_asset');
+            if (targetCode) sessionStorage.removeItem('omni_redirect_asset');
+          } catch {}
+        }
+      }
+
+      if (targetCode) {
+        const { asset } = resolveAssetFromScan(targetCode, filteredAssets);
+        if (asset) {
+          setInspectingAsset(asset);
+        }
+      }
+    };
+
+    checkScannedUrl();
+    window.addEventListener('popstate', checkScannedUrl);
+    window.addEventListener('hashchange', checkScannedUrl);
+    return () => {
+      window.removeEventListener('popstate', checkScannedUrl);
+      window.removeEventListener('hashchange', checkScannedUrl);
+    };
+  }, [currentUser, filteredAssets]);
 
   // Smooth scroll reset whenever tab changes so the new page never starts in an awkward scrolled position
   useEffect(() => {
@@ -165,12 +209,21 @@ function AppShell() {
     );
   }
 
-  // If not authenticated, save intended tab and render LoginPortal
+  // If not authenticated, save intended tab/asset and render LoginPortal
   if (!currentUser) {
     const requested = getTabFromHash();
     if (requested && requested !== 'dashboard' && typeof window !== 'undefined') {
       try {
         sessionStorage.setItem('omni_redirect_tab', requested);
+      } catch {}
+    }
+    if (typeof window !== 'undefined' && window.location.search) {
+      try {
+        const searchParams = new URLSearchParams(window.location.search);
+        const scanned = searchParams.get('asset') || searchParams.get('code') || searchParams.get('tag');
+        if (scanned) {
+          sessionStorage.setItem('omni_redirect_asset', scanned);
+        }
       } catch {}
     }
     return (
@@ -422,7 +475,52 @@ function AppShell() {
         onUpdateAssetStatus={(assetId, st) => {
           handleBatchUpdateStatus([assetId], st);
         }}
+        onViewAssetDetails={(ast) => {
+          setInspectingAsset(ast);
+        }}
       />
+
+      {/* Universal Asset Detail & Passport Modal (Scanned QR tags or deep link) */}
+      {inspectingAsset && (
+        <AssetDetailModal
+          asset={inspectingAsset}
+          onClose={() => {
+            setInspectingAsset(null);
+            if (typeof window !== 'undefined') {
+              const url = new URL(window.location.href);
+              if (url.searchParams.has('asset') || url.searchParams.has('code') || url.searchParams.has('tag')) {
+                url.searchParams.delete('asset');
+                url.searchParams.delete('code');
+                url.searchParams.delete('tag');
+                window.history.replaceState({}, '', url.pathname + (url.search ? url.search : '') + url.hash);
+              }
+            }
+          }}
+          onEdit={(ast) => {
+            setInspectingAsset(null);
+            setSearchQuery(ast.assetCode);
+            navigateToTab('assets');
+          }}
+          onReportRepair={(ast) => {
+            setInspectingAsset(null);
+            handleReportIssue({
+              id: `mnt-${Date.now()}`,
+              assetId: ast.id,
+              assetCode: ast.assetCode,
+              assetName: ast.name,
+              type: 'REPAIR',
+              status: 'IN_PROGRESS',
+              description: 'Reported issue from scanned tag passport',
+              reportedBy: currentUser.fullName,
+              assignedTechnician: currentUser.fullName,
+              startDate: new Date().toISOString().split('T')[0]!,
+              expectedCompletion: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().split('T')[0]!,
+              cost: 150
+            });
+            navigateToTab('repair');
+          }}
+        />
+      )}
 
       {/* TiDB Database Connection & HTAP Sync Modal */}
       {showTiDBModal && (

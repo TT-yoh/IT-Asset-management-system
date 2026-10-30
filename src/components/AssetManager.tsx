@@ -643,6 +643,9 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
         onUpdateAssetStatus={(assetId, st) => {
           if (onBatchUpdateStatus) onBatchUpdateStatus([assetId], st);
         }}
+        onViewAssetDetails={(ast) => {
+          setSelectedAssetForDetails(ast);
+        }}
       />
 
       {/* Precision Label Studio Modal */}

@@ -42,13 +42,11 @@ export const AssetDetailModal: React.FC<AssetDetailModalProps> = ({
 
   if (!asset) return null;
 
+  const origin = typeof window !== 'undefined' && window.location.origin && !window.location.origin.includes('null')
+    ? window.location.origin
+    : 'https://it-asset-management-system-orpin.vercel.app';
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
-    JSON.stringify({
-      code: asset.assetCode,
-      sn: asset.serialNumber,
-      branch: asset.branchName,
-      status: asset.status
-    })
+    `${origin}/?asset=${encodeURIComponent(asset.assetCode)}`
   )}`;
 
   // Calculate straight-line depreciation

@@ -82,12 +82,11 @@ export const PrintLabelsModal: React.FC<PrintLabelsModalProps> = ({
       for (const ast of assets) {
         if (isCancelled) return;
         try {
-          const payload = JSON.stringify({
-            code: ast.assetCode,
-            sn: ast.serialNumber || '',
-            name: ast.name,
-            orgId: ast.orgId
-          });
+          const origin = typeof window !== 'undefined' && window.location.origin && !window.location.origin.includes('null')
+            ? window.location.origin
+            : 'https://it-asset-management-system-orpin.vercel.app';
+          // Universal web URL so scanning from any mobile camera immediately opens the asset's passport details
+          const payload = `${origin}/?asset=${encodeURIComponent(ast.assetCode)}`;
 
           const dataUrl = await QRCode.toDataURL(payload, {
             margin: 1,
