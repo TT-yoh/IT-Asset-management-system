@@ -132,6 +132,13 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [branchFilter, setBranchFilter] = useState<string>('ALL');
 
+  // Role-Based Access Control (RBAC): IT team (ADMIN and IT_SUPPORT) has full access
+  const isITTeam = currentUser.role === 'ADMIN' || currentUser.role === 'IT_SUPPORT';
+  const canAddAsset = isITTeam || currentUser.role === 'BRANCH_MANAGER';
+  const canEditAsset = isITTeam || currentUser.role === 'BRANCH_MANAGER';
+  const canDeleteAsset = isITTeam;
+  const canImportAssets = isITTeam;
+
   // Modals state
   const [isUpsertOpen, setIsUpsertOpen] = useState<boolean>(false);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
@@ -396,14 +403,16 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
           </button>
 
           {/* Import Excel / CSV */}
-          <button
-            onClick={() => setIsImportModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 rounded-xl text-xs font-semibold transition-all border border-emerald-500/30 shadow-sm cursor-pointer"
-            title="Import preexisting assets from Excel (.xlsx) or CSV with interactive column mapping and duplicate check"
-          >
-            <Upload className="w-4 h-4 text-emerald-400" />
-            <span>Import Excel / CSV</span>
-          </button>
+          {canImportAssets && (
+            <button
+              onClick={() => setIsImportModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 rounded-xl text-xs font-semibold transition-all border border-emerald-500/30 shadow-sm cursor-pointer"
+              title="Import preexisting assets from Excel (.xlsx) or CSV with interactive column mapping and duplicate check"
+            >
+              <Upload className="w-4 h-4 text-emerald-400" />
+              <span>Import Excel / CSV</span>
+            </button>
+          )}
 
           {/* Export Excel */}
           <button
@@ -415,16 +424,18 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
           </button>
 
           {/* Enroll Asset Button */}
-          <button
-            onClick={() => {
-              setEditingAsset(null);
-              setIsUpsertOpen(true);
-            }}
-            className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Enroll Asset</span>
-          </button>
+          {canAddAsset && (
+            <button
+              onClick={() => {
+                setEditingAsset(null);
+                setIsUpsertOpen(true);
+              }}
+              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Enroll Asset</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -538,15 +549,15 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
           onToggleSelect={handleToggleSelect}
           onSelectAll={handleSelectAll}
           onViewDetails={(ast) => setSelectedAssetForDetails(ast)}
-          onEditAsset={(ast) => {
+          onEditAsset={canEditAsset ? (ast) => {
             setEditingAsset(ast);
             setIsUpsertOpen(true);
-          }}
-          onDeleteAsset={(id) => {
+          } : undefined}
+          onDeleteAsset={canDeleteAsset ? (id) => {
             if (onDeleteAsset && window.confirm('Delete this asset from ledger?')) {
               onDeleteAsset(id);
             }
-          }}
+          } : undefined}
           onShowQR={(ast) => setSelectedAssetForDetails(ast)}
         />
       ) : (
@@ -555,15 +566,15 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
           selectedIds={selectedAssetIds}
           onToggleSelect={handleToggleSelect}
           onViewDetails={(ast) => setSelectedAssetForDetails(ast)}
-          onEditAsset={(ast) => {
+          onEditAsset={canEditAsset ? (ast) => {
             setEditingAsset(ast);
             setIsUpsertOpen(true);
-          }}
-          onDeleteAsset={(id) => {
+          } : undefined}
+          onDeleteAsset={canDeleteAsset ? (id) => {
             if (onDeleteAsset && window.confirm('Delete this asset from ledger?')) {
               onDeleteAsset(id);
             }
-          }}
+          } : undefined}
           onShowQR={(ast) => setSelectedAssetForDetails(ast)}
         />
       )}
@@ -572,6 +583,8 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
       <BatchActionToolbar
         selectedCount={selectedAssetIds.size}
         branches={branches}
+        canEdit={canEditAsset}
+        canDelete={canDeleteAsset}
         onBatchStatusChange={handleBatchStatusChange}
         onBatchTransferBranch={handleBatchTransfer}
         onBatchDelete={handleBatchDeleteAction}
@@ -584,11 +597,11 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
         <AssetDetailModal
           asset={selectedAssetForDetails}
           onClose={() => setSelectedAssetForDetails(null)}
-          onEdit={(ast) => {
+          onEdit={canEditAsset ? (ast) => {
             setSelectedAssetForDetails(null);
             setEditingAsset(ast);
             setIsUpsertOpen(true);
-          }}
+          } : undefined}
           onReportRepair={onReportIssue}
           onPrintLabel={(ast) => {
             setSelectedAssetIds(new Set([ast.id]));
@@ -635,13 +648,13 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
         onSelectAssetForRepair={(ast) => {
           if (onReportIssue) onReportIssue(ast);
         }}
-        onEnrollScannedTag={(tag) => {
+        onEnrollScannedTag={canAddAsset ? (tag) => {
           setEditingAsset(null);
           setPrefilledTag(tag);
           setIsUpsertOpen(true);
-        }}
+        } : undefined}
         onUpdateAssetStatus={(assetId, st) => {
-          if (onBatchUpdateStatus) onBatchUpdateStatus([assetId], st);
+          if (onBatchUpdateStatus && canEditAsset) onBatchUpdateStatus([assetId], st);
         }}
         onViewAssetDetails={(ast) => {
           setSelectedAssetForDetails(ast);

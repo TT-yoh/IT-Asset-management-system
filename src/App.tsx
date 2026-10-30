@@ -438,89 +438,99 @@ function AppShell() {
       </div>
 
       {/* Quick Camera Barcode/QR Scanner Modal */}
-      <QuickScannerModal
-        isOpen={isGlobalScannerOpen}
-        onClose={() => setIsGlobalScannerOpen(false)}
-        assets={filteredAssets}
-        currentUser={currentUser}
-        onSelectAssetForCheckout={(ast) => {
-          setSearchQuery(ast.assetCode);
-          navigateToTab('assets');
-        }}
-        onSelectAssetForReturn={(ast) => {
-          setSearchQuery(ast.assetCode);
-          navigateToTab('assets');
-        }}
-        onSelectAssetForRepair={(ast) => {
-          handleReportIssue({
-            id: `mnt-${Date.now()}`,
-            assetId: ast.id,
-            assetCode: ast.assetCode,
-            assetName: ast.name,
-            type: 'REPAIR',
-            status: 'IN_PROGRESS',
-            description: 'Scanned via quick camera diagnostic intake',
-            reportedBy: currentUser.fullName,
-            assignedTechnician: currentUser.fullName,
-            startDate: new Date().toISOString().split('T')[0]!,
-            expectedCompletion: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().split('T')[0]!,
-            cost: 150
-          });
-          navigateToTab('repair');
-        }}
-        onEnrollScannedTag={(tag) => {
-          setSearchQuery(tag);
-          navigateToTab('assets');
-        }}
-        onUpdateAssetStatus={(assetId, st) => {
-          handleBatchUpdateStatus([assetId], st);
-        }}
-        onViewAssetDetails={(ast) => {
-          setInspectingAsset(ast);
-        }}
-      />
+      {(() => {
+        const isITTeam = currentUser.role === 'ADMIN' || currentUser.role === 'IT_SUPPORT';
+        const canAddAsset = isITTeam || currentUser.role === 'BRANCH_MANAGER';
+        const canEditAsset = isITTeam || currentUser.role === 'BRANCH_MANAGER';
 
-      {/* Universal Asset Detail & Passport Modal (Scanned QR tags or deep link) */}
-      {inspectingAsset && (
-        <AssetDetailModal
-          asset={inspectingAsset}
-          onClose={() => {
-            setInspectingAsset(null);
-            if (typeof window !== 'undefined') {
-              const url = new URL(window.location.href);
-              if (url.searchParams.has('asset') || url.searchParams.has('code') || url.searchParams.has('tag')) {
-                url.searchParams.delete('asset');
-                url.searchParams.delete('code');
-                url.searchParams.delete('tag');
-                window.history.replaceState({}, '', url.pathname + (url.search ? url.search : '') + url.hash);
-              }
-            }
-          }}
-          onEdit={(ast) => {
-            setInspectingAsset(null);
-            setSearchQuery(ast.assetCode);
-            navigateToTab('assets');
-          }}
-          onReportRepair={(ast) => {
-            setInspectingAsset(null);
-            handleReportIssue({
-              id: `mnt-${Date.now()}`,
-              assetId: ast.id,
-              assetCode: ast.assetCode,
-              assetName: ast.name,
-              type: 'REPAIR',
-              status: 'IN_PROGRESS',
-              description: 'Reported issue from scanned tag passport',
-              reportedBy: currentUser.fullName,
-              assignedTechnician: currentUser.fullName,
-              startDate: new Date().toISOString().split('T')[0]!,
-              expectedCompletion: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().split('T')[0]!,
-              cost: 150
-            });
-            navigateToTab('repair');
-          }}
-        />
-      )}
+        return (
+          <>
+            <QuickScannerModal
+              isOpen={isGlobalScannerOpen}
+              onClose={() => setIsGlobalScannerOpen(false)}
+              assets={filteredAssets}
+              currentUser={currentUser}
+              onSelectAssetForCheckout={(ast) => {
+                setSearchQuery(ast.assetCode);
+                navigateToTab('assets');
+              }}
+              onSelectAssetForReturn={(ast) => {
+                setSearchQuery(ast.assetCode);
+                navigateToTab('assets');
+              }}
+              onSelectAssetForRepair={(ast) => {
+                handleReportIssue({
+                  id: `mnt-${Date.now()}`,
+                  assetId: ast.id,
+                  assetCode: ast.assetCode,
+                  assetName: ast.name,
+                  type: 'REPAIR',
+                  status: 'IN_PROGRESS',
+                  description: 'Scanned via quick camera diagnostic intake',
+                  reportedBy: currentUser.fullName,
+                  assignedTechnician: currentUser.fullName,
+                  startDate: new Date().toISOString().split('T')[0]!,
+                  expectedCompletion: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().split('T')[0]!,
+                  cost: 150
+                });
+                navigateToTab('repair');
+              }}
+              onEnrollScannedTag={canAddAsset ? (tag) => {
+                setSearchQuery(tag);
+                navigateToTab('assets');
+              } : undefined}
+              onUpdateAssetStatus={(assetId, st) => {
+                if (canEditAsset) handleBatchUpdateStatus([assetId], st);
+              }}
+              onViewAssetDetails={(ast) => {
+                setInspectingAsset(ast);
+              }}
+            />
+
+            {/* Universal Asset Detail & Passport Modal (Scanned QR tags or deep link) */}
+            {inspectingAsset && (
+              <AssetDetailModal
+                asset={inspectingAsset}
+                onClose={() => {
+                  setInspectingAsset(null);
+                  if (typeof window !== 'undefined') {
+                    const url = new URL(window.location.href);
+                    if (url.searchParams.has('asset') || url.searchParams.has('code') || url.searchParams.has('tag')) {
+                      url.searchParams.delete('asset');
+                      url.searchParams.delete('code');
+                      url.searchParams.delete('tag');
+                      window.history.replaceState({}, '', url.pathname + (url.search ? url.search : '') + url.hash);
+                    }
+                  }
+                }}
+                onEdit={canEditAsset ? (ast) => {
+                  setInspectingAsset(null);
+                  setSearchQuery(ast.assetCode);
+                  navigateToTab('assets');
+                } : undefined}
+                onReportRepair={(ast) => {
+                  setInspectingAsset(null);
+                  handleReportIssue({
+                    id: `mnt-${Date.now()}`,
+                    assetId: ast.id,
+                    assetCode: ast.assetCode,
+                    assetName: ast.name,
+                    type: 'REPAIR',
+                    status: 'IN_PROGRESS',
+                    description: 'Reported issue from scanned tag passport',
+                    reportedBy: currentUser.fullName,
+                    assignedTechnician: currentUser.fullName,
+                    startDate: new Date().toISOString().split('T')[0]!,
+                    expectedCompletion: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().split('T')[0]!,
+                    cost: 150
+                  });
+                  navigateToTab('repair');
+                }}
+              />
+            )}
+          </>
+        );
+      })()}
 
       {/* TiDB Database Connection & HTAP Sync Modal */}
       {showTiDBModal && (

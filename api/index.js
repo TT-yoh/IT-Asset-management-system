@@ -24427,15 +24427,18 @@ var ROLE_PERMISSIONS = {
     "assets:read",
     "assets:create",
     "assets:update",
+    "assets:delete",
     "checkouts:read",
     "checkouts:create",
     "checkouts:return",
+    "checkouts:writeoff",
     "maintenance:read",
     "maintenance:create",
     "maintenance:update",
     "users:read",
     "branches:read",
-    "departments:read"
+    "departments:read",
+    "audit:read"
   ],
   FINANCE: [
     "assets:read",
@@ -24471,7 +24474,7 @@ function canApproveWriteOff(actorId, custodyUserId, role) {
   if (actorId === custodyUserId) {
     return false;
   }
-  return role === "ADMIN" || role === "FINANCE";
+  return role === "ADMIN" || role === "IT_SUPPORT" || role === "FINANCE";
 }
 
 // server/middleware.ts

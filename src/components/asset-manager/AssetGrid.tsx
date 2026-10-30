@@ -7,8 +7,8 @@ interface AssetGridProps {
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   onViewDetails: (asset: Asset) => void;
-  onEditAsset: (asset: Asset) => void;
-  onDeleteAsset: (id: string) => void;
+  onEditAsset?: (asset: Asset) => void;
+  onDeleteAsset?: (id: string) => void;
   onShowQR: (asset: Asset) => void;
 }
 
@@ -45,8 +45,8 @@ export const AssetGrid: React.FC<AssetGridProps> = ({
           <AssetCard
             asset={asset}
             onSelect={() => onViewDetails(asset)}
-            onEdit={() => onEditAsset(asset)}
-            onDelete={() => onDeleteAsset(asset.id)}
+            onEdit={onEditAsset ? () => onEditAsset(asset) : undefined}
+            onDelete={onDeleteAsset ? () => onDeleteAsset(asset.id) : undefined}
             onShowQr={() => onShowQR(asset)}
           />
         </div>

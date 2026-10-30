@@ -90,15 +90,18 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly PermissionAction[]> = {
     'assets:read',
     'assets:create',
     'assets:update',
+    'assets:delete',
     'checkouts:read',
     'checkouts:create',
     'checkouts:return',
+    'checkouts:writeoff',
     'maintenance:read',
     'maintenance:create',
     'maintenance:update',
     'users:read',
     'branches:read',
-    'departments:read'
+    'departments:read',
+    'audit:read'
   ],
   FINANCE: [
     'assets:read',
@@ -137,5 +140,5 @@ export function canApproveWriteOff(actorId: string, custodyUserId: string, role:
     // Separation of duties violation: custody holder cannot self-certify write-off
     return false;
   }
-  return role === 'ADMIN' || role === 'FINANCE';
+  return role === 'ADMIN' || role === 'IT_SUPPORT' || role === 'FINANCE';
 }

@@ -19,8 +19,8 @@ interface AssetTableProps {
   onToggleSelect: (id: string) => void;
   onSelectAll: () => void;
   onViewDetails: (asset: Asset) => void;
-  onEditAsset: (asset: Asset) => void;
-  onDeleteAsset: (id: string) => void;
+  onEditAsset?: (asset: Asset) => void;
+  onDeleteAsset?: (id: string) => void;
   onShowQR: (asset: Asset) => void;
 }
 
@@ -195,20 +195,24 @@ export const AssetTable: React.FC<AssetTableProps> = ({
                       >
                         <QrCode className="w-3.5 h-3.5" />
                       </button>
-                      <button
-                        onClick={() => onEditAsset(asset)}
-                        title="Edit Asset"
-                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-sky-400 transition-colors"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => onDeleteAsset(asset.id)}
-                        title="Delete Asset"
-                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition-colors"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {onEditAsset && (
+                        <button
+                          onClick={() => onEditAsset(asset)}
+                          title="Edit Asset"
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-sky-400 transition-colors"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {onDeleteAsset && (
+                        <button
+                          onClick={() => onDeleteAsset(asset.id)}
+                          title="Delete Asset"
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
