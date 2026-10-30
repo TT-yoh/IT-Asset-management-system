@@ -88,8 +88,15 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
       if (formBodyRef.current) formBodyRef.current.scrollTop = 0;
       if (modalContainerRef.current) modalContainerRef.current.scrollTop = 0;
       const timer = setTimeout(() => {
-        firstInputRef.current?.focus();
-      }, 60);
+        if (firstInputRef.current && document.contains(firstInputRef.current)) {
+          firstInputRef.current.focus();
+        } else {
+          const firstField = formBodyRef.current?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+            'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])'
+          );
+          firstField?.focus();
+        }
+      }, 70);
       return () => clearTimeout(timer);
     }
   }, [isOpen, activeStep, showAdvancedFields]);

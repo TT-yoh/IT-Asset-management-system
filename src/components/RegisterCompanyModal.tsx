@@ -52,8 +52,17 @@ export const RegisterCompanyModal: React.FC<RegisterCompanyModalProps> = ({
   const formBodyRef = React.useRef<HTMLFormElement>(null);
 
   React.useEffect(() => {
-    if (formBodyRef.current) {
-      formBodyRef.current.scrollTop = 0;
+    if (isOpen) {
+      if (formBodyRef.current) {
+        formBodyRef.current.scrollTop = 0;
+      }
+      const timer = setTimeout(() => {
+        const firstField = formBodyRef.current?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+          'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])'
+        );
+        firstField?.focus();
+      }, 70);
+      return () => clearTimeout(timer);
     }
   }, [activeStep, isOpen]);
 

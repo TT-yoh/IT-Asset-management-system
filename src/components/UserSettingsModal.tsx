@@ -55,10 +55,19 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   const modalBodyRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
-    if (modalBodyRef.current) {
-      modalBodyRef.current.scrollTop = 0;
+    if (isOpen) {
+      if (modalBodyRef.current) {
+        modalBodyRef.current.scrollTop = 0;
+      }
+      const timer = setTimeout(() => {
+        const firstField = modalBodyRef.current?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+          'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])'
+        );
+        firstField?.focus();
+      }, 70);
+      return () => clearTimeout(timer);
     }
-  }, [activeTab]);
+  }, [activeTab, isOpen]);
 
   // Profile Form State
   const [fullName, setFullName] = useState(currentUser.fullName);

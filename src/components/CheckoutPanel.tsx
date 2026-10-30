@@ -689,7 +689,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
                 {assignType === 'REGISTERED' ? (
                   <div>
                     <label className="block text-slate-300 font-semibold mb-1">Assign Employee Custody</label>
-                    <select value={targetUserId} onChange={e => setTargetUserId(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white focus:outline-none focus:border-sky-500">
+                    <select autoFocus value={targetUserId} onChange={e => setTargetUserId(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white focus:outline-none focus:border-sky-500">
                       {users.map(u => <option key={u.id} value={u.id}>{u.fullName} ({u.role})</option>)}
                     </select>
                   </div>
@@ -701,6 +701,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
                     <input
                       type="text"
                       required
+                      autoFocus
                       value={assignCustomName}
                       onChange={e => setAssignCustomName(e.target.value)}
                       placeholder={isSelectedAssetLaptopOrPhone ? "Write the name of the person given to..." : "Type name here (No login account needed)..."}
@@ -758,7 +759,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
               <form onSubmit={handleDirectUnassignSubmit} className="mt-5 space-y-4">
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">Target Assigned Hardware</label>
-                  <select value={targetAssetId} onChange={e => setTargetAssetId(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white">
+                  <select autoFocus value={targetAssetId} onChange={e => setTargetAssetId(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white">
                     {checkedOutAssetsPool.map(a => <option key={a.id} value={a.id}>[{a.assetCode}] {a.name} (Held by: {a.assignedToUserName})</option>)}
                   </select>
                 </div>

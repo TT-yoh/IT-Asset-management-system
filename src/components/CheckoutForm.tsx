@@ -60,8 +60,15 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
   React.useEffect(() => {
     if (containerRef.current) {
       containerRef.current.scrollTop = 0;
+      const timer = setTimeout(() => {
+        const firstField = containerRef.current?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+          'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])'
+        );
+        firstField?.focus();
+      }, 70);
+      return () => clearTimeout(timer);
     }
-  }, [asset?.id]);
+  }, [asset?.id, assigneeType]);
 
   if (!asset) {
     return (

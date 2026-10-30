@@ -413,6 +413,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
                     <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <input
                       type="text"
+                      autoFocus
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="e.g. user@company.com"
@@ -517,6 +518,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
                   </label>
                   <input
                     type="text"
+                    autoFocus
                     value={activationTokenInput}
                     onChange={(e) => setActivationTokenInput(e.target.value)}
                     placeholder="e.g. inv-3k9x8a..."
