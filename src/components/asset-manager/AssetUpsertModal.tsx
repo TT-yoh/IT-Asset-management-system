@@ -180,9 +180,17 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
     let newTag = '';
     let isUnique = false;
     let attempts = 0;
+    const cat = formData.categoryName || '';
+    let prefix = 'AST';
+    if (cat.toLowerCase().includes('laptop')) prefix = 'AST-LPT';
+    else if (cat.toLowerCase().includes('phone') || cat.toLowerCase().includes('mobile') || cat.toLowerCase().includes('tablet')) prefix = 'AST-PHN';
+    else if (cat.toLowerCase().includes('server')) prefix = 'AST-SRV';
+    else if (cat.toLowerCase().includes('network') || cat.toLowerCase().includes('switch') || cat.toLowerCase().includes('router')) prefix = 'AST-NET';
+    else if (cat.toLowerCase().includes('monitor') || cat.toLowerCase().includes('display')) prefix = 'AST-MON';
+
     while (!isUnique && attempts < 100) {
       attempts++;
-      newTag = `AST-${Math.floor(1000 + Math.random() * 9000)}`;
+      newTag = `${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
       if (!existingAssets || !existingAssets.some(a => a.assetCode?.toLowerCase() === newTag.toLowerCase())) {
         isUnique = true;
       }
@@ -498,22 +506,21 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                         <label className="block text-slate-300 font-semibold">
                           Asset Tag / Barcode <span className="text-rose-400">*</span>
                         </label>
-                        {redundancyCheck.tagConflict && (
-                          <button
-                            type="button"
-                            onClick={generateUniqueTag}
-                            className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-semibold transition cursor-pointer"
-                          >
-                            <RefreshCw className="w-2.5 h-2.5" /> Auto-Tag
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={generateUniqueTag}
+                          className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-semibold transition cursor-pointer"
+                          title="Generate a unique conflict-free asset tag"
+                        >
+                          <RefreshCw className="w-2.5 h-2.5" /> Auto-Generate
+                        </button>
                       </div>
                       <input
                         type="text"
                         required
                         value={formData.assetCode || ''}
                         onChange={(e) => setFormData({ ...formData, assetCode: e.target.value })}
-                        placeholder="e.g. AST-1042"
+                        placeholder="e.g. CORP-042 or AST-1042"
                         className={`w-full px-3 py-2 bg-slate-950 border rounded-xl font-mono text-emerald-400 focus:outline-none transition ${
                           redundancyCheck.tagConflict
                             ? 'border-amber-500/80 bg-amber-950/20 focus:border-amber-400'
@@ -537,7 +544,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                           </button>
                         </div>
                       ) : (
-                        <p className="text-[10px] text-slate-400 mt-0.5">Unique barcode/sticker tag for this specific unit.</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">Type your own custom code, scan a physical sticker, or click Auto-Generate.</p>
                       )}
                     </div>
 
@@ -894,21 +901,20 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                       <label className="block text-slate-300 font-semibold">
                         Asset Tag / Barcode <span className="text-rose-400">*</span>
                       </label>
-                      {redundancyCheck.tagConflict && (
-                        <button
-                          type="button"
-                          onClick={generateUniqueTag}
-                          className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-semibold transition cursor-pointer"
-                        >
-                          <RefreshCw className="w-2.5 h-2.5" /> Auto-Tag
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={generateUniqueTag}
+                        className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-semibold transition cursor-pointer"
+                        title="Generate a unique conflict-free asset tag"
+                      >
+                        <RefreshCw className="w-2.5 h-2.5" /> Auto-Generate
+                      </button>
                     </div>
                     <input
                       type="text"
                       required
                       value={formData.assetCode || ''}
-                      placeholder="e.g. AST-1042"
+                      placeholder="e.g. CORP-042 or AST-1042"
                       onChange={(e) => setFormData({ ...formData, assetCode: e.target.value })}
                       className={`w-full px-3 py-2 bg-slate-900 border rounded-xl font-mono text-emerald-400 focus:outline-none transition ${
                         redundancyCheck.tagConflict
@@ -933,7 +939,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                         </button>
                       </div>
                     ) : (
-                      <p className="text-[10px] text-slate-400 mt-0.5">Unique organization barcode tag code for this unit.</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Type your own custom code, scan a physical sticker, or click Auto-Generate.</p>
                     )}
                   </div>
 
