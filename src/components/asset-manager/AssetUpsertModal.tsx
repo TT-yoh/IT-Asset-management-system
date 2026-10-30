@@ -78,6 +78,22 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
   const [aiSuccessMessage, setAiSuccessMessage] = useState('');
   const [formError, setFormError] = useState('');
 
+  const formBodyRef = React.useRef<HTMLFormElement>(null);
+  const modalContainerRef = React.useRef<HTMLDivElement>(null);
+  const firstInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Auto-scroll to top and auto-focus when modal opens or step/mode toggles
+  useEffect(() => {
+    if (isOpen) {
+      if (formBodyRef.current) formBodyRef.current.scrollTop = 0;
+      if (modalContainerRef.current) modalContainerRef.current.scrollTop = 0;
+      const timer = setTimeout(() => {
+        firstInputRef.current?.focus();
+      }, 60);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, activeStep, showAdvancedFields]);
+
   const monthsElapsed = React.useMemo(() => {
     if (!formData.purchaseDate) return 0;
     const pDate = new Date(formData.purchaseDate);
@@ -368,7 +384,10 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+    <div
+      ref={modalContainerRef}
+      className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/85 backdrop-blur-sm flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4"
+    >
       <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-950/70 flex items-center justify-between">
@@ -473,7 +492,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
         )}
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-5 overflow-y-auto space-y-4 flex-1 text-xs">
+        <form ref={formBodyRef} onSubmit={handleSubmit} className="p-5 overflow-y-auto space-y-4 flex-1 text-xs">
           {!showAdvancedFields ? (
             /* WIZARD MODE: 2 Guided Steps */
             <div className="space-y-4">
@@ -494,6 +513,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                       Model or Device Name <span className="text-rose-400">*</span>
                     </label>
                     <input
+                      ref={!showAdvancedFields ? firstInputRef : undefined}
                       type="text"
                       required
                       value={formData.model || formData.name || ''}
@@ -870,6 +890,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                       Asset Name <span className="text-rose-400">*</span>
                     </label>
                     <input
+                      ref={showAdvancedFields ? firstInputRef : undefined}
                       type="text"
                       required
                       value={formData.name || ''}

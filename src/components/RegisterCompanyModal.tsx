@@ -49,6 +49,13 @@ export const RegisterCompanyModal: React.FC<RegisterCompanyModalProps> = ({
   onRegister
 }) => {
   const [activeStep, setActiveStep] = useState<1 | 2 | 3>(1);
+  const formBodyRef = React.useRef<HTMLFormElement>(null);
+
+  React.useEffect(() => {
+    if (formBodyRef.current) {
+      formBodyRef.current.scrollTop = 0;
+    }
+  }, [activeStep, isOpen]);
 
   // Step 1: Company Profile
   const [name, setName] = useState('');
@@ -152,7 +159,7 @@ export const RegisterCompanyModal: React.FC<RegisterCompanyModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
       <div 
         className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden relative max-h-[92vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
@@ -231,7 +238,7 @@ export const RegisterCompanyModal: React.FC<RegisterCompanyModalProps> = ({
         </div>
 
         {/* Form Body - Scrollable */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto flex-1">
+        <form ref={formBodyRef} onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto flex-1">
           {/* STEP 1: COMPANY PROFILE */}
           {activeStep === 1 && (
             <div className="space-y-4 animate-in fade-in duration-150">

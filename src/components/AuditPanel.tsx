@@ -402,7 +402,7 @@ export const AuditPanel: React.FC<AuditPanelProps> = ({
           MODAL: BRANCH REGISTRATION FOR COMPANY ADMINS
          ==================================================================== */}
       {showCreateBranchModal && isAdmin && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
           <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <button onClick={() => setShowCreateBranchModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white text-lg">✕</button>
             
@@ -418,6 +418,7 @@ export const AuditPanel: React.FC<AuditPanelProps> = ({
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">Branch Facility Name *</label>
                 <input
+                  autoFocus
                   type="text"
                   required
                   value={newBranchName}
@@ -512,7 +513,7 @@ export const AuditPanel: React.FC<AuditPanelProps> = ({
           MODAL 4: BRANCH EDIT MODAL
          ==================================================================== */}
       {editingBranch && isAdmin && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150 font-sans">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150 font-sans">
           <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <button onClick={() => setEditingBranch(null)} className="absolute top-4 right-4 text-slate-400 hover:text-white text-lg">✕</button>
             
@@ -526,6 +527,7 @@ export const AuditPanel: React.FC<AuditPanelProps> = ({
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">Branch Name *</label>
                 <input
+                  autoFocus
                   type="text"
                   required
                   value={editBranchName}

@@ -44,6 +44,14 @@ export const MaintenancePanel: React.FC<MaintenancePanelProps> = ({
   const [priorityFilter, setPriorityFilter] = useState('ALL');
   const [techFilter, setTechFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+  const recordsSectionRef = React.useRef<HTMLDivElement>(null);
+  const createModalBodyRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (showCreateModal && createModalBodyRef.current) {
+      createModalBodyRef.current.scrollTop = 0;
+    }
+  }, [showCreateModal]);
 
   const today = new Date().toISOString().split('T')[0]!;
 
@@ -170,7 +178,10 @@ export const MaintenancePanel: React.FC<MaintenancePanelProps> = ({
                 </div>
               </div>
               <button
-                onClick={() => setStatusFilter('IN_PROGRESS')}
+                onClick={() => {
+                  setStatusFilter('IN_PROGRESS');
+                  recordsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
                 className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shrink-0 self-start sm:self-center"
               >
                 Filter Overdue Tickets
@@ -218,7 +229,7 @@ export const MaintenancePanel: React.FC<MaintenancePanelProps> = ({
           </div>
 
           {/* Filter Bar */}
-          <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-2xl shadow-xl space-y-3">
+          <div ref={recordsSectionRef} className="bg-slate-900/90 border border-slate-800 p-4 rounded-2xl shadow-xl space-y-3">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
               {/* Search */}
               <div className="relative flex-1 max-w-md">
@@ -418,8 +429,8 @@ export const MaintenancePanel: React.FC<MaintenancePanelProps> = ({
 
       {/* CREATE TICKET MODAL */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
+          <div ref={createModalBodyRef} className="bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <button onClick={() => setShowCreateModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white p-1">✕</button>
             <h3 className="text-base font-bold text-white flex items-center gap-2 mb-4 pb-3 border-b border-slate-800">
               <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />

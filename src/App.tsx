@@ -144,16 +144,36 @@ function AppShell() {
     };
   }, [currentUser, filteredAssets]);
 
+  // Immediate scroll reset helper for window, document, and main viewport
+  const scrollToTop = React.useCallback((smooth = false) => {
+    const behavior = smooth ? 'smooth' : 'instant';
+    if (mainViewportRef.current) {
+      try {
+        mainViewportRef.current.scrollTo({ top: 0, behavior });
+      } catch {
+        mainViewportRef.current.scrollTop = 0;
+      }
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        window.scrollTo({ top: 0, behavior });
+      } catch {
+        window.scrollTo(0, 0);
+      }
+      if (document.documentElement) document.documentElement.scrollTop = 0;
+      if (document.body) document.body.scrollTop = 0;
+    }
+  }, []);
+
   // Smooth scroll reset whenever tab changes so the new page never starts in an awkward scrolled position
   useEffect(() => {
-    if (mainViewportRef.current) {
-      mainViewportRef.current.scrollTo({ top: 0, behavior: 'instant' });
-    }
-  }, [activeTab]);
+    scrollToTop();
+  }, [activeTab, scrollToTop]);
 
   // Navigate between tabs with browser history tracking (popstate / back arrow support)
   const navigateToTab = (tab: NavTab, replace = false) => {
     setActiveTabState(tab);
+    scrollToTop();
     if (typeof window !== 'undefined') {
       const targetHash = `#/${tab}`;
       if (replace) {

@@ -52,6 +52,13 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   onUpdateUser,
 }) => {
   const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'hardware'>('profile');
+  const modalBodyRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (modalBodyRef.current) {
+      modalBodyRef.current.scrollTop = 0;
+    }
+  }, [activeTab]);
 
   // Profile Form State
   const [fullName, setFullName] = useState(currentUser.fullName);
@@ -192,7 +199,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
       <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/90">
@@ -258,7 +265,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 overflow-y-auto space-y-6 flex-1 text-slate-200">
+        <div ref={modalBodyRef} className="p-6 overflow-y-auto space-y-6 flex-1 text-slate-200">
           {/* TAB 1: GENERAL PROFILE */}
           {activeTab === 'profile' && (
             <form onSubmit={handleSaveProfile} className="space-y-6">

@@ -81,6 +81,14 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
     return () => window.removeEventListener('hashchange', handleHashCheck);
   }, []);
 
+  const subTabHeaderRef = React.useRef<HTMLDivElement>(null);
+  const branchModalBodyRef = React.useRef<HTMLDivElement>(null);
+
+  // Scroll to sub-tab view when switching between Facilities and Departments
+  useEffect(() => {
+    subTabHeaderRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [activeTab]);
+
   const [searchQuery, setSearchQuery] = useState('');
 
   // Toast / notification feedback
@@ -93,6 +101,12 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
   // --- Branch Modal States ---
   const [showBranchModal, setShowBranchModal] = useState(false);
   const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
+
+  useEffect(() => {
+    if (showBranchModal && branchModalBodyRef.current) {
+      branchModalBodyRef.current.scrollTop = 0;
+    }
+  }, [showBranchModal]);
   const [branchName, setBranchName] = useState('');
   const [branchCode, setBranchCode] = useState('');
   const [branchLocation, setBranchLocation] = useState('');
@@ -423,7 +437,7 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
       </div>
 
       {/* Main Tab Controller & Search Bar */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+      <div ref={subTabHeaderRef} className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3">
         <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 w-full sm:w-auto">
           <button
             type="button"
@@ -665,8 +679,8 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
           MODAL: ADD / EDIT BRANCH FACILITY
          ==================================================================== */}
       {showBranchModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 md:p-8 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
+          <div ref={branchModalBodyRef} className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 md:p-8 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <button
               type="button"
               onClick={() => setShowBranchModal(false)}
@@ -694,6 +708,7 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
                   Facility Name *
                 </label>
                 <input
+                  autoFocus
                   type="text"
                   required
                   value={branchName}
@@ -813,7 +828,7 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
           MODAL: ADD / EDIT DEPARTMENT
          ==================================================================== */}
       {showDeptModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl relative">
             <button
               type="button"
@@ -842,6 +857,7 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
                   Department Name *
                 </label>
                 <input
+                  autoFocus
                   type="text"
                   required
                   value={deptName}
@@ -891,7 +907,7 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
           MODAL: CONFIRM DELETE BRANCH
          ==================================================================== */}
       {branchToDelete && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
           <div className="bg-slate-900 border border-rose-500/30 rounded-3xl max-w-md w-full p-6 shadow-2xl relative">
             <div className="flex items-center gap-3 text-rose-400 mb-3">
               <div className="w-10 h-10 rounded-2xl bg-rose-500/10 flex items-center justify-center">
@@ -939,7 +955,7 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
           MODAL: CONFIRM DELETE DEPARTMENT
          ==================================================================== */}
       {deptToDelete && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
           <div className="bg-slate-900 border border-rose-500/30 rounded-3xl max-w-md w-full p-6 shadow-2xl relative">
             <div className="flex items-center gap-3 text-rose-400 mb-3">
               <div className="w-10 h-10 rounded-2xl bg-rose-500/10 flex items-center justify-center">

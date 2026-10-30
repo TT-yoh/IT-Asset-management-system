@@ -63,6 +63,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
   const [targetUserId, setTargetUserId] = useState(users[0]?.id || '');
   const [targetCheckoutRecord, setTargetCheckoutRecord] = useState<CheckoutRecord | null>(null);
   const [unassignReason, setUnassignReason] = useState('Standard rotation cycle');
+  const ledgerRef = React.useRef<HTMLDivElement>(null);
 
   // Direct Assign Custom States
   const [assignType, setAssignType] = useState<'REGISTERED' | 'CUSTOM'>('REGISTERED');
@@ -284,7 +285,10 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
                 </div>
               </div>
               <button
-                onClick={() => setFilterStatus('OVERDUE')}
+                onClick={() => {
+                  setFilterStatus('OVERDUE');
+                  ledgerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
                 className="px-3 py-1.5 bg-amber-500 text-slate-950 font-bold rounded-xl text-[11px] shrink-0"
               >
                 View Overdue
@@ -293,7 +297,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
           )}
 
           {/* Action Toolbar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 p-4 md:p-5 rounded-2xl shadow-xl">
+          <div ref={ledgerRef} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 p-4 md:p-5 rounded-2xl shadow-xl">
             <div>
               <span className="text-sm font-bold text-slate-100 block">Transaction Ledger</span>
               <p className="text-[11px] text-slate-400">
@@ -486,7 +490,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
           MODAL A: HARDWARE CHECKOUT FORM (FILE 5 & FILE 8 REQUIREMENT)
          ==================================================================== */}
       {showCheckoutModal && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
           {activeAssetsPool.length === 0 ? (
             <div className="max-w-md w-full relative bg-slate-900 border border-slate-700 rounded-3xl p-6 md:p-8 shadow-2xl text-xs text-center space-y-4">
               <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
@@ -540,7 +544,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
           MODAL B: RETURN CHECK-IN FORM (FILE 6 & FILE 9 REQUIREMENT)
          ==================================================================== */}
       {showCheckinModal && targetCheckoutRecord && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
           <CheckinForm
             asset={assets.find(a => a.id === targetCheckoutRecord.assetId) || {
               id: targetCheckoutRecord.assetId,
@@ -575,7 +579,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
       {showAssignModal && (() => {
         if (assets.length === 0) {
           return (
-            <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
+            <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
               <div className="max-w-md w-full bg-slate-900 border border-slate-700 rounded-3xl p-6 md:p-8 shadow-2xl text-xs text-center space-y-4">
                 <div className="w-12 h-12 rounded-2xl bg-sky-500/10 border border-sky-500/20 text-sky-400 flex items-center justify-center mx-auto">
                   <UserCheck className="w-6 h-6" />
@@ -613,7 +617,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
         );
 
         return (
-          <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
+          <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
             <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-6 md:p-8 shadow-2xl relative text-xs">
               <button onClick={() => setShowAssignModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-white">✕</button>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
@@ -726,7 +730,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
           MODAL D: ADMIN REVOKE / UNASSIGN (FILE 4 REQUIREMENT)
          ==================================================================== */}
       {showUnassignModal && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
           <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-6 md:p-8 shadow-2xl relative text-xs">
             <button onClick={() => setShowUnassignModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer">✕</button>
             <h3 className="text-base font-bold text-white flex items-center gap-2">

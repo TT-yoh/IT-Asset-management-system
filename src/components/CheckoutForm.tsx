@@ -55,6 +55,13 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
   const [returnDate, setReturnDate] = useState(defaultReturn);
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.scrollTop = 0;
+    }
+  }, [asset?.id]);
 
   if (!asset) {
     return (
@@ -142,7 +149,7 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
   };
 
   return (
-    <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl relative animate-in fade-in zoom-in-95 duration-200 text-xs text-slate-300 max-h-[92vh] overflow-y-auto">
+    <div ref={containerRef} className="bg-slate-900 border border-slate-700 rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl relative animate-in fade-in zoom-in-95 duration-200 text-xs text-slate-300 max-h-[92vh] overflow-y-auto">
       {/* Header */}
       <div className="flex items-center justify-between pb-4 border-b border-slate-800">
         <div className="flex items-center gap-3">

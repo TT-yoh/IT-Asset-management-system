@@ -22,6 +22,13 @@ export const MaintenanceDetailModal: React.FC<MaintenanceDetailModalProps> = ({
   const [cost, setCost] = useState((record.cost || 0).toString());
   const [notes, setNotes] = useState(record.notes || '');
   const [activeTab, setActiveTab] = useState<'DETAILS' | 'UPDATE' | 'AUDIT'>('DETAILS');
+  const modalBodyRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (modalBodyRef.current) {
+      modalBodyRef.current.scrollTop = 0;
+    }
+  }, [activeTab]);
 
   const today = new Date().toISOString().split('T')[0]!;
   const isOverdue = record.status === 'IN_PROGRESS' && record.expectedCompletion < today;
@@ -53,7 +60,7 @@ export const MaintenanceDetailModal: React.FC<MaintenanceDetailModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 p-4 overflow-y-auto animate-in fade-in duration-150">
+    <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
       <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Modal Top Banner */}
         <div className="p-5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
@@ -97,7 +104,7 @@ export const MaintenanceDetailModal: React.FC<MaintenanceDetailModalProps> = ({
         </div>
 
         {/* Tab Body */}
-        <div className="p-6 overflow-y-auto space-y-6 text-xs flex-1">
+        <div ref={modalBodyRef} className="p-6 overflow-y-auto space-y-6 text-xs flex-1">
           {activeTab === 'DETAILS' && (
             <div className="space-y-6">
               {isOverdue && (

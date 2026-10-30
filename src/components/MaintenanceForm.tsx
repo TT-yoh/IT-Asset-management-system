@@ -92,6 +92,7 @@ export const MaintenanceForm: React.FC<MaintenanceFormProps> = ({
             disabled={!!initialData}
             value={assetId}
             onChange={e => setAssetId(e.target.value)}
+            autoFocus
             className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white focus:border-rose-500 focus:outline-none disabled:opacity-60"
           >
             {assets.map(a => (
