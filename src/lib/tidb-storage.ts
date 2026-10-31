@@ -191,7 +191,7 @@ export const generateTiDBUpsertQuery = (tableName: string, data: Record<string, 
 };
 
 // Safe JSON local cache helpers
-const loadFromStorage = <T>(key: string, fallback: T): T => {
+export const loadFromStorage = <T>(key: string, fallback: T): T => {
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return fallback;
@@ -247,6 +247,7 @@ export interface SystemDataPayload {
   notifications: SystemNotification[];
   users: User[];
   branches: Branch[];
+  departments?: Department[];
   organizations?: Organization[];
   isTiDBLive: boolean;
   lastSyncedAt: string;
@@ -300,13 +301,41 @@ export const loadInitialData = async (orgId?: string): Promise<SystemDataPayload
           data.users.forEach((u: User) => mergedUsers.set(u.id, u));
           saveToStorage(STORAGE_KEYS.USERS, Array.from(mergedUsers.values()));
         }
-        if (data.branches) {
-          const cachedBranches = loadFromStorage<Branch[]>(STORAGE_KEYS.BRANCHES, []);
-          const mergedBranches = new Map<string, Branch>();
-          cachedBranches.forEach(b => mergedBranches.set(b.id, b));
-          data.branches.forEach((b: Branch) => mergedBranches.set(b.id, b));
-          saveToStorage(STORAGE_KEYS.BRANCHES, Array.from(mergedBranches.values()));
+
+        const mappedBranches: Branch[] = (data.branches || []).map((b: any) => ({
+          id: b.id,
+          orgId: b.orgId || b.org_id,
+          name: b.name,
+          code: b.code,
+          location: b.location,
+          city: b.city,
+          country: b.country,
+          managerName: b.managerName || b.manager_name
+        }));
+        const cachedBranches = loadFromStorage<Branch[]>(STORAGE_KEYS.BRANCHES, INITIAL_BRANCHES);
+        const mergedBranches = new Map<string, Branch>();
+        cachedBranches.forEach(b => mergedBranches.set(b.id, b));
+        mappedBranches.forEach(b => mergedBranches.set(b.id, b));
+        const finalBranches = Array.from(mergedBranches.values());
+        saveToStorage(STORAGE_KEYS.BRANCHES, finalBranches);
+
+        let finalDepartments: Department[] = [];
+        if (data.departments) {
+          const mappedDepts: Department[] = data.departments.map((d: any) => ({
+            id: d.id,
+            orgId: d.orgId || d.org_id,
+            name: d.name,
+            headCount: d.headCount ?? d.head_count ?? 0,
+            budgetAllocated: d.budgetAllocated ?? d.budget_allocated ?? 0
+          }));
+          const cachedDepts = loadFromStorage<Department[]>(STORAGE_KEYS.DEPARTMENTS, DEPARTMENTS);
+          const mergedDepts = new Map<string, Department>();
+          cachedDepts.forEach(d => mergedDepts.set(d.id, d));
+          mappedDepts.forEach(d => mergedDepts.set(d.id, d));
+          finalDepartments = Array.from(mergedDepts.values());
+          saveToStorage(STORAGE_KEYS.DEPARTMENTS, finalDepartments);
         }
+
         if (data.organizations) saveToStorage(STORAGE_KEYS.ORGANIZATIONS, data.organizations);
 
         return {
@@ -317,7 +346,8 @@ export const loadInitialData = async (orgId?: string): Promise<SystemDataPayload
           auditLogs: data.auditLogs || [],
           notifications: loadFromStorage<SystemNotification[]>(STORAGE_KEYS.NOTIFICATIONS, INITIAL_NOTIFICATIONS),
           users: data.users || [],
-          branches: data.branches || [],
+          branches: finalBranches,
+          departments: finalDepartments.length > 0 ? finalDepartments : undefined,
           organizations: data.organizations || loadFromStorage<Organization[]>(STORAGE_KEYS.ORGANIZATIONS, ORGANIZATIONS),
           isTiDBLive: true,
           lastSyncedAt: updateLastTiDBSyncTime()

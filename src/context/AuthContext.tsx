@@ -99,15 +99,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => initialSession.user);
-  const [isSessionLoading, setIsSessionLoading] = useState<boolean>(() => !initialSession.user);
+  // Do not block initial UI rendering with a blank splash; load immediately
+  const [isSessionLoading, setIsSessionLoading] = useState<boolean>(false);
 
-  // Background session verification against backend /api/auth/me cookie
+  // Background non-blocking session verification against backend /api/auth/me cookie
   useEffect(() => {
     let isCancelled = false;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
 
     const verifyServerSession = async () => {
       try {
-        const res = await fetch('/api/auth/me', { credentials: 'include' });
+        const res = await fetch('/api/auth/me', { 
+          credentials: 'include',
+          signal: controller.signal 
+        });
+        clearTimeout(timeoutId);
+
         if (res.ok) {
           const data = await res.json().catch(() => null);
           if (data?.user && !isCancelled) {
@@ -135,13 +143,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
         } else if (res.status === 401 || res.status === 403) {
           // If server explicitly rejects session cookie and user had no offline session
-          if (!isCancelled) {
+          if (!isCancelled && !initialSession.user) {
             clearStoredSession();
             setCurrentUser(null);
           }
         }
       } catch (err) {
-        // Network unavailable or offline: preserve existing local storage session
+        // Network unavailable, timeout, or offline: preserve existing local storage session
         console.warn('Session verification fallback to local cached session:', err);
       } finally {
         if (!isCancelled) {
@@ -154,6 +162,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     return () => {
       isCancelled = true;
+      clearTimeout(timeoutId);
+      controller.abort();
     };
   }, [systemOrgs]);
 
@@ -168,12 +178,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setCurrentOrg(org);
     setCurrentUser(user);
     setStoredSession(user, org);
+    setIsSessionLoading(false);
     if (typeof window !== 'undefined') {
       const pendingRedirect = sessionStorage.getItem('omni_redirect_tab');
       sessionStorage.removeItem('omni_redirect_tab');
       const validTabs = ['dashboard', 'assets', 'checkout', 'repair', 'branches', 'users', 'reports', 'budget', 'audit'];
       const targetTab = pendingRedirect && validTabs.includes(pendingRedirect) ? pendingRedirect : 'dashboard';
       window.history.pushState({ tab: targetTab }, '', `#/${targetTab}`);
+      window.dispatchEvent(new Event('hashchange'));
+      window.dispatchEvent(new PopStateEvent('popstate', { state: { tab: targetTab } }));
     }
   }, []);
 

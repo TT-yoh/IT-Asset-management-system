@@ -10,6 +10,7 @@ import {
 import {
   STORAGE_KEYS,
   loadInitialData,
+  loadFromStorage,
   persistAsset,
   deleteAssetFromDb,
   bulkPersistAssets,
@@ -75,11 +76,12 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const { currentOrg, currentUser, isBranchRestricted, handleSyncUsers, handleSyncBranches, handleSyncOrganizations } = useAuth();
   const { addNotification, setNotifications, evaluateAutomatedAlerts } = useNotifications();
 
-  const [assets, setAssets] = useState<Asset[]>(INITIAL_ASSETS);
-  const [checkouts, setCheckouts] = useState<CheckoutRecord[]>(INITIAL_CHECKOUTS);
-  const [maintenances, setMaintenances] = useState<MaintenanceRecord[]>(INITIAL_MAINTENANCE);
-  const [budgets, setBudgets] = useState<BudgetAllocation[]>(INITIAL_BUDGETS);
-  const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>(INITIAL_AUDIT_LOGS);
+  // Synchronously initialize from persistent local storage to guarantee zero-blank-screen render
+  const [assets, setAssets] = useState<Asset[]>(() => loadFromStorage<Asset[]>(STORAGE_KEYS.ASSETS, INITIAL_ASSETS));
+  const [checkouts, setCheckouts] = useState<CheckoutRecord[]>(() => loadFromStorage<CheckoutRecord[]>(STORAGE_KEYS.CHECKOUTS, INITIAL_CHECKOUTS));
+  const [maintenances, setMaintenances] = useState<MaintenanceRecord[]>(() => loadFromStorage<MaintenanceRecord[]>(STORAGE_KEYS.MAINTENANCES, INITIAL_MAINTENANCE));
+  const [budgets, setBudgets] = useState<BudgetAllocation[]>(() => loadFromStorage<BudgetAllocation[]>(STORAGE_KEYS.BUDGETS, INITIAL_BUDGETS));
+  const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>(() => loadFromStorage<AuditLogItem[]>(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS));
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   const [lastSyncedAt, setLastSyncedAt] = useState<string>('TiDB Primary (HTAP)');
@@ -201,10 +203,10 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     };
   }, []);
 
-  // 1. Initial data load and re-sync whenever active organization changes
+  // 1. Initial data load and instant re-sync whenever active organization or logged-in user changes
   useEffect(() => {
     refreshAppData();
-  }, [currentOrg?.id]);
+  }, [currentOrg?.id, currentUser?.id]);
 
   // 2. Cross-tab instant synchronization via browser storage events
   useEffect(() => {

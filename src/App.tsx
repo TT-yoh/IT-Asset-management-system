@@ -212,24 +212,19 @@ function AppShell() {
     };
   }, [currentUser]);
 
-  // While verifying background session cookie without cached session, show smooth splash
-  if (isSessionLoading && !currentUser) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 selection:bg-emerald-500">
-        <div className="flex items-center gap-3 animate-pulse">
-          <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-            <span className="text-xl">🌐</span>
-          </div>
-          <div>
-            <h1 className="text-sm font-bold text-white tracking-tight">OmniAsset Enterprise</h1>
-            <p className="text-[11px] text-slate-500">Restoring encrypted session...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Ensure activeTab immediately resolves from 'login'/'activate' to a valid tab upon sign-in
+  useEffect(() => {
+    if (currentUser) {
+      const currentHashTab = getTabFromHash();
+      if (currentHashTab && VALID_TABS.includes(currentHashTab)) {
+        setActiveTabState(currentHashTab);
+      } else {
+        setActiveTabState('dashboard');
+      }
+    }
+  }, [currentUser?.id]);
 
-  // If not authenticated, save intended tab/asset and render LoginPortal
+  // If not authenticated, save intended tab/asset and render LoginPortal immediately
   if (!currentUser) {
     const requested = getTabFromHash();
     if (requested && requested !== 'dashboard' && typeof window !== 'undefined') {
@@ -589,12 +584,14 @@ function AppShell() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <NotificationProvider>
-        <AssetProvider>
-          <AppShell />
-        </AssetProvider>
-      </NotificationProvider>
-    </AuthProvider>
+    <ErrorBoundary fallbackTitle="Application Error" onReset={() => { window.location.hash = ''; window.location.reload(); }}>
+      <AuthProvider>
+        <NotificationProvider>
+          <AssetProvider>
+            <AppShell />
+          </AssetProvider>
+        </NotificationProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }

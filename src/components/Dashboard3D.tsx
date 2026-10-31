@@ -314,11 +314,11 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={barData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                  <XAxis dataKey="branch" stroke="#64748b" fontSize={10} interval={0} tickFormatter={(val: string) => val.length > 10 ? val.split(' ')[0] : val} />
+                  <XAxis dataKey="branch" stroke="#64748b" fontSize={10} interval={0} tickFormatter={(val: string) => (val && typeof val === 'string' && val.length > 10) ? val.split(' ')[0] : (val || '')} />
                   <YAxis stroke="#64748b" fontSize={10} tickFormatter={(val) => `$${(val / 1000).toFixed(0)}k`} />
                   <Tooltip
                     contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px', color: '#fff' }}
-                    formatter={(value: any) => [`$${value.toLocaleString()}`, 'Total Value']}
+                    formatter={(value: any) => [`$${(Number(value) || 0).toLocaleString()}`, 'Total Value']}
                   />
                   <Bar dataKey="value" fill="#10b981" radius={[6, 6, 0, 0]} />
                 </BarChart>
@@ -410,10 +410,10 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                 <XAxis dataKey="year" stroke="#64748b" fontSize={11} />
-                <YAxis stroke="#64748b" fontSize={11} tickFormatter={(val) => `$${(val / 1000).toFixed(0)}k`} />
+                <YAxis stroke="#64748b" fontSize={11} tickFormatter={(val) => `$${((Number(val) || 0) / 1000).toFixed(0)}k`} />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px', color: '#fff' }}
-                  formatter={(value: any) => [`$${Math.round(value).toLocaleString()}`, 'Book Value']}
+                  formatter={(value: any) => [`$${Math.round(Number(value) || 0).toLocaleString()}`, 'Book Value']}
                 />
                 <Area type="monotone" dataKey="bookValue" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorVal)" />
               </AreaChart>
@@ -431,11 +431,11 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={barData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="branch" stroke="#64748b" fontSize={10} interval={0} />
-                <YAxis stroke="#64748b" fontSize={11} tickFormatter={(val) => `$${(val / 1000).toFixed(0)}k`} />
+                <XAxis dataKey="branch" stroke="#64748b" fontSize={10} interval={0} tickFormatter={(val: string) => (val && typeof val === 'string' && val.length > 10) ? val.split(' ')[0] : (val || '')} />
+                <YAxis stroke="#64748b" fontSize={11} tickFormatter={(val) => `$${((Number(val) || 0) / 1000).toFixed(0)}k`} />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px', color: '#fff' }}
-                  formatter={(value: any) => [`$${value.toLocaleString()}`, 'Total Value']}
+                  formatter={(value: any) => [`$${(Number(value) || 0).toLocaleString()}`, 'Total Value']}
                 />
                 <Bar dataKey="value" fill="#6366f1" radius={[4, 4, 0, 0]} />
               </BarChart>

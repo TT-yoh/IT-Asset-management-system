@@ -183,11 +183,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {currentUser && (
                 <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-xs text-emerald-400 shrink-0">
-                    {currentUser.fullName.slice(0, 2).toUpperCase()}
+                    {(currentUser.fullName || currentUser.email || 'US').slice(0, 2).toUpperCase()}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-xs font-bold text-slate-200 truncate">{currentUser.fullName}</div>
-                    <div className="text-[10px] text-slate-400 truncate">{currentUser.role} • {currentUser.branchName}</div>
+                    <div className="text-xs font-bold text-slate-200 truncate">{currentUser.fullName || currentUser.email || 'User'}</div>
+                    <div className="text-[10px] text-slate-400 truncate">{currentUser.role || 'MEMBER'} • {currentUser.branchName || 'Main Facility'}</div>
                   </div>
                 </div>
               )}
