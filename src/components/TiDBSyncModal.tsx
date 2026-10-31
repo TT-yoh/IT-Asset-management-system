@@ -303,7 +303,7 @@ export const TiDBSyncModal: React.FC<TiDBSyncModalProps> = ({
                       type="text"
                       value={host}
                       onChange={e => setHost(e.target.value)}
-                      placeholder="e.g. gateway01.us-east-1.prod.aws.tidbcloud.com"
+                      placeholder="e.g. your-cluster-host.tidbcloud.com"
                       className="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 font-mono"
                     />
                   </div>
@@ -678,7 +678,7 @@ export async function getLiveAssets() {
                   <strong className="text-white">Run Schema in Cloud SQL Editor or Chat2Query:</strong> In your TiDB Cloud console, click on <strong>SQL Editor</strong> or <strong>Chat2Query</strong>. Copy the full script from the &ldquo;TiDB DDL Schema&rdquo; tab above and click <strong>Run</strong>.
                 </li>
                 <li className="p-3.5 bg-slate-950 rounded-xl border border-slate-800">
-                  <strong className="text-white">Copy Connection Credentials:</strong> Click <strong>Connect</strong> in the TiDB Cloud console. Select &ldquo;General&rdquo; or &ldquo;MySQL CLI&rdquo;. Copy your <strong>Gateway Host</strong> (e.g. <code className="text-amber-300 font-mono">gateway01.us-east-1.prod.aws.tidbcloud.com</code>), <strong>User</strong>, and generate a <strong>Password</strong>.
+                  <strong className="text-white">Copy Connection Credentials:</strong> Click <strong>Connect</strong> in the TiDB Cloud console. Select &ldquo;General&rdquo; or &ldquo;MySQL CLI&rdquo;. Copy your <strong>Gateway Host</strong> (e.g. <code className="text-amber-300 font-mono">your-cluster-host.tidbcloud.com</code>), <strong>User</strong>, and generate a <strong>Password</strong>.
                 </li>
                 <li className="p-3.5 bg-slate-950 rounded-xl border border-slate-800">
                   <strong className="text-white">Save in this Portal:</strong> Paste your host, user, and password into the &ldquo;Cluster Connection &amp; Fleet Sync&rdquo; tab above and click &ldquo;Save Credentials&rdquo;.

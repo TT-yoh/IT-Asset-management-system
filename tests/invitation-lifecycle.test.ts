@@ -11,6 +11,11 @@
  */
 
 import app from '../server/index';
+import { query } from '../server/db';
+import { hashPassword } from '../server/auth';
+
+const testAdminEmail = process.env.TEST_ADMIN_EMAIL || 'test-admin-invite@omniasset.internal';
+const testAdminPassword = process.env.TEST_ADMIN_PASSWORD || 'TestPass123!Secure';
 
 let BASE_URL = 'http://localhost:3001';
 let serverInstance: any = null;
@@ -38,14 +43,30 @@ async function run() {
     ...extra
   });
 
-  // 1. Login as Super Admin
-  console.log('1. Authenticating as Super Admin...');
+  // 1. Login as Admin
+  console.log('1. Authenticating as Admin...');
+  const hash = await hashPassword(testAdminPassword);
+  await query(`
+    INSERT INTO users (id, org_id, email, password_hash, full_name, role, status, branch_id, branch_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+  `, [
+    'usr-test-invite-admin',
+    'org-omnitech',
+    testAdminEmail,
+    hash,
+    'Invite Test Admin',
+    'ADMIN',
+    'ACTIVE',
+    'branch-main',
+    'Global Headquarters'
+  ]);
+
   const loginRes = await fetch(`${BASE_URL}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      email: 'ishmaelt42@gmail.com',
-      password: 'Tatenda3@4'
+      email: testAdminEmail,
+      password: testAdminPassword
     })
   });
 
@@ -211,6 +232,10 @@ async function run() {
   console.log('\n======================================================');
   console.log('--- ALL INVITATION & ACTIVATION CHECKS PASSED (100%) ---');
   console.log('======================================================\n');
+  if (serverInstance) {
+    serverInstance.close();
+  }
+  process.exit(0);
 }
 
 run()

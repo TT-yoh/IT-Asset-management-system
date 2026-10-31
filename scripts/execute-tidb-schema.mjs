@@ -20,11 +20,11 @@ dotenv.config({ path: path.join(rootDir, '.env') });
 const args = process.argv.slice(2);
 let connectionUri = args.find(a => a.startsWith('mysql://'));
 
-let host = process.env.VITE_TIDB_HOST || process.env.TIDB_HOST || 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com';
+let host = process.env.VITE_TIDB_HOST || process.env.TIDB_HOST;
 let port = Number(process.env.VITE_TIDB_PORT || process.env.TIDB_PORT || 4000);
-let user = process.env.VITE_TIDB_USER || process.env.TIDB_USER || '';
-let password = process.env.VITE_TIDB_PASSWORD || process.env.TIDB_PASSWORD || '';
-let database = process.env.VITE_TIDB_DATABASE || process.env.TIDB_DATABASE || 'it_asset_ledger';
+let user = process.env.VITE_TIDB_USER || process.env.TIDB_USER;
+let password = process.env.VITE_TIDB_PASSWORD || process.env.TIDB_PASSWORD;
+let database = process.env.VITE_TIDB_DATABASE || process.env.TIDB_DATABASE;
 let ssl = process.env.VITE_TIDB_SSL !== 'false';
 
 if (connectionUri) {

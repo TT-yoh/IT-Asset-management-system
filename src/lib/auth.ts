@@ -114,12 +114,10 @@ export const MockAuthEngine = {
 
     const list = customUsersList || USERS;
     const normalizedInput = email.trim().toLowerCase();
-    const isSuperAdmin = normalizedInput === 'ishmaelt42@gmail.com';
 
     const user = list.find(u => 
-      (u.orgId === orgId || isSuperAdmin) && (
+      u.orgId === orgId && (
         u.email.toLowerCase() === normalizedInput || 
-        (isSuperAdmin && (u.id === 'usr-super-admin-ishmael' || u.email.toLowerCase() === 'ishmaelt42@gmail.com')) ||
         u.email.toLowerCase().split('@')[0] === normalizedInput
       )
     );

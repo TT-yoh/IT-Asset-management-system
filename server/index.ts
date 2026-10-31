@@ -72,12 +72,7 @@ for (const { path: routePath, router } of subRouters) {
 app.get(['/api/init', '/init'], authenticate, async (req: Request, res: Response) => {
   const { orgId, role, branchId } = req.auth!;
 
-  let effectiveOrgId = orgId;
-  const requestedOrg = (req.headers['x-org-id'] as string) || (req.query.orgId as string);
-  const isSuperAdmin = req.auth!.userId === 'usr-super-admin-ishmael';
-  if (requestedOrg && isSuperAdmin) {
-    effectiveOrgId = requestedOrg;
-  }
+  const effectiveOrgId = orgId;
 
   try {
     let assetSql = 'SELECT * FROM `assets` WHERE `org_id` = ?';

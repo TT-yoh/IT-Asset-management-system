@@ -12,11 +12,15 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 dotenv.config({ path: path.join(rootDir, '.env') });
 
-const host = process.env.VITE_TIDB_HOST || 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com';
-const port = Number(process.env.VITE_TIDB_PORT || 4000);
-const user = process.env.VITE_TIDB_USER;
-const password = process.env.VITE_TIDB_PASSWORD;
-const database = process.env.VITE_TIDB_DATABASE || 'it_asset_ledger';
+const host = process.env.VITE_TIDB_HOST || process.env.TIDB_HOST;
+const port = Number(process.env.VITE_TIDB_PORT || process.env.TIDB_PORT || 4000);
+const user = process.env.VITE_TIDB_USER || process.env.TIDB_USER;
+const password = process.env.VITE_TIDB_PASSWORD || process.env.TIDB_PASSWORD;
+const database = process.env.VITE_TIDB_DATABASE || process.env.TIDB_DATABASE;
+
+if (!host || !user || !password || !database) {
+  throw new Error('Missing required TiDB environment variables (TIDB_HOST, TIDB_USER, TIDB_PASSWORD, TIDB_DATABASE).');
+}
 
 async function seed() {
   const connection = await mysql.createConnection({

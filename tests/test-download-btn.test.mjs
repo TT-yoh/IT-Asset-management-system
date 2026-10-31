@@ -92,6 +92,8 @@ async function runTest() {
     // Login
     console.log('🔐 2. Logging in...');
     await cdp.eval(`
+      const adminEmail = ${JSON.stringify(process.env.ADMIN_EMAIL || 'admin@omniasset.internal')};
+      const adminPassword = ${JSON.stringify(process.env.ADMIN_PASSWORD || 'AdminPass123!')};
       const emailInput = document.querySelector('input[type=text]');
       const passInput = document.querySelector('input[type=password]');
       const setVal = (el, val) => {
@@ -100,8 +102,8 @@ async function runTest() {
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
       };
-      setVal(emailInput, 'ishmaelt42@gmail.com');
-      setVal(passInput, 'Tatenda3@4');
+      setVal(emailInput, adminEmail);
+      setVal(passInput, adminPassword);
       document.querySelector('button[type=submit]').click();
     `);
 

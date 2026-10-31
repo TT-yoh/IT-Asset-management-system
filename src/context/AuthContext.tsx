@@ -682,7 +682,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const handleClearDummyUsers = () => {
     setSystemUsers(prev => {
-      const remaining = prev.filter(u => u.id === currentUser?.id || u.id === 'usr-super-admin-ishmael');
+      const remaining = prev.filter(u => u.id === currentUser?.id || u.role === 'ADMIN');
       saveToStorage(STORAGE_KEYS.USERS, remaining);
       return remaining;
     });

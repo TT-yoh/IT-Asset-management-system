@@ -231,13 +231,11 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
       setIsLoading(false);
       
       const normalizedInput = email.trim().toLowerCase();
-      const isSuperAdmin = normalizedInput === 'ishmaelt42@gmail.com';
 
       // Look up user across company tenants strictly by matching corporate email / identity
       const targetUser = users.find(
         u => u.email.toLowerCase() === normalizedInput || 
-             u.email.toLowerCase().split('@')[0] === normalizedInput ||
-             (isSuperAdmin && (u.id === 'usr-super-admin-ishmael' || u.email.toLowerCase() === 'ishmaelt42@gmail.com'))
+             u.email.toLowerCase().split('@')[0] === normalizedInput
       );
       
       if (!targetUser) {

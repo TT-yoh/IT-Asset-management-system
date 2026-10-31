@@ -7,6 +7,11 @@
  */
 
 import app from '../server/index';
+import { query } from '../server/db';
+import { hashPassword } from '../server/auth';
+
+const testAdminEmail = process.env.TEST_ADMIN_EMAIL || 'test-admin-facilities@omniasset.internal';
+const testAdminPassword = process.env.TEST_ADMIN_PASSWORD || 'TestPass123!Secure';
 
 let BASE_URL = 'http://localhost:3001';
 let serverInstance: any = null;
@@ -38,12 +43,28 @@ function headers(extra: Record<string, string> = {}) {
 
 // 1. Admin Login
 test('1. Admin Authentication for Facilities Management', async () => {
+  const hash = await hashPassword(testAdminPassword);
+  await query(`
+    INSERT INTO users (id, org_id, email, password_hash, full_name, role, status, branch_id, branch_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+  `, [
+    'usr-test-fac-admin',
+    'org-omnitech',
+    testAdminEmail,
+    hash,
+    'Facilities Test Admin',
+    'ADMIN',
+    'ACTIVE',
+    'branch-main',
+    'Global Headquarters'
+  ]);
+
   const res = await fetch(`${BASE_URL}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      email: 'ishmaelt42@gmail.com',
-      password: 'Tatenda3@4'
+      email: testAdminEmail,
+      password: testAdminPassword
     })
   });
   if (!res.ok) throw new Error(`Login failed: ${await res.text()}`);
@@ -292,7 +313,11 @@ async function run() {
   console.log(`Results: ${passed} Passed, ${failed} Failed`);
   console.log('==========================================\n');
 
-  if (failed > 0) process.exit(1);
+  if (failed > 0) {
+    process.exit(1);
+  } else {
+    process.exit(0);
+  }
 }
 
 run();

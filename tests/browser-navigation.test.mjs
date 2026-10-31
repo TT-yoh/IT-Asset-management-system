@@ -133,8 +133,10 @@ async function runBrowserTest() {
     }
     console.log('  ✅ Step 2 PASS: Switching to Activate and clicking Back returns cleanly to #/login.\n');
 
-    // 3. Login as Super Admin
-    console.log('🔐 3. Logging in as Super Admin (ishmaelt42@gmail.com)...');
+    // 3. Login as Admin
+    const adminEmail = process.env.ADMIN_EMAIL || 'admin@omniasset.internal';
+    const adminPassword = process.env.ADMIN_PASSWORD || 'AdminPass123!';
+    console.log(`🔐 3. Logging in as Admin (${adminEmail})...`);
     await cdp.eval(`
       const emailInput = document.querySelector('input[type=text]');
       const passInput = document.querySelector('input[type=password]');
@@ -146,8 +148,8 @@ async function runBrowserTest() {
         el.dispatchEvent(new Event('change', { bubbles: true }));
       };
 
-      setVal(emailInput, 'ishmaelt42@gmail.com');
-      setVal(passInput, 'Tatenda3@4');
+      setVal(emailInput, ${JSON.stringify(adminEmail)});
+      setVal(passInput, ${JSON.stringify(adminPassword)});
 
       const submitBtn = document.querySelector('button[type=submit]');
       submitBtn.click();

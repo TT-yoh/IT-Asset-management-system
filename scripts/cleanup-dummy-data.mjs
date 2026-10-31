@@ -14,11 +14,15 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 dotenv.config({ path: path.join(rootDir, '.env') });
 
-const host = process.env.TIDB_HOST || 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com';
+const host = process.env.TIDB_HOST;
 const port = Number(process.env.TIDB_PORT || 4000);
 const user = process.env.TIDB_USER;
 const password = process.env.TIDB_PASSWORD;
-const database = process.env.TIDB_DATABASE || 'it_asset_ledger';
+const database = process.env.TIDB_DATABASE;
+
+if (!host || !user || !password || !database) {
+  throw new Error('Missing required TiDB environment variables (TIDB_HOST, TIDB_USER, TIDB_PASSWORD, TIDB_DATABASE).');
+}
 
 async function cleanup() {
   console.log(`📡 Connecting to TiDB Cloud database: ${database} at ${host}:${port}...`);
@@ -69,25 +73,33 @@ async function cleanup() {
   await conn.query('DELETE FROM `organizations` WHERE `id` NOT IN ("org-omnitech");');
   console.log('✓ Retained single production organization (OmniTech Enterprise Systems)');
 
-  // 6. Delete all dummy users, preserving ONLY Super Admin ishmaelt42@gmail.com
-  await conn.query('DELETE FROM `users` WHERE LOWER(`email`) != "ishmaelt42@gmail.com";');
+  // 6. Delete dummy users, preserving configured Administrator
+  const adminEmail = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+  const adminPassword = process.env.ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD environment variables are required to retain/provision the administrator account.');
+  }
+
+  await conn.query('DELETE FROM `users` WHERE LOWER(`email`) != ?;', [adminEmail]);
   
-  // Upsert Super Admin with production bcrypt hash
-  const superPasswordHash = await bcrypt.hash('Tatenda3@4', 12);
+  // Upsert Administrator with production bcrypt hash
+  const superPasswordHash = await bcrypt.hash(adminPassword, 12);
+  const adminId = process.env.ADMIN_ID || 'usr-admin-primary';
   await conn.query(`
     INSERT INTO \`users\` (
       \`id\`, \`org_id\`, \`email\`, \`password_hash\`, \`full_name\`, \`role\`,
       \`status\`, \`department_id\`, \`department_name\`, \`branch_id\`, \`branch_name\`, \`two_factor_enabled\`
     ) VALUES (
-      'usr-super-admin-ishmael', 'org-omnitech', 'ishmaelt42@gmail.com', ?, 'Ishmael (Super Admin)', 'ADMIN',
+      ?, 'org-omnitech', ?, ?, 'System Administrator', 'ADMIN',
       'ACTIVE', 'dept-sec', 'Cybersecurity & InfoSec', 'branch-main', 'Global Headquarters', 0
     ) ON DUPLICATE KEY UPDATE
       \`password_hash\` = VALUES(\`password_hash\`),
-      \`full_name\` = 'Ishmael (Super Admin)',
+      \`full_name\` = 'System Administrator',
       \`role\` = 'ADMIN',
       \`status\` = 'ACTIVE';
-  `, [superPasswordHash]);
-  console.log('✓ Preserved ONLY Super Admin account (ishmaelt42@gmail.com)');
+  `, [adminId, adminEmail, superPasswordHash]);
+  console.log(`✓ Preserved/provisioned Administrator account (${adminEmail})`);
 
   // 7. Verify counts
   const [[{ assetCount }]] = await conn.query('SELECT COUNT(*) as assetCount FROM `assets`;');

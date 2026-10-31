@@ -4,11 +4,25 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 async function run() {
-  const host = process.env.TIDB_HOST || 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com';
+  const host = process.env.TIDB_HOST;
   const port = Number(process.env.TIDB_PORT) || 4000;
   const user = process.env.TIDB_USER;
   const password = process.env.TIDB_PASSWORD;
-  const database = process.env.TIDB_DATABASE || 'it_asset_ledger';
+  const database = process.env.TIDB_DATABASE;
+
+  if (!host || !user || !password || !database) {
+    throw new Error('Missing required TiDB environment variables (TIDB_HOST, TIDB_USER, TIDB_PASSWORD, TIDB_DATABASE).');
+  }
+
+  const email = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+  const rawPassword = process.env.ADMIN_PASSWORD;
+
+  if (!email || !rawPassword) {
+    throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD environment variables are required.');
+  }
+
+  const adminId = process.env.ADMIN_ID || 'usr-admin-primary';
+  const adminName = process.env.ADMIN_NAME || 'System Administrator';
 
   console.log(`📡 Connecting to TiDB Cloud at ${host}:${port} as ${user}...`);
   const conn = await mysql.createConnection({
@@ -20,9 +34,7 @@ async function run() {
     ssl: { minVersion: 'TLSv1.2', rejectUnauthorized: false }
   });
 
-  const email = 'ishmaelt42@gmail.com';
-  const rawPassword = 'Tatenda3@4';
-  const passwordHash = await bcrypt.hash(rawPassword, 10);
+  const passwordHash = await bcrypt.hash(rawPassword, 12);
 
   // Check if organizations exist
   const [orgs] = await conn.query('SELECT id FROM organizations LIMIT 1');
@@ -38,19 +50,19 @@ async function run() {
   const deptId = depts[0]?.id || 'dept-sec';
   const deptName = depts[0]?.name || 'Cybersecurity & InfoSec';
 
-  console.log('Seeding Super Admin user into TiDB Cloud...');
+  console.log('Seeding Administrator user into TiDB Cloud...');
   const upsertUserSql = `
     INSERT INTO users (
       id, org_id, email, full_name, role, status,
       department_id, department_name, branch_id, branch_name,
       password_hash, two_factor_enabled, avatar, version
     ) VALUES (
-      'usr-super-admin-ishmael', ?, ?, 'Ishmael (Super Admin)', 'ADMIN', 'ACTIVE',
+      ?, ?, ?, ?, 'ADMIN', 'ACTIVE',
       ?, ?, ?, ?,
       ?, 0, 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80', 1
     ) ON DUPLICATE KEY UPDATE
       org_id = VALUES(org_id),
-      full_name = 'Ishmael (Super Admin)',
+      full_name = VALUES(full_name),
       role = 'ADMIN',
       status = 'ACTIVE',
       department_id = VALUES(department_id),
@@ -63,8 +75,10 @@ async function run() {
   `;
 
   await conn.query(upsertUserSql, [
+    adminId,
     orgId,
     email,
+    adminName,
     deptId,
     deptName,
     branchId,

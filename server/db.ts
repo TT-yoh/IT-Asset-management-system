@@ -4,11 +4,11 @@ import path from 'path';
 
 dotenv.config();
 
-const host = process.env.TIDB_HOST || 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com';
-const port = Number(process.env.TIDB_PORT || 4000);
-const user = process.env.TIDB_USER || 'pcTx68ZcUHQq15E.root';
-const password = process.env.TIDB_PASSWORD || 'Fyxzmx2p19g5mL5j';
-const database = process.env.TIDB_DATABASE || 'it_asset_ledger';
+const host = process.env.TIDB_HOST;
+const port = process.env.TIDB_PORT ? Number(process.env.TIDB_PORT) : 4000;
+const user = process.env.TIDB_USER;
+const password = process.env.TIDB_PASSWORD;
+const database = process.env.TIDB_DATABASE;
 const ssl = process.env.TIDB_SSL !== 'false';
 
 let pool: mysql.Pool | null = null;
@@ -29,8 +29,16 @@ export function resetInMemoryStore() {
  * Returns active TiDB / MySQL connection pool, or null if not configured
  */
 export function getDbPool(): mysql.Pool | null {
+  if (process.env.ALLOW_IN_MEMORY_DB === 'true' && !process.env.FORCE_DB) {
+    return null;
+  }
   if (pool) return pool;
-  if (!user || !host) return null;
+  if (!user || !host || !password || !database) {
+    if (process.env.ALLOW_IN_MEMORY_DB === 'true') {
+      return null;
+    }
+    throw new Error('FATAL: Database configuration missing (TIDB_HOST, TIDB_USER, TIDB_PASSWORD, TIDB_DATABASE). Set ALLOW_IN_MEMORY_DB=true to run with in-memory store.');
+  }
 
   try {
     pool = mysql.createPool({

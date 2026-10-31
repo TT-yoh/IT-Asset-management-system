@@ -1,13 +1,19 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
+import dotenv from 'dotenv';
 import { AuthContextPayload } from './permissions';
+
+dotenv.config();
 
 const BCRYPT_ROUNDS = 12;
 const SESSION_TTL_SECONDS = 2 * 60 * 60; // 2 hours
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 15;
 
-const SESSION_SECRET = process.env.SESSION_SECRET || 'omni_asset_secure_session_secret_key_2026_prod';
+const SESSION_SECRET = process.env.SESSION_SECRET;
+if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
+  throw new Error('FATAL: SESSION_SECRET environment variable is missing or less than 32 characters. Server refusing to start.');
+}
 
 /**
  * Hash a password using bcrypt with cost 12

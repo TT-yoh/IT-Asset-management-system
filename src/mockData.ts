@@ -57,24 +57,9 @@ export const DEPARTMENTS: Department[] = [
 ];
 
 // ============================================================================
-// PRODUCTION ACTIVE SUPER ADMIN USER
+// PRODUCTION USERS LIST (Populated via database or runtime state)
 // ============================================================================
-export const USERS: User[] = [
-  {
-    id: 'usr-super-admin-ishmael',
-    orgId: 'org-omnitech',
-    email: 'ishmaelt42@gmail.com',
-    fullName: 'Ishmael (Super Admin)',
-    role: 'ADMIN',
-    departmentId: 'dept-sec',
-    departmentName: 'Cybersecurity & InfoSec',
-    branchId: 'branch-main',
-    branchName: 'Global Headquarters',
-    twoFactorEnabled: false,
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    status: 'ACTIVE'
-  }
-];
+export const USERS: User[] = [];
 
 // ============================================================================
 // STANDARD ASSET CATEGORIES TAXONOMY

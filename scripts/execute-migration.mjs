@@ -9,11 +9,15 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 dotenv.config({ path: path.join(rootDir, '.env') });
 
-const host = process.env.TIDB_HOST || 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com';
+const host = process.env.TIDB_HOST;
 const port = Number(process.env.TIDB_PORT || 4000);
-const user = process.env.TIDB_USER || '';
-const password = process.env.TIDB_PASSWORD || '';
-const database = process.env.TIDB_DATABASE || 'it_asset_ledger';
+const user = process.env.TIDB_USER;
+const password = process.env.TIDB_PASSWORD;
+const database = process.env.TIDB_DATABASE;
+
+if (!host || !user || !password || !database) {
+  throw new Error('Missing required TiDB environment variables (TIDB_HOST, TIDB_USER, TIDB_PASSWORD, TIDB_DATABASE).');
+}
 
 async function run() {
   console.log(`Applying migration to ${host}:${port}/${database}...`);

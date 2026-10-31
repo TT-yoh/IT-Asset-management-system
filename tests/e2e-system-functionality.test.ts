@@ -1,7 +1,7 @@
 /**
  * Complete End-to-End System Functionality & Integrity Test Suite
  * Tests 100% of the system workflows:
- * - Super Admin Authentication (ishmaelt42@gmail.com / Tatenda3@4)
+ * - Administrator Authentication
  * - Zero-Roundtrip Init Dataset Scoping
  * - Asset Lifecycle (Create -> Update -> Checkout -> Return -> Maintenance -> Complete -> Write-off)
  * - Branch Hub Operations (Create -> Upsert -> Update -> Read)
@@ -12,6 +12,12 @@
  */
 
 import app from '../server/index';
+import { query } from '../server/db';
+import { hashPassword } from '../server/auth';
+
+const testOrgId = 'org-e2e-test';
+const testAdminEmail = process.env.TEST_ADMIN_EMAIL || 'test-admin-e2e@omniasset.internal';
+const testAdminPassword = process.env.TEST_ADMIN_PASSWORD || 'TestPass123!Secure';
 
 let BASE_URL = 'http://localhost:3001';
 let serverInstance: any = null;
@@ -53,14 +59,40 @@ test('1. Health Check Endpoint (/api/health)', async () => {
   if (data.status !== 'healthy') throw new Error(`Unexpected status: ${data.status}`);
 });
 
-// 2. Super Admin Login
-test('2. Super Admin Login (ishmaelt42@gmail.com / Tatenda3@4)', async () => {
+// 2. Administrator Login
+test('2. Administrator Login', async () => {
+  await query('DELETE FROM `audit_logs` WHERE `org_id` = ?;', [testOrgId]);
+  await query('DELETE FROM `assets` WHERE `org_id` = ?;', [testOrgId]);
+  await query('DELETE FROM `users` WHERE `org_id` = ? OR `email` = ?;', [testOrgId, testAdminEmail]);
+  await query('DELETE FROM `branches` WHERE `org_id` = ?;', [testOrgId]);
+  await query('DELETE FROM `budgets` WHERE `org_id` = ?;', [testOrgId]);
+  await query('DELETE FROM `organizations` WHERE `id` = ?;', [testOrgId]);
+
+  await query('INSERT INTO `organizations` (`id`, `name`, `type`) VALUES (?, ?, ?);', [testOrgId, 'E2E Test Enterprise', 'Enterprise']);
+  await query('INSERT INTO `branches` (`id`, `org_id`, `name`, `code`, `location`, `city`, `country`, `manager_name`) VALUES (?, ?, ?, ?, ?, ?, ?, ?);', ['branch-e2e', testOrgId, 'E2E HQ', 'HQ-E2E', 'Tower 1', 'New York', 'USA', 'E2E Admin']);
+
+  const hash = await hashPassword(testAdminPassword);
+  await query(`
+    INSERT INTO users (id, org_id, email, password_hash, full_name, role, status, branch_id, branch_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+  `, [
+    'usr-test-e2e-admin',
+    testOrgId,
+    testAdminEmail,
+    hash,
+    'E2E Test Admin',
+    'ADMIN',
+    'ACTIVE',
+    'branch-e2e',
+    'E2E HQ'
+  ]);
+
   const res = await fetch(`${BASE_URL}/api/auth/login`, {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify({
-      email: 'ishmaelt42@gmail.com',
-      password: 'Tatenda3@4'
+      email: testAdminEmail,
+      password: testAdminPassword
     })
   });
 
@@ -75,7 +107,7 @@ test('2. Super Admin Login (ishmaelt42@gmail.com / Tatenda3@4)', async () => {
   }
 
   const data = await res.json();
-  if (!data.user || data.user.email !== 'ishmaelt42@gmail.com' || data.user.role !== 'ADMIN') {
+  if (!data.user || data.user.email !== testAdminEmail || data.user.role !== 'ADMIN') {
     throw new Error(`Invalid user profile returned on login: ${JSON.stringify(data.user)}`);
   }
 });
@@ -85,7 +117,7 @@ test('3. Verify Authenticated Profile (/api/auth/me)', async () => {
   const res = await fetch(`${BASE_URL}/api/auth/me`, { headers: headers() });
   if (!res.ok) throw new Error(`Failed to fetch /api/auth/me: ${res.status}`);
   const data = await res.json();
-  if (data.user.email !== 'ishmaelt42@gmail.com') throw new Error(`Profile email mismatch: ${data.user.email}`);
+  if (data.user.email !== testAdminEmail) throw new Error(`Profile email mismatch: ${data.user.email}`);
 });
 
 // 4. Initial Organization Dataset Load
@@ -482,6 +514,8 @@ async function run() {
 
   if (failed > 0) {
     process.exit(1);
+  } else {
+    process.exit(0);
   }
 }
 

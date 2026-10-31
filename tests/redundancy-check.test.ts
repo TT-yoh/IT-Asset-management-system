@@ -1,9 +1,29 @@
+import app from '../server/index';
+import { query } from '../server/db';
+import { hashPassword } from '../server/auth';
 import { AssetService } from '../src/lib/asset-service';
 import type { Asset } from '../src/types';
 
-const BASE_URL = 'http://localhost:3001';
+let BASE_URL = 'http://localhost:3001';
+let serverInstance: any = null;
+
+const testAdminEmail = process.env.TEST_ADMIN_EMAIL || 'test-admin-redundancy@omniasset.internal';
+const testAdminPassword = process.env.TEST_ADMIN_PASSWORD || 'TestPass123!Secure';
 
 async function run() {
+  try {
+    const probe = await fetch('http://localhost:3001/api/health', { signal: AbortSignal.timeout(600) });
+    if (!probe.ok) {
+      serverInstance = app.listen(0);
+      const address = serverInstance.address() as any;
+      BASE_URL = `http://127.0.0.1:${address.port}`;
+    }
+  } catch {
+    serverInstance = app.listen(0);
+    const address = serverInstance.address() as any;
+    BASE_URL = `http://127.0.0.1:${address.port}`;
+  }
+
   console.log('--- Starting Redundancy Check Test Suite ---');
   let sessionCookie = '';
 
@@ -13,14 +33,30 @@ async function run() {
     ...extra
   });
 
-  // 1. Login as Super Admin
+  // 1. Login as Admin
   console.log('1. Logging in as Admin...');
+  const hash = await hashPassword(testAdminPassword);
+  await query(`
+    INSERT INTO users (id, org_id, email, password_hash, full_name, role, status, branch_id, branch_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+  `, [
+    'usr-test-red-admin',
+    'org-omnitech',
+    testAdminEmail,
+    hash,
+    'Redundancy Test Admin',
+    'ADMIN',
+    'ACTIVE',
+    'branch-main',
+    'Global Headquarters'
+  ]);
+
   const loginRes = await fetch(`${BASE_URL}/api/auth/login`, {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify({
-      email: 'ishmaelt42@gmail.com',
-      password: 'Tatenda3@4'
+      email: testAdminEmail,
+      password: testAdminPassword
     })
   });
 
@@ -225,6 +261,10 @@ async function run() {
   console.log('\n======================================================');
   console.log('--- ALL REDUNDANCY & DUPLICATE CHECKS PASSED (100%) ---');
   console.log('======================================================\n');
+  if (serverInstance) {
+    serverInstance.close();
+  }
+  process.exit(0);
 }
 
 run().catch(err => {

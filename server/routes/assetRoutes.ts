@@ -12,13 +12,7 @@ assetRouter.use(authenticate);
  */
 assetRouter.get('/', requirePermission('assets:read'), async (req: Request, res: Response) => {
   const { orgId, role, branchId } = req.auth!;
-
-  let effectiveOrgId = orgId;
-  const isSuperAdmin = req.auth!.userId === 'usr-super-admin-ishmael';
-  const requestedOrg = (req.headers['x-org-id'] as string) || (req.query.orgId as string);
-  if (requestedOrg && isSuperAdmin) {
-    effectiveOrgId = requestedOrg;
-  }
+  const effectiveOrgId = orgId;
 
   let sql = 'SELECT * FROM `assets` WHERE `org_id` = ?';
   const params: any[] = [effectiveOrgId];
@@ -40,13 +34,8 @@ assetRouter.get('/', requirePermission('assets:read'), async (req: Request, res:
  * Pre-flight redundancy check for Asset Tag, Serial, MAC, and IMEI
  */
 assetRouter.get('/check-redundancy', async (req: Request, res: Response) => {
-  const { orgId, role } = req.auth!;
-  let effectiveOrgId = orgId;
-  const isSuperAdmin = req.auth!.userId === 'usr-super-admin-ishmael';
-  const requestedOrg = (req.headers['x-org-id'] as string) || (req.query.orgId as string);
-  if (requestedOrg && isSuperAdmin) {
-    effectiveOrgId = requestedOrg;
-  }
+  const { orgId } = req.auth!;
+  const effectiveOrgId = orgId;
 
   const assetCode = String(req.query.assetCode || '').trim();
   const serialNumber = String(req.query.serialNumber || '').trim();
@@ -170,10 +159,7 @@ assetRouter.post('/', requirePermission('assets:create'), async (req: Request, r
   // Enforce branch scoping: BRANCH_MANAGER can only create within their branch
   const effectiveBranchId = role === 'BRANCH_MANAGER' ? userBranchId : (data.branchId || data.branch_id || userBranchId);
   const condition = normalizeCondition(data.condition || data.assetCondition || data.asset_condition);
-  const isSuperAdmin = actorId === 'usr-super-admin-ishmael';
-  const effectiveOrgId = (isSuperAdmin && (data.orgId || data.org_id))
-    ? (data.orgId || data.org_id)
-    : orgId;
+  const effectiveOrgId = orgId;
 
   // Redundancy & Duplicate Data Check
   const cleanCode = assetCode.trim();
@@ -308,8 +294,7 @@ assetRouter.post('/bulk', requirePermission('assets:create'), async (req: Reques
     return;
   }
 
-  const isSuperAdmin = actorId === 'usr-super-admin-ishmael';
-  const effectiveOrgId = (isSuperAdmin && req.body.orgId) ? req.body.orgId : orgId;
+  const effectiveOrgId = orgId;
 
   const results: { imported: number; skipped: number; errors: string[] } = {
     imported: 0,

@@ -10,7 +10,7 @@ All dummy records, test assets, sample work orders, and demo accounts have been 
 | **Checkouts / Custody** | `0 Records` | Zero active checkouts |
 | **Maintenance Tickets** | `0 Records` | Zero open repair orders |
 | **Budgets** | `0 Records` | Ready for financial year allocations |
-| **Super Admin** | `Active` | Email: `ishmaelt42@gmail.com` |
+| **Super Admin** | `Active` | Configured via `ADMIN_EMAIL` |
 | **Primary Organization** | `org-omnitech` | OmniTech Enterprise Systems |
 | **Primary Facility** | `branch-main` | Global Headquarters |
 | **Cryptographic Audit Chain** | `Genesis Initialized` | Sequential SHA-256 hash chaining active |
@@ -19,12 +19,12 @@ All dummy records, test assets, sample work orders, and demo accounts have been 
 
 ## 2. Super Admin Initial Credentials
 
-Upon initial deployment, use the provisioned enterprise Super Admin account to access the administrative portal and invite staff:
+Upon initial deployment, use the provisioned enterprise Administrator account (configured via `ADMIN_EMAIL` and `ADMIN_PASSWORD` in your secure environment) to access the administrative portal and invite staff:
 
 - **Portal URL**: `/` or `/login`
-- **Username / Email**: `ishmaelt42@gmail.com`
-- **Password**: `Tatenda3@4`
-- **Role**: `SUPER_ADMIN` (Omni-tenant and system-wide privileges)
+- **Username / Email**: `<configured-admin-email>`
+- **Password**: `<configured-admin-password>`
+- **Role**: `ADMIN` (Omni-tenant and system-wide privileges)
 
 > **Important**: Upon first production deployment, you can immediately manage users in **Admin Settings > Staff**, configure branch locations, and generate initial asset tags.
 
@@ -43,7 +43,7 @@ NODE_ENV=production
 SESSION_SECRET=change-this-to-a-secure-random-32-byte-hex-key
 
 # PingCAP TiDB Cloud (TLS connection on Port 4000)
-TIDB_HOST=gateway01.us-east-1.prod.aws.tidbcloud.com
+TIDB_HOST=<your-cluster-host>.tidbcloud.com
 TIDB_PORT=4000
 TIDB_USER=<your-tidb-cluster-user>
 TIDB_PASSWORD=<your-tidb-cluster-password>
