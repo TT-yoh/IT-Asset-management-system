@@ -2,21 +2,20 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import mysql from 'mysql2/promise';
-import dotenv from 'dotenv';
+import { config } from '../server/config.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
-dotenv.config({ path: path.join(rootDir, '.env') });
 
-const host = process.env.TIDB_HOST;
-const port = Number(process.env.TIDB_PORT || 4000);
-const user = process.env.TIDB_USER;
-const password = process.env.TIDB_PASSWORD;
-const database = process.env.TIDB_DATABASE;
+const host = config.TIDB_HOST;
+const port = config.TIDB_PORT;
+const user = config.TIDB_USER;
+const password = config.TIDB_PASSWORD;
+const database = config.TIDB_DATABASE;
 
 if (!host || !user || !password || !database) {
-  throw new Error('Missing required TiDB environment variables (TIDB_HOST, TIDB_USER, TIDB_PASSWORD, TIDB_DATABASE).');
+  throw new Error('Missing required TiDB environment variables in config (TIDB_HOST, TIDB_USER, TIDB_PASSWORD, TIDB_DATABASE).');
 }
 
 async function run() {

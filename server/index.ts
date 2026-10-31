@@ -1,4 +1,5 @@
 import express, { Request, Response } from 'express';
+import config from './config';
 import { cookieParserMiddleware, authenticate } from './middleware';
 import { idempotencyMiddleware } from './middleware/idempotency';
 import { authRouter } from './routes/authRoutes';
@@ -11,18 +12,25 @@ import { departmentRouter } from './routes/departmentRoutes';
 import { userRouter } from './routes/userRoutes';
 import { auditRouter } from './routes/auditRoutes';
 import { query } from './db';
+import path from 'path';
+import fs from 'fs';
 
 export const app = express();
+
+// Trust Proxy Configuration (if configured)
+if (config.TRUST_PROXY !== undefined) {
+  app.set('trust proxy', config.TRUST_PROXY);
+}
 
 // Global CORS Middleware supporting credentials & preflight OPTIONS
 app.use((req: Request, res: Response, next) => {
   const origin = req.headers.origin;
-  if (origin) {
+  if (origin && config.CORS_ORIGINS.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
-  } else {
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  } else if (!origin && !config.isProduction) {
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Org-Id, Idempotency-Key');
 
@@ -37,8 +45,8 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParserMiddleware);
 app.use(idempotencyMiddleware);
 
-// Health check endpoint (both /api/health and /health)
-app.get(['/api/health', '/health'], (_req: Request, res: Response) => {
+// Health check endpoint (both /api/health and optional /health)
+app.get(config.ALLOW_ROOT_ROUTES ? ['/api/health', '/health'] : ['/api/health'], (_req: Request, res: Response) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -46,7 +54,7 @@ app.get(['/api/health', '/health'], (_req: Request, res: Response) => {
   });
 });
 
-// Mount modular sub-routers with both /api and root prefixes for Vercel/Node portability
+// Mount modular sub-routers with both /api and optional root prefixes
 const subRouters = [
   { path: 'auth', router: authRouter },
   { path: 'assets', router: assetRouter },
@@ -62,14 +70,16 @@ const subRouters = [
 
 for (const { path: routePath, router } of subRouters) {
   app.use(`/api/${routePath}`, router);
-  app.use(`/${routePath}`, router);
+  if (config.ALLOW_ROOT_ROUTES) {
+    app.use(`/${routePath}`, router);
+  }
 }
 
 /**
  * Aggregated initial dataset for zero-roundtrip client initialization
  * Scoped strictly to authenticated user's organization!
  */
-app.get(['/api/init', '/init'], authenticate, async (req: Request, res: Response) => {
+app.get(config.ALLOW_ROOT_ROUTES ? ['/api/init', '/init'] : ['/api/init'], authenticate, async (req: Request, res: Response) => {
   const { orgId, role, branchId } = req.auth!;
 
   const effectiveOrgId = orgId;
@@ -144,9 +154,6 @@ app.get(['/api/init', '/init'], authenticate, async (req: Request, res: Response
 });
 
 // Serve frontend static assets in production if dist directory exists
-import path from 'path';
-import fs from 'fs';
-
 const distDir = path.resolve(process.cwd(), 'dist');
 if (fs.existsSync(distDir)) {
   app.use(express.static(distDir));
@@ -157,10 +164,10 @@ if (fs.existsSync(distDir)) {
   });
 }
 
-const PORT = Number(process.env.API_PORT || process.env.PORT || 3001);
+const PORT = config.PORT;
 
-const isTestEnv = process.env.NODE_ENV === 'test' || process.argv.some(arg => arg.includes('test'));
-const isVercel = Boolean(process.env.VERCEL);
+const isTestEnv = config.isTest || process.argv.some(arg => arg.includes('test'));
+const isVercel = config.isVercel;
 
 if (!isTestEnv && !isVercel) {
   app.listen(PORT, '0.0.0.0', () => {

@@ -1,15 +1,15 @@
 import mysql from 'mysql2/promise';
-import dotenv from 'dotenv';
+import fs from 'fs';
 import path from 'path';
+import config from './config';
 
-dotenv.config();
-
-const host = process.env.TIDB_HOST;
-const port = process.env.TIDB_PORT ? Number(process.env.TIDB_PORT) : 4000;
-const user = process.env.TIDB_USER;
-const password = process.env.TIDB_PASSWORD;
-const database = process.env.TIDB_DATABASE;
-const ssl = process.env.TIDB_SSL !== 'false';
+const host = config.TIDB_HOST;
+const port = config.TIDB_PORT;
+const user = config.TIDB_USER;
+const password = config.TIDB_PASSWORD;
+const database = config.TIDB_DATABASE;
+const ssl = config.TIDB_SSL;
+const caPath = config.TIDB_CA_PATH;
 
 let pool: mysql.Pool | null = null;
 let isPoolInitialized = false;
@@ -29,25 +29,31 @@ export function resetInMemoryStore() {
  * Returns active TiDB / MySQL connection pool, or null if not configured
  */
 export function getDbPool(): mysql.Pool | null {
-  if (process.env.ALLOW_IN_MEMORY_DB === 'true' && !process.env.FORCE_DB) {
+  if (config.ALLOW_IN_MEMORY_DB) {
     return null;
   }
   if (pool) return pool;
   if (!user || !host || !password || !database) {
-    if (process.env.ALLOW_IN_MEMORY_DB === 'true') {
+    if (config.ALLOW_IN_MEMORY_DB || config.isTest) {
       return null;
     }
     throw new Error('FATAL: Database configuration missing (TIDB_HOST, TIDB_USER, TIDB_PASSWORD, TIDB_DATABASE). Set ALLOW_IN_MEMORY_DB=true to run with in-memory store.');
   }
 
   try {
+    const sslConfig = ssl
+      ? (caPath && fs.existsSync(caPath)
+          ? { ca: fs.readFileSync(caPath), minVersion: 'TLSv1.2' }
+          : { rejectUnauthorized: false, minVersion: 'TLSv1.2' })
+      : undefined;
+
     pool = mysql.createPool({
       host,
       port,
       user,
       password,
       database,
-      ssl: ssl ? { rejectUnauthorized: false } : undefined,
+      ssl: sslConfig,
       timezone: 'Z',
       dateStrings: true,
       waitForConnections: true,

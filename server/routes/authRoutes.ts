@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import config from '../config';
 import { query } from '../db';
 import {
   hashPassword,
@@ -115,7 +116,7 @@ authRouter.post('/login', async (req: Request, res: Response) => {
   // Set httpOnly, Secure, SameSite cookie
   res.cookie('session_token', sessionToken, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: config.isProduction,
     sameSite: 'strict',
     maxAge: 2 * 60 * 60 * 1000 // 2 hours
   });
@@ -145,7 +146,7 @@ authRouter.post('/login', async (req: Request, res: Response) => {
 authRouter.post('/logout', (_req: Request, res: Response) => {
   res.clearCookie('session_token', {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: config.isProduction,
     sameSite: 'strict'
   });
   res.json({ success: true, message: 'Logged out successfully.' });
@@ -456,7 +457,7 @@ authRouter.post('/activate', async (req: Request, res: Response) => {
 
   res.cookie('session_token', sessionToken, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: config.isProduction,
     sameSite: 'strict',
     maxAge: 2 * 60 * 60 * 1000 // 2 hours
   });
@@ -524,7 +525,7 @@ authRouter.post('/forgot-password', async (req: Request, res: Response) => {
     res.json({
       success: true,
       message: 'If the email matches an active account, password reset instructions have been recorded.',
-      ...(process.env.NODE_ENV !== 'production' ? { resetToken: token } : {})
+      ...(config.isTest ? { resetToken: token } : {})
     });
     return;
   }

@@ -1,28 +1,27 @@
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
-import dotenv from 'dotenv';
-dotenv.config();
+import { config } from '../server/config.ts';
 
 async function run() {
-  const host = process.env.TIDB_HOST;
-  const port = Number(process.env.TIDB_PORT) || 4000;
-  const user = process.env.TIDB_USER;
-  const password = process.env.TIDB_PASSWORD;
-  const database = process.env.TIDB_DATABASE;
+  const host = config.TIDB_HOST;
+  const port = config.TIDB_PORT;
+  const user = config.TIDB_USER;
+  const password = config.TIDB_PASSWORD;
+  const database = config.TIDB_DATABASE;
 
   if (!host || !user || !password || !database) {
-    throw new Error('Missing required TiDB environment variables (TIDB_HOST, TIDB_USER, TIDB_PASSWORD, TIDB_DATABASE).');
+    throw new Error('Missing required TiDB environment variables in config (TIDB_HOST, TIDB_USER, TIDB_PASSWORD, TIDB_DATABASE).');
   }
 
-  const email = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
-  const rawPassword = process.env.ADMIN_PASSWORD;
+  const email = (config.ADMIN_EMAIL || '').trim().toLowerCase();
+  const rawPassword = config.ADMIN_PASSWORD;
 
   if (!email || !rawPassword) {
-    throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD environment variables are required.');
+    throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD configuration settings are required.');
   }
 
-  const adminId = process.env.ADMIN_ID || 'usr-admin-primary';
-  const adminName = process.env.ADMIN_NAME || 'System Administrator';
+  const adminId = config.ADMIN_ID || 'usr-admin-primary';
+  const adminName = config.ADMIN_NAME || 'System Administrator';
 
   console.log(`📡 Connecting to TiDB Cloud at ${host}:${port} as ${user}...`);
   const conn = await mysql.createConnection({

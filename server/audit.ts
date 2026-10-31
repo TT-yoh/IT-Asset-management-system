@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { QueryExecutor, query } from './db';
+import config from './config';
 
 export const GENESIS_PREV_HASH = '0000000000000000000000000000000000000000000000000000000000000000';
 
@@ -116,7 +117,7 @@ export function computeAuditHash(payload: AuditRecordPayload): string {
 
   const canonicalSerialized = canonicalJsonStringify(canonicalObj);
   // Temporary debug
-  if (process.env.DEBUG_AUDIT) {
+  if (config.DEBUG_AUDIT) {
     console.log('[DEBUG CANONICAL]:', canonicalSerialized);
   }
   return crypto.createHash('sha256').update(canonicalSerialized, 'utf8').digest('hex');

@@ -4,24 +4,17 @@
  */
 
 import mysql from 'mysql2/promise';
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
+import { config } from '../server/config.ts';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, '..');
-dotenv.config({ path: path.join(rootDir, '.env') });
-
-const host = process.env.TIDB_HOST;
-const port = Number(process.env.TIDB_PORT || 4000);
-const user = process.env.TIDB_USER;
-const password = process.env.TIDB_PASSWORD;
-const database = process.env.TIDB_DATABASE;
+const host = config.TIDB_HOST;
+const port = config.TIDB_PORT;
+const user = config.TIDB_USER;
+const password = config.TIDB_PASSWORD;
+const database = config.TIDB_DATABASE;
 
 if (!host || !user || !password || !database) {
-  throw new Error('Missing required TiDB environment variables (TIDB_HOST, TIDB_USER, TIDB_PASSWORD, TIDB_DATABASE).');
+  throw new Error('Missing required TiDB environment variables in config (TIDB_HOST, TIDB_USER, TIDB_PASSWORD, TIDB_DATABASE).');
 }
 
 async function cleanup() {
@@ -74,18 +67,18 @@ async function cleanup() {
   console.log('✓ Retained single production organization (OmniTech Enterprise Systems)');
 
   // 6. Delete dummy users, preserving configured Administrator
-  const adminEmail = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
-  const adminPassword = process.env.ADMIN_PASSWORD;
+  const adminEmail = (config.ADMIN_EMAIL || '').trim().toLowerCase();
+  const adminPassword = config.ADMIN_PASSWORD;
 
   if (!adminEmail || !adminPassword) {
-    throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD environment variables are required to retain/provision the administrator account.');
+    throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD configuration settings are required to retain/provision the administrator account.');
   }
 
   await conn.query('DELETE FROM `users` WHERE LOWER(`email`) != ?;', [adminEmail]);
   
   // Upsert Administrator with production bcrypt hash
   const superPasswordHash = await bcrypt.hash(adminPassword, 12);
-  const adminId = process.env.ADMIN_ID || 'usr-admin-primary';
+  const adminId = config.ADMIN_ID || 'usr-admin-primary';
   await conn.query(`
     INSERT INTO \`users\` (
       \`id\`, \`org_id\`, \`email\`, \`password_hash\`, \`full_name\`, \`role\`,
