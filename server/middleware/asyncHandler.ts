@@ -17,3 +17,4 @@ export function asyncHandler(fn: AsyncRequestHandler) {
 }
 
 export default asyncHandler;
+

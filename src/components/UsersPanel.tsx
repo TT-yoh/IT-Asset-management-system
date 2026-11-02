@@ -341,6 +341,10 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
     if (!newFullName.trim() || !newEmail.trim()) return;
 
     const branch = branches.find(b => b.id === selectedBranchId) || branches[0];
+    if (!branch) {
+      showToast('Please create at least one branch before inviting users.');
+      return;
+    }
     const dept = activeDepts.find(d => d.id === selectedDeptId) || activeDepts[0];
 
     setIsInviting(true);
@@ -350,10 +354,10 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
           fullName: newFullName.trim(),
           email: newEmail.trim().toLowerCase(),
           role: newRole,
-          departmentId: dept ? dept.id : 'dept-gen',
-          departmentName: dept ? dept.name : 'General Operations',
-          branchId: branch ? branch.id : (branches[0]?.id || 'br-main'),
-          branchName: branch ? branch.name : (branches[0]?.name || 'Main Campus')
+          departmentId: dept ? dept.id : undefined,
+          departmentName: dept ? dept.name : undefined,
+          branchId: branch.id,
+          branchName: branch.name
         });
 
         if (res.success && res.inviteToken) {
@@ -381,10 +385,10 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
           fullName: newFullName.trim(),
           email: newEmail.trim().toLowerCase(),
           role: newRole,
-          departmentId: dept ? dept.id : 'dept-gen',
-          departmentName: dept ? dept.name : 'General Operations',
-          branchId: branch ? branch.id : (branches[0]?.id || 'br-main'),
-          branchName: branch ? branch.name : (branches[0]?.name || 'Main Campus')
+          departmentId: dept ? dept.id : undefined,
+          departmentName: dept ? dept.name : undefined,
+          branchId: branch.id,
+          branchName: branch.name
         })
       });
 
@@ -401,10 +405,10 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
         email: newEmail.trim().toLowerCase(),
         fullName: newFullName.trim(),
         role: newRole,
-        departmentId: dept ? dept.id : 'dept-gen',
-        departmentName: dept ? dept.name : 'General Operations',
-        branchId: branch ? branch.id : (branches[0]?.id || 'br-main'),
-        branchName: branch ? branch.name : (branches[0]?.name || 'Main Campus'),
+        departmentId: dept ? dept.id : undefined,
+        departmentName: dept ? dept.name : undefined,
+        branchId: branch.id,
+        branchName: branch.name,
         twoFactorEnabled: false,
         avatar: `https://images.unsplash.com/photo-${1534528741775 + (users.length % 10)}?w=100&auto=format&fit=crop&q=80`,
         status: 'INVITED',

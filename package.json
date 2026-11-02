@@ -19,9 +19,13 @@
     "test:concurrency": "cross-env NODE_ENV=test tsx tests/offline-concurrency.test.ts",
     "test:facilities": "cross-env NODE_ENV=test tsx tests/facilities-departments.test.ts",
     "test:e2e": "cross-env NODE_ENV=test tsx tests/e2e-system-functionality.test.ts",
-    "test": "cross-env NODE_ENV=test tsx tests/config-validation.test.ts && cross-env NODE_ENV=test tsx tests/database-layer.test.ts && cross-env NODE_ENV=test tsx tests/security-scoping.test.ts && cross-env NODE_ENV=test tsx tests/audit-integrity.test.ts && cross-env NODE_ENV=test tsx tests/offline-concurrency.test.ts && cross-env NODE_ENV=test tsx tests/facilities-departments.test.ts && cross-env NODE_ENV=test tsx tests/e2e-system-functionality.test.ts",
+    "test": "cross-env NODE_ENV=test tsx tests/config-validation.test.ts && cross-env NODE_ENV=test tsx tests/database-layer.test.ts && cross-env NODE_ENV=test tsx tests/security-scoping.test.ts && cross-env NODE_ENV=test tsx tests/audit-integrity.test.ts && cross-env NODE_ENV=test tsx tests/offline-concurrency.test.ts && cross-env NODE_ENV=test tsx tests/facilities-departments.test.ts && cross-env NODE_ENV=test tsx tests/schema-drift.test.ts && cross-env NODE_ENV=test tsx tests/e2e-system-functionality.test.ts",
     "db:migrate:tidb": "node scripts/execute-tidb-schema.mjs",
-    "db:clean": "node scripts/cleanup-dummy-data.mjs"
+    "db:clean": "node scripts/cleanup-dummy-data.mjs",
+    "test:drift": "cross-env NODE_ENV=test tsx tests/schema-drift.test.ts",
+    "db:migrate": "node scripts/migrate.mjs",
+    "db:status": "node scripts/migrate.mjs --status",
+    "db:dry-run": "node scripts/migrate.mjs --dry-run"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

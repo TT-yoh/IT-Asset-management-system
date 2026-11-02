@@ -396,7 +396,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                   <input
                     type="text"
                     disabled
-                    value={currentUser.branchName || 'Main Campus'}
+                    value={currentUser.branchName || 'Unassigned'}
                     className="w-full px-3 py-2 bg-slate-950/60 border border-slate-800/80 rounded-xl text-xs text-slate-400 cursor-not-allowed"
                   />
                 </div>

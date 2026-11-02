@@ -49,10 +49,12 @@ async function apiRequest(
 }
 
 async function cleanTestData() {
-  await query('DELETE FROM `checkouts` WHERE `id` LIKE ?;', ['test-%']);
-  await query('DELETE FROM `assets` WHERE `id` LIKE ?;', ['test-%']);
-  await query('DELETE FROM `users` WHERE `id` LIKE ?;', ['test-%']);
-  await query('DELETE FROM `branches` WHERE `id` LIKE ?;', ['test-%']);
+  await query('DELETE FROM `audit_logs` WHERE `org_id` LIKE ?;', ['test-%']);
+  await query('DELETE FROM `checkouts` WHERE `id` LIKE ? OR `org_id` LIKE ?;', ['test-%', 'test-%']);
+  await query('DELETE FROM `maintenances` WHERE `id` LIKE ? OR `org_id` LIKE ?;', ['test-%', 'test-%']);
+  await query('DELETE FROM `assets` WHERE `id` LIKE ? OR `org_id` LIKE ?;', ['test-%', 'test-%']);
+  await query('DELETE FROM `users` WHERE `id` LIKE ? OR `org_id` LIKE ?;', ['test-%', 'test-%']);
+  await query('DELETE FROM `branches` WHERE `id` LIKE ? OR `org_id` LIKE ?;', ['test-%', 'test-%']);
   await query('DELETE FROM `organizations` WHERE `id` LIKE ?;', ['test-%']);
 }
 

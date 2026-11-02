@@ -549,8 +549,8 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
             asset={assets.find(a => a.id === targetCheckoutRecord.assetId) || {
               id: targetCheckoutRecord.assetId,
               orgId: currentUser.orgId,
-              branchId: branches[0]?.id || 'br-main',
-              branchName: branches[0]?.name || 'Main Campus',
+              branchId: branches[0]?.id || '',
+              branchName: branches[0]?.name || 'Unassigned',
               categoryId: 'cat-gen',
               categoryName: 'Hardware',
               assetCode: targetCheckoutRecord.assetCode,

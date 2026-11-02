@@ -55,7 +55,8 @@ async function apiRequest(
 async function cleanTestData() {
   await query('DELETE FROM `idempotency_keys` WHERE `org_id` = ?;', ['test-sync-org']);
   await query('DELETE FROM `audit_logs` WHERE `org_id` = ?;', ['test-sync-org']);
-  await query('DELETE FROM `maintenances` WHERE `id` LIKE ?;', ['test-mnt-%']);
+  await query('DELETE FROM `checkouts` WHERE `org_id` = ?;', ['test-sync-org']);
+  await query('DELETE FROM `maintenances` WHERE `id` LIKE ? OR `org_id` = ?;', ['test-mnt-%', 'test-sync-org']);
   await query('DELETE FROM `assets` WHERE `org_id` = ?;', ['test-sync-org']);
   await query('DELETE FROM `users` WHERE `org_id` = ?;', ['test-sync-org']);
   await query('DELETE FROM `branches` WHERE `org_id` = ?;', ['test-sync-org']);

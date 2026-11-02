@@ -43,7 +43,7 @@ async function seed() {
 
   // 2. Branches
   const branches = [
-    ['branch-ny', 'org-omnitech', 'New York Global HQ', 'NYC-HQ', '452 5th Avenue, Floors 12-16', 'New York', 'United States', 'David Vance'],
+    ['branch-main', 'org-omnitech', 'Global Headquarters', 'HQ-MAIN', '452 5th Avenue, Floors 12-16', 'New York', 'United States', 'David Vance'],
     ['branch-lon', 'org-omnitech', 'London Operations Hub', 'LON-01', '100 Bishopsgate', 'London', 'United Kingdom', 'Sarah Jenkins'],
     ['branch-sg', 'org-omnitech', 'Singapore APAC Center', 'SGP-01', '1 Marina Boulevard', 'Singapore', 'Singapore', 'Chen Wei']
   ];
@@ -73,9 +73,9 @@ async function seed() {
 
   // 4. Staff Users
   const users = [
-    ['usr-alex', 'org-omnitech', 'alex.mercer@omnitech.io', 'Alex Mercer', 'ADMIN', 'dept-eng', 'Engineering & DevOps', 'branch-ny', 'New York Global HQ', 1],
+    ['usr-alex', 'org-omnitech', 'alex.mercer@omnitech.io', 'Alex Mercer', 'ADMIN', 'dept-eng', 'Engineering & DevOps', 'branch-main', 'Global Headquarters', 1],
     ['usr-sarah', 'org-omnitech', 'sarah.jenkins@omnitech.io', 'Sarah Jenkins', 'BRANCH_MANAGER', 'dept-ops', 'Cloud Infrastructure', 'branch-lon', 'London Operations Hub', 1],
-    ['usr-david', 'org-omnitech', 'david.vance@omnitech.io', 'David Vance', 'IT_SUPPORT', 'dept-sec', 'Cybersecurity & InfoSec', 'branch-ny', 'New York Global HQ', 0]
+    ['usr-david', 'org-omnitech', 'david.vance@omnitech.io', 'David Vance', 'IT_SUPPORT', 'dept-sec', 'Cybersecurity & InfoSec', 'branch-main', 'Global Headquarters', 0]
   ];
   for (const u of users) {
     await connection.query(`
@@ -103,9 +103,9 @@ async function seed() {
 
   // 6. Assets
   const sampleAssets = [
-    ['ast-001', 'org-omnitech', 'branch-ny', 'New York Global HQ', 'cat-laptop', 'Laptops & Ultrabooks', 'AST-MBP-01', 'MacBook Pro 16" M3 Max', 'Apple MBP 16', 'C02G871LMD6R', 'ACTIVE', 'GOOD', '2025-01-15', 3899.00, '2028-01-15', 3499.00, 'usr-alex', 'Alex Mercer'],
+    ['ast-001', 'org-omnitech', 'branch-main', 'Global Headquarters', 'cat-laptop', 'Laptops & Ultrabooks', 'AST-MBP-01', 'MacBook Pro 16" M3 Max', 'Apple MBP 16', 'C02G871LMD6R', 'ACTIVE', 'GOOD', '2025-01-15', 3899.00, '2028-01-15', 3499.00, 'usr-alex', 'Alex Mercer'],
     ['ast-002', 'org-omnitech', 'branch-lon', 'London Operations Hub', 'cat-server', 'Enterprise Servers & Compute', 'AST-SRV-01', 'Dell PowerEdge R760 Rack Server', 'PowerEdge R760', 'SN-DELL-99812-UK', 'ACTIVE', 'NEW', '2025-02-10', 9800.00, '2030-02-10', 9400.00, 'usr-sarah', 'Sarah Jenkins'],
-    ['ast-003', 'org-omnitech', 'branch-ny', 'New York Global HQ', 'cat-net', 'Networking & Security Gear', 'AST-NET-01', 'Cisco Nexus 9300 Backbone Switch', 'Nexus 9300-FX3', 'FOX2418P0AX', 'ACTIVE', 'GOOD', '2024-06-20', 4600.00, '2029-06-20', 3900.00, 'usr-david', 'David Vance']
+    ['ast-003', 'org-omnitech', 'branch-main', 'Global Headquarters', 'cat-net', 'Networking & Security Gear', 'AST-NET-01', 'Cisco Nexus 9300 Backbone Switch', 'Nexus 9300-FX3', 'FOX2418P0AX', 'ACTIVE', 'GOOD', '2024-06-20', 4600.00, '2029-06-20', 3900.00, 'usr-david', 'David Vance']
   ];
   for (const a of sampleAssets) {
     await connection.query(`

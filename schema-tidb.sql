@@ -1,5 +1,8 @@
 -- ============================================================================
 -- PingCAP TiDB Cloud Schema: Enterprise Multi-Tenant IT Asset Management
+-- NOTE: Hand-edited schema-tidb.sql is RETIRED as the authoritative truth.
+-- Authoritative schema is managed via versioned migrations in migrations/NNN_*.sql
+-- applied via `npm run db:migrate`. Documentation is maintained in docs/schema.md.
 -- Engine: Distributed MySQL 8.0 Wire-Compatible + TiKV (OLTP) + TiFlash (HTAP)
 -- ============================================================================
 

@@ -62,6 +62,8 @@ test('1. Health Check Endpoint (/api/health)', async () => {
 // 2. Administrator Login
 test('2. Administrator Login', async () => {
   await query('DELETE FROM `audit_logs` WHERE `org_id` = ?;', [testOrgId]);
+  await query('DELETE FROM `checkouts` WHERE `org_id` = ?;', [testOrgId]);
+  await query('DELETE FROM `maintenances` WHERE `org_id` = ?;', [testOrgId]);
   await query('DELETE FROM `assets` WHERE `org_id` = ?;', [testOrgId]);
   await query('DELETE FROM `users` WHERE `org_id` = ? OR `email` = ?;', [testOrgId, testAdminEmail]);
   await query('DELETE FROM `branches` WHERE `org_id` = ?;', [testOrgId]);
@@ -398,8 +400,9 @@ test('14. Staff Invitation & Status Management (/api/users)', async () => {
       email: testEmail,
       fullName: 'E2E Test Security Engineer',
       role: 'IT_SUPPORT',
-      departmentName: 'Infrastructure & Cloud',
-      branchName: 'Main Campus'
+      branchId: 'branch-e2e',
+      branchName: 'E2E HQ',
+      departmentName: 'Infrastructure & Cloud'
     })
   });
   if (!resInvite.ok) throw new Error(`User invite failed: ${await resInvite.text()}`);

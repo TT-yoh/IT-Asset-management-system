@@ -68,6 +68,24 @@ userRouter.post('/invite', requirePermission('users:invite'), async (req: Reques
     return;
   }
 
+  if (!data.branchId || typeof data.branchId !== 'string' || !data.branchId.trim()) {
+    res.status(400).json({ error: 'A valid branch ID is required.' });
+    return;
+  }
+
+  const branchCheck = await query<any>(
+    'SELECT `id`, `name` FROM `branches` WHERE `id` = ? AND `org_id` = ? LIMIT 1;',
+    [data.branchId.trim(), orgId]
+  );
+  if (branchCheck.length === 0) {
+    res.status(400).json({ error: 'Specified branch does not exist in your organization.' });
+    return;
+  }
+  const branchId = branchCheck[0].id;
+  const branchName = branchCheck[0].name;
+  const departmentId = data.departmentId || null;
+  const departmentName = data.departmentName || null;
+
   const cleanEmail = String(data.email).trim().toLowerCase();
 
   // Check duplicate email
@@ -85,10 +103,10 @@ userRouter.post('/invite', requirePermission('users:invite'), async (req: Reques
           freshInvitedAt,
           data.fullName.trim(),
           data.role || 'USER',
-          data.departmentId || 'dept-gen',
-          data.departmentName || 'General Operations',
-          data.branchId || 'br-main',
-          data.branchName || 'Main Campus',
+          departmentId,
+          departmentName,
+          branchId,
+          branchName,
           existingUser.id
         ]
       );
@@ -123,10 +141,10 @@ userRouter.post('/invite', requirePermission('users:invite'), async (req: Reques
         cleanEmail,
         data.fullName.trim(),
         data.role || 'USER',
-        data.departmentId || 'dept-gen',
-        data.departmentName || 'General Operations',
-        data.branchId || 'br-main',
-        data.branchName || 'Main Campus',
+        departmentId,
+        departmentName,
+        branchId,
+        branchName,
         inviteToken,
         invitedAt
       ]);
@@ -251,6 +269,25 @@ userRouter.put('/:id', requirePermission('users:update'), async (req: Request, r
   // Status changes (e.g. SUSPENDED/ACTIVE) can only be executed by ADMIN
   const targetStatus = actorRole === 'ADMIN' && data.status ? data.status : existing.status;
 
+  let targetBranchId = existing.branch_id;
+  let targetBranchName = existing.branch_name;
+  if (data.branchId !== undefined) {
+    if (!data.branchId || typeof data.branchId !== 'string' || !data.branchId.trim()) {
+      res.status(400).json({ error: 'A valid branch ID is required.' });
+      return;
+    }
+    const branchRows = await query<any>(
+      'SELECT `id`, `name` FROM `branches` WHERE `id` = ? AND `org_id` = ? LIMIT 1;',
+      [data.branchId.trim(), orgId]
+    );
+    if (branchRows.length === 0) {
+      res.status(400).json({ error: 'Specified branch does not exist in your organization.' });
+      return;
+    }
+    targetBranchId = branchRows[0].id;
+    targetBranchName = branchRows[0].name;
+  }
+
   try {
     await withTransaction(async (tx) => {
       await tx(`
@@ -262,10 +299,10 @@ userRouter.put('/:id', requirePermission('users:update'), async (req: Request, r
         data.fullName || existing.full_name,
         targetRole,
         targetStatus,
-        data.departmentId || existing.department_id,
-        data.departmentName || existing.department_name,
-        data.branchId || existing.branch_id,
-        data.branchName || existing.branch_name,
+        data.departmentId !== undefined ? data.departmentId : existing.department_id,
+        data.departmentName !== undefined ? data.departmentName : existing.department_name,
+        targetBranchId,
+        targetBranchName,
         targetUserId,
         orgId
       ]);

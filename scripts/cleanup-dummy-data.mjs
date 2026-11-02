@@ -1,12 +1,42 @@
 /**
- * Purge all sample dummy data from TiDB Cloud database
- * Preserves ONLY the authenticated Super Admin and essential organizational taxonomies.
+ * Development & Test Fixture Data Purge Utility
+ * Clears ephemeral operational test data (checkouts, maintenance tickets, assets, notifications).
+ *
+ * Safety Guards:
+ * - Refuses to execute if NODE_ENV === 'production'
+ * - Refuses to execute unless the target database matches an allowlist (*_dev, *_test)
+ * - Refuses to execute without an explicit '--i-know-this-wipes-everything' CLI flag
+ * - Never deletes organizations or users via cascade
+ * - Contains zero hardcoded credentials or seeds
  */
 
 import mysql from 'mysql2/promise';
-import bcrypt from 'bcryptjs';
 import fs from 'fs';
 import { config } from '../server/config.ts';
+
+// 1. Guard: Never run in production
+if (config.isProduction || process.env.NODE_ENV === 'production') {
+  console.error('\n🚫 Refusing to execute cleanup: Operation is strictly prohibited in production mode.');
+  process.exit(1);
+}
+
+// 2. Guard: Database name must match allowlist (*_dev or *_test)
+const dbName = (config.TIDB_DATABASE || '').toLowerCase();
+const isAllowedDb = dbName.endsWith('_dev') || dbName.endsWith('_test') || dbName.endsWith('dev') || dbName.endsWith('test');
+if (!isAllowedDb) {
+  console.error(`\n🚫 Refusing to execute cleanup: Database "${config.TIDB_DATABASE}" does not match the safety allowlist (*_dev, *_test).`);
+  console.error('Data purging is only permitted against dedicated development or testing database instances.\n');
+  process.exit(1);
+}
+
+// 3. Guard: Explicit confirmation flag required
+const hasConfirmFlag = process.argv.includes('--i-know-this-wipes-everything');
+if (!hasConfirmFlag) {
+  console.error('\n⚠️  Notice: This command will purge operational records from the database.');
+  console.error('To proceed, you must pass the explicit confirmation flag:');
+  console.error('   node scripts/cleanup-dummy-data.mjs --i-know-this-wipes-everything\n');
+  process.exit(1);
+}
 
 const host = config.TIDB_HOST;
 const port = config.TIDB_PORT;
@@ -14,15 +44,11 @@ const user = config.TIDB_USER;
 const password = config.TIDB_PASSWORD;
 const database = config.TIDB_DATABASE;
 
-if (!host || !user || !password || !database) {
-  throw new Error('Missing required TiDB environment variables in config (TIDB_HOST, TIDB_USER, TIDB_PASSWORD, TIDB_DATABASE).');
-}
-
 async function cleanup() {
-  console.log(`📡 Connecting to TiDB Cloud database: ${database} at ${host}:${port}...`);
+  console.log(`\n🧹 Connecting to dev/test database "${database}" at ${host}:${port}...`);
   const sslConfig = {
     minVersion: 'TLSv1.2',
-    rejectUnauthorized: true,
+    rejectUnauthorized: !config.isTest,
     ...(config.TIDB_CA_PATH && fs.existsSync(config.TIDB_CA_PATH)
       ? { ca: fs.readFileSync(config.TIDB_CA_PATH) }
       : {})
@@ -37,89 +63,51 @@ async function cleanup() {
     ssl: sslConfig
   });
 
-  console.log('🧹 Purging dummy data across tables...');
+  try {
+    console.log('🧹 Purging operational test data...');
 
-  // 1. Clear checkouts & maintenance tickets
-  await conn.query('DELETE FROM `maintenances`;');
-  console.log('✓ Cleared maintenances table (0 tickets)');
+    // 1. Clear checkouts & maintenance tickets (custody & work tickets)
+    await conn.query('DELETE FROM `maintenances`;');
+    console.log('✓ Cleared maintenances table');
 
-  await conn.query('DELETE FROM `checkouts`;');
-  console.log('✓ Cleared checkouts table (0 checkouts)');
+    await conn.query('DELETE FROM `checkouts`;');
+    console.log('✓ Cleared checkouts table');
 
-  // 2. Clear assets
-  await conn.query('DELETE FROM `assets`;');
-  console.log('✓ Cleared assets table (0 assets)');
+    // 2. Clear assets (hardware catalog)
+    await conn.query('DELETE FROM `assets`;');
+    console.log('✓ Cleared assets table');
 
-  // 3. Clear budgets
-  await conn.query('DELETE FROM `budgets`;');
-  console.log('✓ Cleared budgets table (0 allocations)');
+    // 3. Clear budgets & notifications
+    await conn.query('DELETE FROM `budgets`;');
+    console.log('✓ Cleared budgets table');
 
-  // 4. Clear dummy test branches except the main production branch
-  await conn.query("DELETE FROM `branches` WHERE `id` != 'branch-main';");
-  
-  // Ensure default main headquarters branch exists
-  await conn.query(`
-    INSERT INTO \`branches\` (\`id\`, \`org_id\`, \`name\`, \`code\`, \`location\`, \`city\`, \`country\`, \`manager_name\`)
-    VALUES ('branch-main', 'org-omnitech', 'Global Headquarters', 'HQ-MAIN', 'Corporate HQ Tower, Floor 45', 'New York', 'United States', 'Ismael (Super Admin)')
-    ON DUPLICATE KEY UPDATE \`name\` = VALUES(\`name\`);
-  `);
-  console.log('✓ Retained single clean production branch (Global Headquarters)');
+    await conn.query('DELETE FROM `notifications`;');
+    console.log('✓ Cleared notifications table');
 
-  // 5. Ensure primary enterprise organization
-  await conn.query(`
-    INSERT INTO \`organizations\` (\`id\`, \`name\`, \`type\`, \`branding_color\`, \`branches_count\`)
-    VALUES ('org-omnitech', 'OmniTech Enterprise Systems', 'Enterprise', '#0ea5e9', 1)
-    ON DUPLICATE KEY UPDATE \`name\` = VALUES(\`name\`), \`branding_color\` = VALUES(\`branding_color\`);
-  `);
-  // Remove dummy organizations if any
-  await conn.query("DELETE FROM `organizations` WHERE `id` NOT IN ('org-omnitech');");
-  console.log('✓ Retained single production organization (OmniTech Enterprise Systems)');
+    // 4. Clear transient lockouts and idempotency keys
+    try {
+      await conn.query('DELETE FROM `login_attempts`;');
+      console.log('✓ Cleared login_attempts table');
+    } catch {
+      // Table may not exist yet
+    }
 
-  // 6. Delete dummy users, preserving configured Administrator
-  const adminEmail = (config.ADMIN_EMAIL || '').trim().toLowerCase();
-  const adminPassword = config.ADMIN_PASSWORD;
+    try {
+      await conn.query('DELETE FROM `idempotency_keys_v2`;');
+      console.log('✓ Cleared idempotency_keys_v2 table');
+    } catch {
+      // Table may not exist yet
+    }
 
-  if (!adminEmail || !adminPassword) {
-    throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD configuration settings are required to retain/provision the administrator account.');
+    // Safety: We NEVER delete from organizations or users tables here
+    console.log('🛡️ Preserved all organizations, branches, departments, and users intact.');
+    console.log('🎉 Cleanup completed successfully.\n');
+  } finally {
+    await conn.end();
   }
-
-  await conn.query('DELETE FROM `users` WHERE LOWER(`email`) != ?;', [adminEmail]);
-  
-  // Upsert Administrator with production bcrypt hash
-  const superPasswordHash = await bcrypt.hash(adminPassword, 12);
-  const adminId = config.ADMIN_ID || 'usr-admin-primary';
-  await conn.query(`
-    INSERT INTO \`users\` (
-      \`id\`, \`org_id\`, \`email\`, \`password_hash\`, \`full_name\`, \`role\`,
-      \`status\`, \`department_id\`, \`department_name\`, \`branch_id\`, \`branch_name\`, \`two_factor_enabled\`
-    ) VALUES (
-      ?, 'org-omnitech', ?, ?, 'System Administrator', 'ADMIN',
-      'ACTIVE', 'dept-sec', 'Cybersecurity & InfoSec', 'branch-main', 'Global Headquarters', 0
-    ) ON DUPLICATE KEY UPDATE
-      \`password_hash\` = VALUES(\`password_hash\`),
-      \`full_name\` = 'System Administrator',
-      \`role\` = 'ADMIN',
-      \`status\` = 'ACTIVE';
-  `, [adminId, adminEmail, superPasswordHash]);
-  console.log(`✓ Preserved/provisioned Administrator account (${adminEmail})`);
-
-  // 7. Verify counts
-  const [[{ assetCount }]] = await conn.query('SELECT COUNT(*) as assetCount FROM `assets`;');
-  const [[{ checkoutCount }]] = await conn.query('SELECT COUNT(*) as checkoutCount FROM `checkouts`;');
-  const [[{ userCount }]] = await conn.query('SELECT COUNT(*) as userCount FROM `users`;');
-  const [[{ branchCount }]] = await conn.query('SELECT COUNT(*) as branchCount FROM `branches`;');
-
-  console.log('\n📊 Production Database Status:');
-  console.log(`   - Assets: ${assetCount}`);
-  console.log(`   - Checkouts: ${checkoutCount}`);
-  console.log(`   - Users: ${userCount} (Super Admin)`);
-  console.log(`   - Branches: ${branchCount}`);
-
-  await conn.end();
-  console.log('\n✨ Database successfully reset to clean production state!\n');
 }
 
-cleanup().catch(err => {
-  console.error('Cleanup error:', err);
+cleanup().catch((err) => {
+  console.error('\n❌ Cleanup execution failed:', err.message);
   process.exit(1);
 });

@@ -107,8 +107,8 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     email: user.email,
     fullName: user.full_name,
     role: user.role,
-    branchId: user.branch_id || 'br-main',
-    branchName: user.branch_name || 'Main Campus'
+    branchId: user.branch_id || '',
+    branchName: user.branch_name || ''
   };
 
   const sessionToken = createSessionToken(tokenPayload);
@@ -290,7 +290,7 @@ authRouter.post('/change-password', authenticate, async (req: Request, res: Resp
   const newHash = await hashPassword(newPassword);
 
   await query(
-    'UPDATE `users` SET `password_hash` = ?, `password` = NULL WHERE `id` = ?;',
+    'UPDATE `users` SET `password_hash` = ?, `password_changed_at` = NOW() WHERE `id` = ?;',
     [newHash, userId]
   );
 
@@ -449,8 +449,8 @@ authRouter.post('/activate', async (req: Request, res: Response) => {
     email: user.email,
     fullName: user.full_name,
     role: user.role,
-    branchId: user.branch_id || 'br-main',
-    branchName: user.branch_name || 'Main Campus'
+    branchId: user.branch_id || '',
+    branchName: user.branch_name || ''
   };
 
   const sessionToken = createSessionToken(tokenPayload);

@@ -47,13 +47,14 @@ async function run() {
 
   // Check if branch exists
   const [branches] = await conn.query('SELECT id, name FROM branches LIMIT 1');
-  const branchId = branches[0]?.id || 'branch-ny';
-  const branchName = branches[0]?.name || 'New York Global HQ';
+  if (!branches || branches.length === 0) throw new Error('Cannot seed administrator: No branches found. Please create a branch first.');
+  const branchId = branches[0].id;
+  const branchName = branches[0].name;
 
   // Check if dept exists
   const [depts] = await conn.query('SELECT id, name FROM departments LIMIT 1');
-  const deptId = depts[0]?.id || 'dept-sec';
-  const deptName = depts[0]?.name || 'Cybersecurity & InfoSec';
+  const deptId = depts[0]?.id || null;
+  const deptName = depts[0]?.name || null;
 
   console.log('Seeding Administrator user into TiDB Cloud...');
   const upsertUserSql = `
