@@ -184,7 +184,7 @@ userRouter.post('/:id/reinvite', requirePermission('users:invite'), async (req: 
   const invitedAt = new Date().toISOString();
 
   await query(
-    'UPDATE `users` SET `invite_token` = ?, `invited_at` = ?, `status` = "INVITED" WHERE `id` = ?;',
+    "UPDATE `users` SET `invite_token` = ?, `invited_at` = ?, `status` = 'INVITED' WHERE `id` = ?;",
     [newInviteToken, invitedAt, targetId]
   );
 
@@ -322,7 +322,7 @@ userRouter.delete('/:id', requirePermission('users:delete'), async (req: Request
   try {
     await withTransaction(async (tx) => {
       // 1. Gracefully close any active equipment checkouts held by this user
-      await tx('UPDATE \`checkouts\` SET \`status\` = "RETURNED", \`notes\` = "Auto-closed on staff account deletion" WHERE \`checked_out_to_user_id\` = ? AND \`status\` = "ACTIVE";', [targetUserId]);
+      await tx("UPDATE `checkouts` SET `status` = 'RETURNED', `notes` = 'Auto-closed on staff account deletion' WHERE `checked_out_to_user_id` = ? AND `status` = 'ACTIVE';", [targetUserId]);
 
       // 2. Clear assigned equipment custody so assets return to available inventory
       await tx('UPDATE \`assets\` SET \`assigned_to_user_id\` = NULL, \`assigned_to_user_name\` = NULL, \`assigned_to_user_avatar\` = NULL, \`assigned_at\` = NULL WHERE \`assigned_to_user_id\` = ? AND \`org_id\` = ?;', [targetUserId, orgId]);

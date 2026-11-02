@@ -61,7 +61,7 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), async (req: Requ
 
   // Pre-flight check: Verify asset does not already have an active checkout
   const activeCheckouts = await query<any>(
-    'SELECT id, checked_out_to_user_name FROM `checkouts` WHERE `asset_id` = ? AND `status` = "ACTIVE" LIMIT 1;',
+    "SELECT id, checked_out_to_user_name FROM `checkouts` WHERE `asset_id` = ? AND `status` = 'ACTIVE' LIMIT 1;",
     [asset.id]
   );
   if (activeCheckouts.length > 0) {
@@ -87,7 +87,7 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), async (req: Requ
     await withTransaction(async (tx) => {
       // Atomic concurrency guard: verify under transaction lock to prevent race condition double-checkout
       const concurrentCheck = await tx(
-        'SELECT id FROM `checkouts` WHERE `asset_id` = ? AND `status` = "ACTIVE" LIMIT 1;',
+        "SELECT id FROM `checkouts` WHERE `asset_id` = ? AND `status` = 'ACTIVE' LIMIT 1;",
         [asset.id]
       );
       if (concurrentCheck.length > 0) {

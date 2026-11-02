@@ -43,6 +43,7 @@ function headers(extra: Record<string, string> = {}) {
 
 // 1. Admin Login
 test('1. Admin Authentication for Facilities Management', async () => {
+  await query('DELETE FROM users WHERE id = ? OR email = ?;', ['usr-test-fac-admin', testAdminEmail]);
   const hash = await hashPassword(testAdminPassword);
   await query(`
     INSERT INTO users (id, org_id, email, password_hash, full_name, role, status, branch_id, branch_name)
@@ -305,7 +306,7 @@ async function run() {
     }
   } finally {
     if (serverInstance) {
-      serverInstance.close();
+      await new Promise(r => serverInstance.close(r));
     }
   }
 

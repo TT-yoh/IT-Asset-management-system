@@ -1,20 +1,18 @@
 import mysql from 'mysql2/promise';
 import fs from 'fs';
-import path from 'path';
 import config from './config';
-
-const host = config.TIDB_HOST;
-const port = config.TIDB_PORT;
-const user = config.TIDB_USER;
-const password = config.TIDB_PASSWORD;
-const database = config.TIDB_DATABASE;
-const ssl = config.TIDB_SSL;
-const caPath = config.TIDB_CA_PATH;
 
 let pool: mysql.Pool | null = null;
 let isPoolInitialized = false;
+let forceInMemoryForTest = false;
 
-// Fallback in-memory store for offline development, local unit tests, and air-gapped environments
+export function setForceInMemoryForTest(val: boolean) {
+  if (config.isTest) {
+    forceInMemoryForTest = val;
+  }
+}
+
+// In-memory store for offline unit tests (active ONLY when config.isTest is true)
 const inMemoryStore = new Map<string, any[]>();
 
 export function getInMemoryStore() {
@@ -26,57 +24,90 @@ export function resetInMemoryStore() {
 }
 
 /**
- * Returns active TiDB / MySQL connection pool, or null if not configured
+ * Returns active TiDB / MySQL connection pool, or null if test environment uses in-memory.
+ * Outside test environment, missing credentials or pool failure throws immediately.
  */
 export function getDbPool(): mysql.Pool | null {
-  if (config.ALLOW_IN_MEMORY_DB) {
+  if (config.isTest && (forceInMemoryForTest || config.USE_IN_MEMORY_DB || config.ALLOW_IN_MEMORY_DB)) {
     return null;
   }
   if (pool) return pool;
-  if (!user || !host || !password || !database) {
-    if (config.ALLOW_IN_MEMORY_DB || config.isTest) {
+
+  let targetHost = config.TIDB_HOST;
+  let targetPort = config.TIDB_PORT;
+  let targetUser = config.TIDB_USER;
+  let targetPassword = config.TIDB_PASSWORD;
+  let targetDatabase = config.TIDB_DATABASE;
+
+  // Parse TEST_DATABASE_URL if provided in test environment
+  if (config.isTest && config.TEST_DATABASE_URL) {
+    try {
+      const parsed = new URL(config.TEST_DATABASE_URL);
+      targetHost = parsed.hostname || targetHost;
+      targetPort = parsed.port ? Number(parsed.port) : targetPort;
+      targetUser = parsed.username ? decodeURIComponent(parsed.username) : targetUser;
+      targetPassword = parsed.password ? decodeURIComponent(parsed.password) : targetPassword;
+      targetDatabase = parsed.pathname ? parsed.pathname.replace(/^\//, '') : targetDatabase;
+    } catch (err: any) {
+      console.warn('[DB] Could not parse TEST_DATABASE_URL:', err.message);
+    }
+  }
+
+  if (!targetHost || !targetUser || !targetPassword || !targetDatabase) {
+    if (config.isTest) {
       return null;
     }
-    throw new Error('FATAL: Database configuration missing (TIDB_HOST, TIDB_USER, TIDB_PASSWORD, TIDB_DATABASE). Set ALLOW_IN_MEMORY_DB=true to run with in-memory store.');
+    throw new Error('FATAL: Database configuration missing (TIDB_HOST, TIDB_USER, TIDB_PASSWORD, TIDB_DATABASE).');
   }
 
-  try {
-    const sslConfig = ssl
-      ? (caPath && fs.existsSync(caPath)
-          ? { ca: fs.readFileSync(caPath), minVersion: 'TLSv1.2' }
-          : { rejectUnauthorized: false, minVersion: 'TLSv1.2' })
-      : undefined;
-
-    pool = mysql.createPool({
-      host,
-      port,
-      user,
-      password,
-      database,
-      ssl: sslConfig,
-      timezone: 'Z',
-      dateStrings: true,
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0,
-      enableKeepAlive: true,
-      keepAliveInitialDelay: 10000
-    });
-    isPoolInitialized = true;
-    return pool;
-  } catch (err) {
-    console.warn('Could not initialize MySQL pool, falling back to resilient in-memory engine:', err);
-    return null;
+  let sslConfig: mysql.SslOptions | undefined;
+  if (config.isTest && config.TIDB_SSL === false) {
+    sslConfig = undefined;
+  } else {
+    if (config.TIDB_CA_PATH && fs.existsSync(config.TIDB_CA_PATH)) {
+      sslConfig = {
+        ca: fs.readFileSync(config.TIDB_CA_PATH),
+        minVersion: 'TLSv1.2',
+        rejectUnauthorized: true
+      };
+    } else {
+      sslConfig = {
+        minVersion: 'TLSv1.2',
+        rejectUnauthorized: true
+      };
+    }
   }
+
+  pool = mysql.createPool({
+    host: targetHost,
+    port: targetPort,
+    user: targetUser,
+    password: targetPassword,
+    database: targetDatabase,
+    ssl: sslConfig,
+    timezone: 'Z',
+    dateStrings: true,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10000
+  });
+  isPoolInitialized = true;
+  return pool;
 }
 
 export type QueryExecutor = <T = any>(sql: string, params?: any[]) => Promise<T[]>;
 
 /**
  * Executes a parameterized SQL query safely.
- * Never concatenates raw values into the query.
+ * Never catches and falls back to in-memory store; SQL errors propagate to callers unchanged.
  */
 export async function query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
+  if (config.isTest && forceInMemoryForTest) {
+    return executeInMemoryQuery<T>(sql, params);
+  }
+
   const activePool = getDbPool();
 
   if (activePool) {
@@ -84,65 +115,156 @@ export async function query<T = any>(sql: string, params: any[] = []): Promise<T
       const [rows] = await activePool.execute(sql, params);
       return rows as T[];
     } catch (err: any) {
-      // If network unreachable or ECONNREFUSED, fallback to in-memory store
-      console.warn(`Database query error (query falling back to in-memory store): ${err.message}`);
-      return executeInMemoryQuery<T>(sql, params);
+      // Log server-side only without leaking credentials or details to clients
+      console.error(`[DB ERROR] Code: ${err.code || 'UNKNOWN'} - SQL: ${sql}`);
+      // Propagate original error (ER_DUP_ENTRY, etc.) unchanged to callers
+      throw err;
     }
   }
 
-  return executeInMemoryQuery<T>(sql, params);
+  if (config.isTest) {
+    return executeInMemoryQuery<T>(sql, params);
+  }
+
+  throw new Error('FATAL: Database connection pool is not available.');
 }
 
 /**
  * Runs a set of operations in a single database transaction.
- * Automatically commits on success, and rolls back on error.
+ * If getConnection or beginTransaction fails, throws immediately.
+ * Always rolls back on error, releases connection in finally, and rethrows original error.
  */
 export async function withTransaction<T>(
   callback: (executor: QueryExecutor) => Promise<T>
 ): Promise<T> {
   const activePool = getDbPool();
-  if (activePool) {
-    let conn;
-    try {
-      conn = await activePool.getConnection();
-      await conn.beginTransaction();
-      const txExecutor: QueryExecutor = async (sql: string, params: any[] = []) => {
-        const [rows] = await conn.execute(sql, params);
-        return rows as any[];
-      };
-      const result = await callback(txExecutor);
-      await conn.commit();
-      return result;
-    } catch (err) {
-      if (conn) {
-        try {
-          await conn.rollback();
-        } catch {}
-        throw err;
-      }
-      // If pool connection failed completely (no connection obtained), fallback to in-memory execution!
-      console.warn(`Database transaction warning (falling back to in-memory store): ${(err as any)?.message}`);
+  if (!activePool) {
+    if (config.isTest) {
       return callback(query);
-    } finally {
-      if (conn) {
-        conn.release();
-      }
     }
+    throw new Error('Database pool not available for transaction.');
   }
 
-  // Fallback to in-memory execution
-  return callback(query);
+  let conn: mysql.PoolConnection | null = null;
+  try {
+    conn = await activePool.getConnection();
+    await conn.beginTransaction();
+
+    const txExecutor: QueryExecutor = async (sql: string, params: any[] = []) => {
+      const [rows] = await conn!.execute(sql, params);
+      return rows as any[];
+    };
+
+    const result = await callback(txExecutor);
+    await conn.commit();
+    return result;
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch (rollbackErr: any) {
+        console.error('[DB] Transaction rollback error:', rollbackErr.message);
+      }
+    }
+    throw err;
+  } finally {
+    if (conn) {
+      conn.release();
+    }
+  }
 }
 
 /**
- * Resilient in-memory query engine supporting parameterized SELECT, INSERT, UPDATE, DELETE
- * to allow air-gapped testing and offline execution.
+ * Readiness ping check: verifies active database connectivity.
  */
-function executeInMemoryQuery<T = any>(sql: string, params: any[]): T[] {
+export async function ping(): Promise<boolean> {
+  const activePool = getDbPool();
+  if (activePool) {
+    try {
+      const [rows] = await activePool.query('SELECT 1 as ping;');
+      return Array.isArray(rows) && rows.length > 0;
+    } catch (err: any) {
+      console.error('[DB] Ping failed:', err.message);
+      return false;
+    }
+  }
+  if (config.isTest) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Closes the active database connection pool gracefully.
+ */
+export async function closePool(): Promise<void> {
+  if (pool) {
+    try {
+      await pool.end();
+    } catch (err: any) {
+      console.error('[DB] Error during pool shutdown:', err.message);
+    } finally {
+      pool = null;
+      isPoolInitialized = false;
+    }
+  }
+}
+
+let isShuttingDown = false;
+export async function gracefulShutdown(signal: string) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`[SHUTDOWN] Received ${signal}, closing database connections gracefully...`);
+  await closePool();
+  if (!config.isTest) {
+    process.exit(0);
+  }
+}
+
+if (!config.isTest) {
+  process.once('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.once('SIGINT', () => gracefulShutdown('SIGINT'));
+}
+
+/**
+ * Strict in-memory query engine (test environments ONLY).
+ * Throws "unsupported SQL" for anything it cannot evaluate faithfully:
+ * JOIN, LIKE, IN (...), OR conditions, range comparisons, unsupported ORDER BY, composite keys.
+ * UPDATE/DELETE with a null/undefined WHERE param matches NOTHING.
+ * Merge semantics strictly preserve org_id.
+ */
+export function executeInMemoryQuery<T = any>(sql: string, params: any[]): T[] {
   const normalized = sql.trim();
   const lower = normalized.toLowerCase();
 
-  // 1. SELECT queries
+  // 1. Strict SQL Syntax & Construct Enforcement
+  if (/\bjoin\b/i.test(normalized)) {
+    throw new Error('unsupported SQL: JOIN is not supported by the in-memory engine');
+  }
+  if (/\blike\b/i.test(normalized)) {
+    throw new Error('unsupported SQL: LIKE is not supported by the in-memory engine');
+  }
+  if (/\bin\s*\(/i.test(normalized)) {
+    throw new Error('unsupported SQL: IN (...) is not supported by the in-memory engine');
+  }
+  if (/\bwhere\b[\s\S]*\bor\b/i.test(normalized)) {
+    throw new Error('unsupported SQL: OR in WHERE clause is not supported by the in-memory engine');
+  }
+  if (/[<>]|<=|>=/i.test(normalized.replace(/'[^']*'/g, ''))) {
+    throw new Error('unsupported SQL: range comparison operators are not supported by the in-memory engine');
+  }
+
+  // Verify ORDER BY clauses
+  const orderMatch = lower.match(/order\s+by\s+[`]?([a-zA-Z0-9_]+)[`]?\s*(asc|desc)?/i);
+  if (orderMatch) {
+    const orderCol = orderMatch[1];
+    const supportedCols = ['seq', 'name', 'timestamp', 'created_at', 'checked_out_at', 'fiscal_year'];
+    if (!supportedCols.includes(orderCol)) {
+      throw new Error(`unsupported SQL: ORDER BY ${orderCol} is not supported by the in-memory engine`);
+    }
+  }
+
+  // 2. SELECT queries
   if (lower.startsWith('select')) {
     const tableMatch = lower.match(/from\s+[`]?([a-zA-Z0-9_]+)[`]?/);
     if (!tableMatch || !tableMatch[1]) return [] as T[];
@@ -159,6 +281,10 @@ function executeInMemoryQuery<T = any>(sql: string, params: any[]): T[] {
       while ((match = condRegex.exec(whereClause)) !== null && paramIdx < params.length) {
         const col = match[1];
         const val = params[paramIdx++];
+        if (val === null || val === undefined) {
+          // NULL in SQL = condition evaluates to UNKNOWN -> matches 0 rows
+          return [] as T[];
+        }
         if (col === 'email') {
           rows = rows.filter(r => r.email?.toLowerCase() === String(val).toLowerCase());
         } else {
@@ -174,11 +300,20 @@ function executeInMemoryQuery<T = any>(sql: string, params: any[]): T[] {
       return [{ [alias]: rows.length }] as any;
     }
 
-    // Order by seq handling
-    if (lower.includes('order by seq desc') || lower.includes('order by `seq` desc')) {
-      rows.sort((a, b) => Number(b.seq || 0) - Number(a.seq || 0));
-    } else if (lower.includes('order by seq asc') || lower.includes('order by `seq` asc')) {
-      rows.sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0));
+    // Order by column handling
+    if (orderMatch) {
+      const orderCol = orderMatch[1];
+      const direction = (orderMatch[2] || 'asc').toLowerCase();
+      rows.sort((a, b) => {
+        const valA = a[orderCol] ?? '';
+        const valB = b[orderCol] ?? '';
+        if (typeof valA === 'number' && typeof valB === 'number') {
+          return direction === 'desc' ? valB - valA : valA - valB;
+        }
+        return direction === 'desc'
+          ? String(valB).localeCompare(String(valA))
+          : String(valA).localeCompare(String(valB));
+      });
     }
 
     if (lower.includes('limit 1')) {
@@ -188,7 +323,7 @@ function executeInMemoryQuery<T = any>(sql: string, params: any[]): T[] {
     return rows as T[];
   }
 
-  // 2. INSERT queries
+  // 3. INSERT queries
   if (lower.startsWith('insert')) {
     const tableMatch = lower.match(/into\s+[`]?([a-zA-Z0-9_]+)[`]?/);
     if (tableMatch && tableMatch[1]) {
@@ -208,13 +343,20 @@ function executeInMemoryQuery<T = any>(sql: string, params: any[]): T[] {
             newRow[col] = params[r * colCount + idx];
           });
 
-          // Check for upsert / primary key conflict (id or key)
+          // Check for upsert / primary key conflict
           const existingIdx = rows.findIndex(existing => 
             (newRow.id && existing.id === newRow.id) || 
             (newRow.key && existing.key === newRow.key)
           );
+
           if (existingIdx !== -1) {
-            rows[existingIdx] = { ...rows[existingIdx], ...newRow };
+            const existingOrgId = rows[existingIdx].org_id;
+            const merged = { ...rows[existingIdx], ...newRow };
+            // Merge semantics: NEVER overwrite existing org_id
+            if (existingOrgId) {
+              merged.org_id = existingOrgId;
+            }
+            rows[existingIdx] = merged;
           } else {
             rows.push(newRow);
           }
@@ -225,7 +367,7 @@ function executeInMemoryQuery<T = any>(sql: string, params: any[]): T[] {
     return [] as T[];
   }
 
-  // 3. UPDATE queries
+  // 4. UPDATE queries
   if (lower.startsWith('update')) {
     const tableMatch = lower.match(/update\s+[`]?([a-zA-Z0-9_]+)[`]?/);
     if (tableMatch && tableMatch[1]) {
@@ -252,17 +394,25 @@ function executeInMemoryQuery<T = any>(sql: string, params: any[]): T[] {
         whereConds.forEach((cond, cIdx) => {
           const col = cond.split('=')[0].trim().replace(/[`"']/g, '');
           const val = params[setPlaceholdersCount + cIdx];
-          if (val !== null && val !== undefined) {
+          // If WHERE parameter is null or undefined, matches NOTHING (0 rows)
+          if (val === null || val === undefined) {
+            matchingIndices = [];
+          } else {
             matchingIndices = matchingIndices.filter(i => rows[i][col] == val);
           }
         });
 
         for (const idx of matchingIndices) {
           const target = { ...rows[idx] };
+          const existingOrgId = target.org_id;
           let pIdx = 0;
           setCols.forEach(col => {
             if (pIdx < setPlaceholdersCount) {
-              target[col] = params[pIdx++];
+              const newVal = params[pIdx++];
+              // Tenant boundary preservation: never overwrite org_id
+              if (col !== 'org_id' || !existingOrgId) {
+                target[col] = newVal;
+              }
             }
           });
           if (lower.includes('version = version + 1') || lower.includes('`version` = `version` + 1')) {
@@ -277,20 +427,25 @@ function executeInMemoryQuery<T = any>(sql: string, params: any[]): T[] {
     return [{ affectedRows: 0 }] as any;
   }
 
-  // 4. DELETE queries
+  // 5. DELETE queries
   if (lower.startsWith('delete')) {
     const tableMatch = lower.match(/from\s+[`]?([a-zA-Z0-9_]+)[`]?/);
     if (tableMatch && tableMatch[1]) {
       const tableName = tableMatch[1];
       let rows = inMemoryStore.get(tableName) || [];
-      const param = params[0];
-      if (typeof param === 'string' && param.endsWith('%')) {
-        const prefix = param.slice(0, -1);
-        rows = rows.filter(r => !r.id?.startsWith(prefix));
-      } else {
-        rows = rows.filter(r => r.id !== param);
+
+      // Check WHERE condition
+      const whereMatch = lower.match(/where\s+[`]?([a-zA-Z0-9_]+)[`]?\s*=\s*\?/);
+      if (whereMatch && whereMatch[1]) {
+        const col = whereMatch[1];
+        const param = params[0];
+        // If WHERE param is null or undefined, matches NOTHING (0 rows deleted)
+        if (param === null || param === undefined) {
+          return [] as T[];
+        }
+        rows = rows.filter(r => r[col] != param);
+        inMemoryStore.set(tableName, rows);
       }
-      inMemoryStore.set(tableName, rows);
     }
     return [] as T[];
   }

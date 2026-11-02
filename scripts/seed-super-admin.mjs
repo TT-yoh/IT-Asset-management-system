@@ -30,7 +30,13 @@ async function run() {
     user,
     password,
     database,
-    ssl: { minVersion: 'TLSv1.2', rejectUnauthorized: false }
+    ssl: {
+      minVersion: 'TLSv1.2',
+      rejectUnauthorized: true,
+      ...(config.TIDB_CA_PATH && fs.existsSync(config.TIDB_CA_PATH)
+        ? { ca: fs.readFileSync(config.TIDB_CA_PATH) }
+        : {})
+    }
   });
 
   const passwordHash = await bcrypt.hash(rawPassword, 12);

@@ -76,7 +76,10 @@ async function runMigration() {
       password,
       ssl: {
         minVersion: 'TLSv1.2',
-        rejectUnauthorized: false
+        rejectUnauthorized: true,
+        ...(config.TIDB_CA_PATH && fs.existsSync(config.TIDB_CA_PATH)
+          ? { ca: fs.readFileSync(config.TIDB_CA_PATH) }
+          : {})
       },
       connectTimeout: 25000,
       multipleStatements: true

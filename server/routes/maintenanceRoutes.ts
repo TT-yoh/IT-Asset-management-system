@@ -74,7 +74,7 @@ maintenanceRouter.post('/', requirePermission('maintenance:create'), async (req:
       ]);
 
       // Update asset status to REPAIR
-      await tx('UPDATE `assets` SET `status` = "REPAIR" WHERE `id` = ?;', [asset.id]);
+      await tx("UPDATE `assets` SET `status` = 'REPAIR' WHERE `id` = ?;", [asset.id]);
 
       await recordAuditEvent(tx, {
         orgId,
@@ -156,7 +156,7 @@ maintenanceRouter.put('/:id', requirePermission('maintenance:update'), async (re
       ]);
 
       if (newStatus === 'COMPLETED') {
-        await tx('UPDATE `assets` SET `status` = "ACTIVE" WHERE `id` = ?;', [rec.asset_id]);
+        await tx("UPDATE `assets` SET `status` = 'ACTIVE' WHERE `id` = ?;", [rec.asset_id]);
       }
 
       await recordAuditEvent(tx, {

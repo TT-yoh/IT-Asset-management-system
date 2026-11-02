@@ -83,6 +83,8 @@ const baseConfigSchema = z.object({
   IDEMPOTENCY_REQUIRED: z.boolean().default(false),
   ALLOW_ROOT_ROUTES: z.boolean().default(false),
   ALLOW_IN_MEMORY_DB: z.boolean().default(false),
+  USE_IN_MEMORY_DB: z.boolean().default(false),
+  TEST_DATABASE_URL: z.string().optional(),
   ADMIN_EMAIL: z.string().optional(),
   ADMIN_PASSWORD: z.string().optional(),
   ADMIN_ID: z.string().optional(),
@@ -100,6 +102,11 @@ export function validateConfig(raw: Record<string, any>): Readonly<AppConfig> {
   const isProduction = rawNodeEnv === 'production' || isStartScript;
   const isTest = rawNodeEnv === 'test';
   const isDevelopment = !isProduction && !isTest;
+
+  // Disabling TLS is strictly permitted only in test environments
+  if (!isTest && (raw.TIDB_SSL === false || raw.TIDB_SSL === 'false')) {
+    throw new Error('\n======================================================\nFATAL: Disabling TLS (TIDB_SSL=false) is only permitted when NODE_ENV=test.\n======================================================\n');
+  }
 
   // Never read secrets from VITE_* variables
   for (const key of Object.keys(raw)) {
@@ -134,7 +141,7 @@ export function validateConfig(raw: Record<string, any>): Readonly<AppConfig> {
     TIDB_USER: raw.TIDB_USER ? String(raw.TIDB_USER).trim() : undefined,
     TIDB_PASSWORD: raw.TIDB_PASSWORD ? String(raw.TIDB_PASSWORD).trim() : undefined,
     TIDB_DATABASE: raw.TIDB_DATABASE ? String(raw.TIDB_DATABASE).trim() : undefined,
-    TIDB_SSL: raw.TIDB_SSL !== false && raw.TIDB_SSL !== 'false',
+    TIDB_SSL: isTest ? (raw.TIDB_SSL !== false && raw.TIDB_SSL !== 'false') : true,
     TIDB_CA_PATH: raw.TIDB_CA_PATH ? String(raw.TIDB_CA_PATH).trim() : undefined,
     CORS_ORIGINS: corsOrigins,
     TOTP_ENCRYPTION_KEY: raw.TOTP_ENCRYPTION_KEY ? String(raw.TOTP_ENCRYPTION_KEY).trim() : undefined,
@@ -146,7 +153,9 @@ export function validateConfig(raw: Record<string, any>): Readonly<AppConfig> {
     MAIL_FROM: raw.MAIL_FROM ? String(raw.MAIL_FROM).trim() : undefined,
     IDEMPOTENCY_REQUIRED: raw.IDEMPOTENCY_REQUIRED === true || raw.IDEMPOTENCY_REQUIRED === 'true',
     ALLOW_ROOT_ROUTES: raw.ALLOW_ROOT_ROUTES === true || raw.ALLOW_ROOT_ROUTES === 'true',
-    ALLOW_IN_MEMORY_DB: raw.ALLOW_IN_MEMORY_DB === true || raw.ALLOW_IN_MEMORY_DB === 'true',
+    ALLOW_IN_MEMORY_DB: (raw.ALLOW_IN_MEMORY_DB === true || raw.ALLOW_IN_MEMORY_DB === 'true' || raw.USE_IN_MEMORY_DB === true || raw.USE_IN_MEMORY_DB === 'true'),
+    USE_IN_MEMORY_DB: (raw.USE_IN_MEMORY_DB === true || raw.USE_IN_MEMORY_DB === 'true' || raw.ALLOW_IN_MEMORY_DB === true || raw.ALLOW_IN_MEMORY_DB === 'true'),
+    TEST_DATABASE_URL: raw.TEST_DATABASE_URL ? String(raw.TEST_DATABASE_URL).trim() : undefined,
     ADMIN_EMAIL: raw.ADMIN_EMAIL ? String(raw.ADMIN_EMAIL).trim() : undefined,
     ADMIN_PASSWORD: raw.ADMIN_PASSWORD ? String(raw.ADMIN_PASSWORD).trim() : undefined,
     ADMIN_ID: raw.ADMIN_ID ? String(raw.ADMIN_ID).trim() : undefined,
@@ -190,6 +199,9 @@ export function validateConfig(raw: Record<string, any>): Readonly<AppConfig> {
     }
     if (!valid.TOTP_ENCRYPTION_KEY || !isValid32ByteKey(valid.TOTP_ENCRYPTION_KEY)) {
       prodErrors.push('TOTP_ENCRYPTION_KEY is required in production (32-byte key: 64 hex characters or 32 raw bytes)');
+    }
+    if (raw.USE_IN_MEMORY_DB === true || raw.USE_IN_MEMORY_DB === 'true' || raw.ALLOW_IN_MEMORY_DB === true || raw.ALLOW_IN_MEMORY_DB === 'true') {
+      prodErrors.push('USE_IN_MEMORY_DB / ALLOW_IN_MEMORY_DB is strictly prohibited in production');
     }
 
     if (prodErrors.length > 0) {

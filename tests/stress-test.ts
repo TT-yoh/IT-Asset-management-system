@@ -138,13 +138,13 @@ async function apiRequest(
 }
 
 async function cleanStressData() {
-  await query('DELETE FROM `audit_logs` WHERE `org_id` = "stress-org";');
-  await query('DELETE FROM `checkouts` WHERE `id` LIKE "chk-stress-%";');
-  await query('DELETE FROM `idempotency_keys` WHERE `org_id` = "stress-org";');
-  await query('DELETE FROM `assets` WHERE `org_id` = "stress-org";');
-  await query('DELETE FROM `users` WHERE `org_id` = "stress-org";');
-  await query('DELETE FROM `branches` WHERE `org_id` = "stress-org";');
-  await query('DELETE FROM `organizations` WHERE `id` = "stress-org";');
+  await query("DELETE FROM `audit_logs` WHERE `org_id` = 'stress-org';");
+  await query("DELETE FROM `checkouts` WHERE `id` LIKE 'chk-stress-%';");
+  await query("DELETE FROM `idempotency_keys` WHERE `org_id` = 'stress-org';");
+  await query("DELETE FROM `assets` WHERE `org_id` = 'stress-org';");
+  await query("DELETE FROM `users` WHERE `org_id` = 'stress-org';");
+  await query("DELETE FROM `branches` WHERE `org_id` = 'stress-org';");
+  await query("DELETE FROM `organizations` WHERE `id` = 'stress-org';");
 }
 
 async function setupStressData() {

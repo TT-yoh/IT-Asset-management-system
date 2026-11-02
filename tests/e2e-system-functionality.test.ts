@@ -504,7 +504,7 @@ async function run() {
     }
   } finally {
     if (serverInstance) {
-      serverInstance.close();
+      await new Promise(r => serverInstance.close(r));
     }
   }
 

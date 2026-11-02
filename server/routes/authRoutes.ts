@@ -414,7 +414,7 @@ authRouter.post('/activate', async (req: Request, res: Response) => {
   // Parameterized token lookup
   const cleanToken = String(inviteToken).trim();
   const users = await query<any>(
-    'SELECT * FROM `users` WHERE `invite_token` = ? AND `status` = "INVITED" LIMIT 1;',
+    "SELECT * FROM `users` WHERE `invite_token` = ? AND `status` = 'INVITED' LIMIT 1;",
     [cleanToken]
   );
 
@@ -438,7 +438,7 @@ authRouter.post('/activate', async (req: Request, res: Response) => {
 
   // Consume token and activate account
   await query(
-    'UPDATE `users` SET `password_hash` = ?, `status` = "ACTIVE", `two_factor_enabled` = ?, `invite_token` = NULL WHERE `id` = ?;',
+    "UPDATE `users` SET `password_hash` = ?, `status` = 'ACTIVE', `two_factor_enabled` = ?, `invite_token` = NULL WHERE `id` = ?;",
     [hashedPassword, twoFactorEnabled ? 1 : 0, user.id]
   );
 

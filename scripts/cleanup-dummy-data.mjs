@@ -5,6 +5,7 @@
 
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
+import fs from 'fs';
 import { config } from '../server/config.ts';
 
 const host = config.TIDB_HOST;
@@ -19,13 +20,21 @@ if (!host || !user || !password || !database) {
 
 async function cleanup() {
   console.log(`📡 Connecting to TiDB Cloud database: ${database} at ${host}:${port}...`);
+  const sslConfig = {
+    minVersion: 'TLSv1.2',
+    rejectUnauthorized: true,
+    ...(config.TIDB_CA_PATH && fs.existsSync(config.TIDB_CA_PATH)
+      ? { ca: fs.readFileSync(config.TIDB_CA_PATH) }
+      : {})
+  };
+
   const conn = await mysql.createConnection({
     host,
     port,
     user,
     password,
     database,
-    ssl: { minVersion: 'TLSv1.2', rejectUnauthorized: false }
+    ssl: sslConfig
   });
 
   console.log('🧹 Purging dummy data across tables...');
@@ -46,7 +55,7 @@ async function cleanup() {
   console.log('✓ Cleared budgets table (0 allocations)');
 
   // 4. Clear dummy test branches except the main production branch
-  await conn.query('DELETE FROM `branches` WHERE `id` != "branch-main";');
+  await conn.query("DELETE FROM `branches` WHERE `id` != 'branch-main';");
   
   // Ensure default main headquarters branch exists
   await conn.query(`
@@ -63,7 +72,7 @@ async function cleanup() {
     ON DUPLICATE KEY UPDATE \`name\` = VALUES(\`name\`), \`branding_color\` = VALUES(\`branding_color\`);
   `);
   // Remove dummy organizations if any
-  await conn.query('DELETE FROM `organizations` WHERE `id` NOT IN ("org-omnitech");');
+  await conn.query("DELETE FROM `organizations` WHERE `id` NOT IN ('org-omnitech');");
   console.log('✓ Retained single production organization (OmniTech Enterprise Systems)');
 
   // 6. Delete dummy users, preserving configured Administrator

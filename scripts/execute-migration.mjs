@@ -20,13 +20,21 @@ if (!host || !user || !password || !database) {
 
 async function run() {
   console.log(`Applying migration to ${host}:${port}/${database}...`);
+  const sslConfig = {
+    minVersion: 'TLSv1.2',
+    rejectUnauthorized: true,
+    ...(config.TIDB_CA_PATH && fs.existsSync(config.TIDB_CA_PATH)
+      ? { ca: fs.readFileSync(config.TIDB_CA_PATH) }
+      : {})
+  };
+
   const conn = await mysql.createConnection({
     host,
     port,
     user,
     password,
     database,
-    ssl: { rejectUnauthorized: false },
+    ssl: sslConfig,
     multipleStatements: true
   });
 

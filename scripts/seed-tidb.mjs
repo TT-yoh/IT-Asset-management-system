@@ -22,7 +22,13 @@ async function seed() {
     user,
     password,
     database,
-    ssl: { minVersion: 'TLSv1.2', rejectUnauthorized: false }
+    ssl: {
+      minVersion: 'TLSv1.2',
+      rejectUnauthorized: true,
+      ...(config.TIDB_CA_PATH && fs.existsSync(config.TIDB_CA_PATH)
+        ? { ca: fs.readFileSync(config.TIDB_CA_PATH) }
+        : {})
+    }
   });
 
   console.log(`Connected to \`${database}\` for initial baseline seeding...`);

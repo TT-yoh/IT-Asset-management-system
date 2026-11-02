@@ -1,4 +1,6 @@
-import express, { Request, Response } from 'express';
+import 'express-async-errors';
+import express, { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import config from './config';
 import { cookieParserMiddleware, authenticate } from './middleware';
 import { idempotencyMiddleware } from './middleware/idempotency';
@@ -11,11 +13,19 @@ import { branchRouter } from './routes/branchRoutes';
 import { departmentRouter } from './routes/departmentRoutes';
 import { userRouter } from './routes/userRoutes';
 import { auditRouter } from './routes/auditRoutes';
-import { query } from './db';
+import { query, ping } from './db';
 import path from 'path';
 import fs from 'fs';
 
 export const app = express();
+
+// Request ID propagation middleware
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const reqId = (req.headers['x-request-id'] as string) || crypto.randomUUID();
+  (req as any).id = reqId;
+  res.setHeader('X-Request-Id', reqId);
+  next();
+});
 
 // Trust Proxy Configuration (if configured)
 if (config.TRUST_PROXY !== undefined) {
@@ -46,12 +56,23 @@ app.use(cookieParserMiddleware);
 app.use(idempotencyMiddleware);
 
 // Health check endpoint (both /api/health and optional /health)
-app.get(config.ALLOW_ROOT_ROUTES ? ['/api/health', '/health'] : ['/api/health'], (_req: Request, res: Response) => {
+app.get(config.ALLOW_ROOT_ROUTES ? ['/api/health', '/health'] : ['/api/health'], async (_req: Request, res: Response) => {
+  const isDbConnected = await ping();
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    service: 'OmniAsset TiDB API Gateway'
+    service: 'OmniAsset TiDB API Gateway',
+    database: isDbConnected ? 'connected' : 'disconnected'
   });
+});
+
+// Readiness check endpoint (used by container orchestrators & probes)
+app.get(config.ALLOW_ROOT_ROUTES ? ['/api/ready', '/ready'] : ['/api/ready'], async (_req: Request, res: Response) => {
+  const isReady = await ping();
+  if (isReady) {
+    return res.json({ status: 'ready', database: 'connected' });
+  }
+  return res.status(503).json({ status: 'unready', database: 'disconnected' });
 });
 
 // Mount modular sub-routers with both /api and optional root prefixes
@@ -163,6 +184,43 @@ if (fs.existsSync(distDir)) {
     }
   });
 }
+
+// Central Express Error Handling Middleware (Catches all async & sync rejections)
+app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
+  const requestId = (req as any).id || (req.headers['x-request-id'] as string) || crypto.randomUUID();
+  const statusCode = typeof err.statusCode === 'number'
+    ? err.statusCode
+    : (typeof err.status === 'number' ? err.status : 500);
+
+  // Log full error details server-side only
+  console.error(`[ERROR] RequestId: ${requestId} - ${req.method} ${req.originalUrl}:`, err);
+
+  // Never leak raw SQL or internal driver error messages to the client
+  const isServerFault = statusCode >= 500;
+  const clientMessage = isServerFault
+    ? 'An internal server error occurred. Please contact system support.'
+    : (err.message || 'Request could not be processed.');
+
+  res.status(statusCode).json({
+    error: clientMessage,
+    requestId
+  });
+});
+
+// Process-level unhandled rejection & uncaught exception logging with clean exit
+process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+  console.error('[FATAL] Unhandled Promise Rejection at:', promise, 'reason:', reason);
+  if (!config.isTest) {
+    process.exit(1);
+  }
+});
+
+process.on('uncaughtException', (err: Error) => {
+  console.error('[FATAL] Uncaught Exception thrown:', err);
+  if (!config.isTest) {
+    process.exit(1);
+  }
+});
 
 const PORT = config.PORT;
 
