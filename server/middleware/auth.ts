@@ -1,8 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
-import config from './config';
-import { verifySessionToken, createSessionToken, SESSION_TTL_SECONDS } from './auth';
-import { AuthContextPayload, UserRole, PermissionAction, hasPermission } from './permissions';
-import { query } from './db';
+import config from '../config';
+import { verifySessionToken, createSessionToken, SESSION_TTL_SECONDS } from '../auth';
+import { AuthContextPayload, UserRole, PermissionAction, hasPermission } from '../permissions';
+import { query } from '../db';
 
 // Extend Express Request interface to include authenticated session payload
 declare global {
@@ -210,7 +210,8 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     fullName: user.full_name,
     role: user.role,
     branchId: user.branch_id || '',
-    branchName: user.branch_name || ''
+    branchName: user.branch_name || '',
+    isSuperAdmin: Boolean(user.is_super_admin)
   };
 
   // Sliding session refresh: if authenticated by cookie and < 30 mins remaining
@@ -269,4 +270,21 @@ export function requirePermission(action: PermissionAction) {
 
     next();
   };
+}
+
+/**
+ * Super Admin authorization guard
+ */
+export function requireSuperAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!req.auth) {
+    res.status(401).json({ error: 'Unauthenticated.' });
+    return;
+  }
+
+  if (!req.auth.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden. Super admin privileges required.' });
+    return;
+  }
+
+  next();
 }

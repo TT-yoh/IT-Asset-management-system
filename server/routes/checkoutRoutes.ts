@@ -12,7 +12,7 @@ checkoutRouter.use(authenticate);
  * GET /api/checkouts
  */
 checkoutRouter.get('/', requirePermission('checkouts:read'), async (req: Request, res: Response) => {
-  const { orgId, role, userId } = req.auth!;
+  const { orgId, role, userId, branchId } = req.auth!;
 
   let sql = `
     SELECT c.* FROM \`checkouts\` c
@@ -21,7 +21,14 @@ checkoutRouter.get('/', requirePermission('checkouts:read'), async (req: Request
   `;
   const params: any[] = [orgId];
 
-  if (role === 'USER') {
+  if (role === 'BRANCH_MANAGER') {
+    if (!branchId) {
+      res.json({ checkouts: [] });
+      return;
+    }
+    sql += ' AND c.branch_id = ?';
+    params.push(branchId);
+  } else if (role === 'USER') {
     sql += ' AND c.checked_out_to_user_id = ?';
     params.push(userId);
   }

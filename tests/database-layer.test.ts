@@ -10,7 +10,8 @@ import {
   resetInMemoryStore,
   getInMemoryStore,
   setForceInMemoryForTest,
-  executeInMemoryQuery
+  executeInMemoryQuery,
+  closePool
 } from '../server/db';
 import { validateConfig } from '../server/config';
 
@@ -201,7 +202,7 @@ test('13. Forced DB failure in route returns JSON 500 with requestId, process st
     assert.strictEqual(body.error.includes('mysql'), false, 'Response must not leak mysql driver details');
   } finally {
     if (serverInstance) {
-      serverInstance.close();
+      await new Promise<void>((resolve) => serverInstance.close(() => resolve()));
     }
   }
 });
@@ -227,10 +228,12 @@ async function run() {
   console.log(`Phase 2 Summary: ${passed} Passed, ${failed} Failed`);
   console.log('==========================================\n');
 
+  await closePool();
+
   if (failed > 0) {
-    process.exit(1);
+    process.exitCode = 1;
   } else {
-    process.exit(0);
+    process.exitCode = 0;
   }
 }
 

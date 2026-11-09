@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import express, { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../db';
 import { authenticate, requirePermission } from '../middleware';
 import { recordAuditEvent } from '../audit';
@@ -17,8 +17,12 @@ assetRouter.get('/', requirePermission('assets:read'), async (req: Request, res:
   let sql = 'SELECT * FROM `assets` WHERE `org_id` = ?';
   const params: any[] = [effectiveOrgId];
 
-  // Enforce branch boundary for BRANCH_MANAGER and USER
-  if ((role === 'BRANCH_MANAGER' || role === 'USER') && branchId) {
+  // Enforce branch boundary for BRANCH_MANAGER and USER (fail closed if branchId is missing)
+  if (role === 'BRANCH_MANAGER' || role === 'USER') {
+    if (!branchId) {
+      res.json({ assets: [] });
+      return;
+    }
     sql += ' AND `branch_id` = ?';
     params.push(branchId);
   }
@@ -284,7 +288,7 @@ assetRouter.post('/', requirePermission('assets:create'), async (req: Request, r
  * POST /api/assets/bulk
  * High-throughput batch ingestion of multiple assets in a single database transaction
  */
-assetRouter.post('/bulk', requirePermission('assets:create'), async (req: Request, res: Response) => {
+assetRouter.post('/bulk', express.json({ limit: '5mb' }), requirePermission('assets:create'), async (req: Request, res: Response) => {
   const { orgId, role, userId: actorId, fullName: actorName, branchId: userBranchId } = req.auth!;
   const { assets: rawAssets } = req.body;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -526,7 +530,7 @@ assetRouter.delete('/:id', requirePermission('assets:delete'), async (req: Reque
       if (hasLinkedRecords) {
         // Soft delete / write-off: preserve custody audit history per ON DELETE RESTRICT constraints
         await tx(
-          'UPDATE `assets` SET `status` = "DISPOSED", `assigned_to_user_id` = NULL, `assigned_to_user_name` = NULL, `version` = `version` + 1 WHERE `id` = ? AND `org_id` = ?;',
+          'UPDATE `assets` SET `status` = \'DISPOSED\', `assigned_to_user_id` = NULL, `assigned_to_user_name` = NULL, `version` = `version` + 1 WHERE `id` = ? AND `org_id` = ?;',
           [assetId, orgId]
         );
       } else {

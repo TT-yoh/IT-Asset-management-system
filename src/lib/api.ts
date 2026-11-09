@@ -44,3 +44,4 @@ if (typeof window !== 'undefined' && window.fetch) {
     return originalFetch(input, init);
   };
 }
+

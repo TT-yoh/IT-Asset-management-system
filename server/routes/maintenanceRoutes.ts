@@ -10,15 +10,30 @@ maintenanceRouter.use(authenticate);
  * GET /api/maintenance
  */
 maintenanceRouter.get('/', requirePermission('maintenance:read'), async (req: Request, res: Response) => {
-  const { orgId } = req.auth!;
+  const { orgId, role, branchId, userId } = req.auth!;
 
-  const rows = await query(`
+  let sql = `
     SELECT m.* FROM \`maintenances\` m
     INNER JOIN \`assets\` a ON m.asset_id = a.id
     WHERE a.org_id = ?
-    ORDER BY m.created_at DESC LIMIT 300;
-  `, [orgId]);
+  `;
+  const params: any[] = [orgId];
 
+  if (role === 'BRANCH_MANAGER') {
+    if (!branchId) {
+      res.json({ maintenance: [] });
+      return;
+    }
+    sql += ' AND m.branch_id = ?';
+    params.push(branchId);
+  } else if (role === 'USER') {
+    sql += ' AND m.reported_by_user_id = ?';
+    params.push(userId);
+  }
+
+  sql += ' ORDER BY m.created_at DESC LIMIT 300;';
+
+  const rows = await query(sql, params);
   res.json({ maintenance: rows });
 });
 

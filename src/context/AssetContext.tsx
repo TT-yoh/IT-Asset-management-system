@@ -171,7 +171,7 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           return res.ok;
         } else if (mut.table === 'maintenance') {
           const row = mapMaintenanceToTiDBRow(mut.data);
-          const res = await fetch('/api/maintenances', {
+          const res = await fetch('/api/maintenance', {
             method: 'POST',
             headers,
             credentials: 'include',

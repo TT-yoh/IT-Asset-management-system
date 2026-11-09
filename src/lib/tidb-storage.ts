@@ -594,7 +594,7 @@ export async function persistMaintenance(mnt: MaintenanceRecord, allMaintenances
 
   try {
     const row = mapMaintenanceToTiDBRow(mnt);
-    const res = await fetch('/api/maintenances', {
+    const res = await fetch('/api/maintenance', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',

@@ -12,6 +12,7 @@ export interface AuthContextPayload {
   role: UserRole;
   branchId: string;
   branchName: string;
+  isSuperAdmin: boolean;
 }
 
 export type PermissionAction =
