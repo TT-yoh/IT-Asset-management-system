@@ -516,8 +516,22 @@ assetRouter.delete('/:id', requirePermission('assets:delete'), async (req: Reque
   const assetName = existing[0]!.name || assetId;
 
   try {
+    const historyCheck = await query<any>(
+      'SELECT (SELECT COUNT(*) FROM `checkouts` WHERE `asset_id` = ?) + (SELECT COUNT(*) FROM `maintenances` WHERE `asset_id` = ?) AS cnt;',
+      [assetId, assetId]
+    );
+    const hasLinkedRecords = (historyCheck[0]?.cnt || 0) > 0;
+
     await withTransaction(async (tx) => {
-      await tx('DELETE FROM `assets` WHERE `id` = ? AND `org_id` = ?;', [assetId, orgId]);
+      if (hasLinkedRecords) {
+        // Soft delete / write-off: preserve custody audit history per ON DELETE RESTRICT constraints
+        await tx(
+          'UPDATE `assets` SET `status` = "DISPOSED", `assigned_to_user_id` = NULL, `assigned_to_user_name` = NULL, `version` = `version` + 1 WHERE `id` = ? AND `org_id` = ?;',
+          [assetId, orgId]
+        );
+      } else {
+        await tx('DELETE FROM `assets` WHERE `id` = ? AND `org_id` = ?;', [assetId, orgId]);
+      }
 
       await recordAuditEvent(tx, {
         orgId,
@@ -528,12 +542,12 @@ assetRouter.delete('/:id', requirePermission('assets:delete'), async (req: Reque
         entityType: 'Asset',
         entityId: assetId,
         entityName: assetName,
-        changes: { deletedAssetId: assetId, status: 'DISPOSED' },
+        changes: { deletedAssetId: assetId, status: 'DISPOSED', preservedCustodyHistory: hasLinkedRecords },
         ipAddress
       });
     });
 
-    res.json({ success: true, message: 'Asset deleted or written off.' });
+    res.json({ success: true, message: hasLinkedRecords ? 'Asset written off and archived to preserve custody audit history.' : 'Asset deleted successfully.' });
   } catch (err: any) {
     res.status(500).json({ error: `Asset deletion transaction failed: ${err.message}` });
   }

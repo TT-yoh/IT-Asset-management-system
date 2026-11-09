@@ -45,6 +45,10 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 2FA Challenge State
+  const [challengeToken, setChallengeToken] = useState<string | null>(null);
+  const [totpCode, setTotpCode] = useState('');
+
   // Option A: Invite Activation Form State
   const [activationTokenInput, setActivationTokenInput] = useState('');
   const [activationPassword, setActivationPassword] = useState('');
@@ -185,6 +189,54 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (challengeToken) {
+      if (!totpCode.trim()) {
+        setError('Please enter your 6-digit authenticator code or recovery code.');
+        return;
+      }
+      setIsLoading(true);
+      setError(null);
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            challengeToken,
+            totpCode: totpCode.trim().length === 6 ? totpCode.trim() : undefined,
+            recoveryCode: totpCode.trim().length !== 6 ? totpCode.trim() : undefined
+          })
+        });
+        const data = await res.json().catch(() => null);
+        setIsLoading(false);
+        if (res.ok && data?.user) {
+          const userOrg = organizations.find(o => o.id === data.user.org_id || o.id === data.user.orgId) || organizations[0]!;
+          const mappedUser: User = {
+            id: data.user.id,
+            orgId: data.user.org_id || data.user.orgId,
+            email: data.user.email,
+            fullName: data.user.full_name || data.user.fullName,
+            role: data.user.role,
+            status: data.user.status || 'ACTIVE',
+            departmentId: data.user.department_id || data.user.departmentId,
+            departmentName: data.user.department_name || data.user.departmentName,
+            branchId: data.user.branch_id || data.user.branchId,
+            branchName: data.user.branch_name || data.user.branchName,
+            twoFactorEnabled: Boolean(data.user.two_factor_enabled || data.user.twoFactorEnabled),
+            avatar: data.user.avatar
+          };
+          onLoginSuccess(mappedUser, userOrg);
+          return;
+        }
+        setError(data?.error || 'Invalid two-factor authentication code.');
+        return;
+      } catch (err: any) {
+        setIsLoading(false);
+        setError('Failed to complete 2FA verification. Please check connection.');
+        return;
+      }
+    }
+
     if (!email || !password) return;
 
     setIsLoading(true);
@@ -198,6 +250,13 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
         body: JSON.stringify({ email: email.trim(), password })
       });
       const data = await res.json().catch(() => null);
+
+      if (res.ok && data?.requires2FA) {
+        setIsLoading(false);
+        setChallengeToken(data.challengeToken || 'pending');
+        setError(null);
+        return;
+      }
 
       if (res.ok && data?.user) {
         setIsLoading(false);
@@ -218,47 +277,14 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
         };
         onLoginSuccess(mappedUser, userOrg);
         return;
-      } else if (res.status === 401 || res.status === 429) {
-        setIsLoading(false);
-        setError(data?.error || 'Invalid credentials or account locked.');
-        return;
       }
-    } catch {
-      // Server not reachable (offline / air-gapped dev environment fallback)
-    }
 
-    setTimeout(() => {
       setIsLoading(false);
-      
-      const normalizedInput = email.trim().toLowerCase();
-
-      // Look up user across company tenants strictly by matching corporate email / identity
-      const targetUser = users.find(
-        u => u.email.toLowerCase() === normalizedInput || 
-             u.email.toLowerCase().split('@')[0] === normalizedInput
-      );
-      
-      if (!targetUser) {
-        setError(`No corporate account found matching "${email}". Please verify your work email address.`);
-        return;
-      }
-
-      if (targetUser.status === 'INVITED') {
-        setError(`Your account has been invited but not yet activated. Please click "Activate with Invite Token" below.`);
-        return;
-      }
-
-      // Automatically determine user's isolated company tenant
-      const userOrg = organizations.find(o => o.id === targetUser.orgId) || organizations[0]!;
-
-      if (targetUser.password && password !== targetUser.password) {
-        setError(`Invalid credentials for ${targetUser.fullName}. Please check your password.`);
-        return;
-      }
-
-      // Log in directly into their dedicated company workspace
-      onLoginSuccess(targetUser, userOrg);
-    }, 400);
+      setError(data?.error || 'Invalid credentials or account locked.');
+    } catch {
+      setIsLoading(false);
+      setError('Unable to connect to authorization server. Please verify connection.');
+    }
   };
 
   const handleActivateSubmit = async (e: React.FormEvent) => {
@@ -292,15 +318,14 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
           return;
         }
       } else {
-        // Direct API activation fallback
+        // Direct API activation
         const res = await fetch('/api/auth/activate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({
             inviteToken: activationTokenInput.trim(),
-            newPassword: activationPassword,
-            twoFactorEnabled: twoFactorActivation
+            newPassword: activationPassword
           })
         });
         const data = await res.json().catch(() => null);
@@ -312,7 +337,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
         const updatedUser: User = data?.user || {
           ...matchedInvitedUser,
           status: 'ACTIVE',
-          twoFactorEnabled: twoFactorActivation
+          twoFactorEnabled: false
         };
         const org = data?.organization || matchedInvitedOrg || organizations[0]!;
         onLoginSuccess(updatedUser, org);
@@ -388,82 +413,151 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
           {/* VIEW 1: ENTERPRISE SIGN-IN */}
           {authMode === 'SIGNIN' && (
             <div className="animate-in fade-in duration-150">
-              <div className="mb-6 flex items-center justify-between">
+              {challengeToken ? (
                 <div>
-                  <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                    <span>Corporate Sign-In</span>
-                  </h2>
-                  <p className="text-[11px] text-slate-400 mt-0.5">Enter your work email to access your company workspace.</p>
-                </div>
-                <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                  <Building className="w-4 h-4" />
-                </div>
-              </div>
-
-              <form onSubmit={handleLoginSubmit} className="space-y-4">
-                {/* Work Email */}
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Work Email Address
-                  </label>
-                  <div className="relative">
-                    <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type="text"
-                      autoFocus
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="e.g. user@company.com"
-                      required
-                      className="w-full bg-slate-950/80 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition font-medium"
-                    />
+                  <div className="mb-6 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                        <span>Two-Factor Authentication</span>
+                      </h2>
+                      <p className="text-[11px] text-slate-400 mt-0.5">Enter your 6-digit authenticator code or backup recovery code.</p>
+                    </div>
+                    <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                      <KeyRound className="w-4 h-4" />
+                    </div>
                   </div>
-                </div>
 
-                {/* Password */}
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Password
-                  </label>
-                  <div className="relative">
-                    <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••••••"
-                      required
-                      className="w-full bg-slate-950/80 border border-slate-800 rounded-xl pl-10 pr-10 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition font-mono"
-                    />
+                  <form onSubmit={handleLoginSubmit} className="space-y-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                        Authenticator Code or Recovery Code
+                      </label>
+                      <div className="relative">
+                        <KeyRound className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="text"
+                          autoFocus
+                          value={totpCode}
+                          onChange={(e) => setTotpCode(e.target.value)}
+                          placeholder="e.g. 123456 or recovery code"
+                          required
+                          className="w-full bg-slate-950/80 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition font-mono tracking-wider text-center"
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="w-full bg-gradient-to-r from-emerald-500 to-indigo-600 hover:from-emerald-400 hover:to-indigo-500 disabled:opacity-50 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-emerald-500/20 transition flex items-center justify-center gap-2 mt-5 text-xs uppercase tracking-wider cursor-pointer"
+                    >
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Verifying Code...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Verify & Enter Workspace</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </>
+                      )}
+                    </button>
+
                     <button
                       type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
+                      onClick={() => {
+                        setChallengeToken(null);
+                        setTotpCode('');
+                        setError(null);
+                      }}
+                      className="w-full text-center text-xs text-slate-400 hover:text-white pt-2 cursor-pointer transition"
                     >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      ← Back to Email & Password
                     </button>
-                  </div>
+                  </form>
                 </div>
+              ) : (
+                <div>
+                  <div className="mb-6 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                        <span>Corporate Sign-In</span>
+                      </h2>
+                      <p className="text-[11px] text-slate-400 mt-0.5">Enter your work email to access your company workspace.</p>
+                    </div>
+                    <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                      <Building className="w-4 h-4" />
+                    </div>
+                  </div>
 
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="w-full bg-gradient-to-r from-emerald-500 to-indigo-600 hover:from-emerald-400 hover:to-indigo-500 disabled:opacity-50 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-emerald-500/20 transition flex items-center justify-center gap-2 mt-5 text-xs uppercase tracking-wider cursor-pointer"
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Verifying Credentials...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Sign In to Workspace</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </>
-                  )}
-                </button>
-              </form>
+                  <form onSubmit={handleLoginSubmit} className="space-y-4">
+                    {/* Work Email */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                        Work Email Address
+                      </label>
+                      <div className="relative">
+                        <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="text"
+                          autoFocus
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          placeholder="e.g. user@company.com"
+                          required
+                          className="w-full bg-slate-950/80 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition font-medium"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Password */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                        Password
+                      </label>
+                      <div className="relative">
+                        <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type={showPassword ? 'text' : 'password'}
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          placeholder="••••••••••••"
+                          required
+                          className="w-full bg-slate-950/80 border border-slate-800 rounded-xl pl-10 pr-10 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
+                        >
+                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="w-full bg-gradient-to-r from-emerald-500 to-indigo-600 hover:from-emerald-400 hover:to-indigo-500 disabled:opacity-50 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-emerald-500/20 transition flex items-center justify-center gap-2 mt-5 text-xs uppercase tracking-wider cursor-pointer"
+                    >
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Verifying Credentials...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Sign In to Workspace</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </>
+                      )}
+                    </button>
+                  </form>
+                </div>
+              )}
 
               {/* Enterprise Security Notice */}
               <div className="mt-6 pt-4 border-t border-slate-800/80 text-center">
@@ -538,7 +632,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
                       type={showActivationPassword ? 'text' : 'password'}
                       value={activationPassword}
                       onChange={(e) => setActivationPassword(e.target.value)}
-                      placeholder="Minimum 6 characters"
+                      placeholder="Minimum 12 characters"
                       required
                       className="w-full bg-slate-950/80 border border-slate-800 rounded-xl pl-10 pr-10 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 font-mono"
                     />
@@ -566,17 +660,10 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
                   />
                 </div>
 
-                <div className="flex items-center gap-2 pt-1">
-                  <input
-                    type="checkbox"
-                    id="activation-2fa"
-                    checked={twoFactorActivation}
-                    onChange={(e) => setTwoFactorActivation(e.target.checked)}
-                    className="rounded border-slate-800 bg-slate-950 text-emerald-500 focus:ring-emerald-500"
-                  />
-                  <label htmlFor="activation-2fa" className="text-xs text-slate-300 cursor-pointer select-none">
-                    Enable Two-Factor Authentication (2FA)
-                  </label>
+                <div className="pt-1">
+                  <p className="text-[11px] text-slate-400">
+                    🛡️ Multi-factor authentication (2FA) can be configured securely in your account settings after activation.
+                  </p>
                 </div>
 
                 <button

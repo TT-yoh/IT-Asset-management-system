@@ -2,7 +2,8 @@ import 'express-async-errors';
 import express, { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import config from './config';
-import { cookieParserMiddleware, authenticate } from './middleware';
+import { cookieParserMiddleware, csrfProtection, authenticate } from './middleware';
+import rateLimit from 'express-rate-limit';
 import { idempotencyMiddleware } from './middleware/idempotency';
 import { authRouter } from './routes/authRoutes';
 import { assetRouter } from './routes/assetRoutes';
@@ -53,7 +54,22 @@ app.use((req: Request, res: Response, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParserMiddleware);
+app.use(csrfProtection);
 app.use(idempotencyMiddleware);
+
+// Rate limiter for authentication endpoints (per IP)
+const authRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: config.isTest ? 5000 : 30, // 30 attempts per 15 minutes in dev/prod
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests from this IP. Please try again later.' }
+});
+
+app.use('/api/auth', authRateLimiter);
+if (config.ALLOW_ROOT_ROUTES) {
+  app.use('/auth', authRateLimiter);
+}
 
 // Health check endpoint (both /api/health and optional /health)
 app.get(config.ALLOW_ROOT_ROUTES ? ['/api/health', '/health'] : ['/api/health'], async (_req: Request, res: Response) => {
@@ -120,7 +136,7 @@ app.get(config.ALLOW_ROOT_ROUTES ? ['/api/init', '/init'] : ['/api/init'], authe
       query('SELECT m.* FROM `maintenances` m INNER JOIN `assets` a ON m.asset_id = a.id WHERE a.org_id = ? ORDER BY m.created_at DESC;', [effectiveOrgId]),
       query('SELECT * FROM `budgets` WHERE `org_id` = ?;', [effectiveOrgId]),
       query('SELECT * FROM `branches` WHERE `org_id` = ?;', [effectiveOrgId]),
-      query('SELECT `id`, `org_id`, `email`, `full_name`, `role`, `department_id`, `department_name`, `branch_id`, `branch_name`, `two_factor_enabled`, `avatar`, `status`, `invite_token`, `invited_at` FROM `users` WHERE `org_id` = ?;', [effectiveOrgId]),
+      query('SELECT `id`, `org_id`, `email`, `full_name`, `role`, `department_id`, `department_name`, `branch_id`, `branch_name`, `two_factor_enabled`, `avatar`, `status`, `invited_at` FROM `users` WHERE `org_id` = ?;', [effectiveOrgId]),
       query('SELECT * FROM `departments` WHERE `org_id` = ? ORDER BY `name` ASC;', [effectiveOrgId]),
       query('SELECT * FROM `organizations` ORDER BY `name` ASC;')
     ]);
@@ -130,7 +146,6 @@ app.get(config.ALLOW_ROOT_ROUTES ? ['/api/init', '/init'] : ['/api/init'], authe
       auditLogs = await query('SELECT * FROM `audit_logs` WHERE `org_id` = ? ORDER BY `timestamp` DESC LIMIT 200;', [effectiveOrgId]);
     }
 
-    const isAdminOrDirector = role === 'ADMIN' || role === 'DIRECTOR';
     const sanitizedUsers = rawUsers.map((u: any) => ({
       id: u.id,
       orgId: u.org_id,
@@ -144,7 +159,6 @@ app.get(config.ALLOW_ROOT_ROUTES ? ['/api/init', '/init'] : ['/api/init'], authe
       twoFactorEnabled: Boolean(u.two_factor_enabled),
       avatar: u.avatar || '',
       status: u.status || 'ACTIVE',
-      inviteToken: isAdminOrDirector ? u.invite_token || undefined : undefined,
       invitedAt: u.invited_at || undefined
     }));
 

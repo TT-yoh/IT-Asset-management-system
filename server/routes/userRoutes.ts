@@ -1,8 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../db';
-import { authenticate, requirePermission } from '../middleware';
-import { generateSecureToken } from '../auth';
+import { authenticate, requirePermission, invalidateUserCache } from '../middleware';
+import { generateSecureToken, hashToken } from '../auth';
 import { recordAuditEvent } from '../audit';
+import { sendInviteEmail } from '../mailer';
 
 export const userRouter = Router();
 userRouter.use(authenticate);
@@ -17,7 +18,7 @@ userRouter.get('/', requirePermission('users:read'), async (req: Request, res: R
   let sql = `
     SELECT \`id\`, \`org_id\`, \`email\`, \`full_name\`, \`role\`, \`department_id\`,
            \`department_name\`, \`branch_id\`, \`branch_name\`, \`two_factor_enabled\`,
-           \`avatar\`, \`status\`, \`invite_token\`, \`invited_at\`, \`created_at\`
+           \`avatar\`, \`status\`, \`invited_at\`, \`created_at\`
     FROM \`users\`
     WHERE \`org_id\` = ?
   `;
@@ -33,7 +34,6 @@ userRouter.get('/', requirePermission('users:read'), async (req: Request, res: R
 
   const rows = await query<any>(sql, params);
 
-  const isAdminOrDirector = req.auth?.role === 'ADMIN' || req.auth?.role === 'DIRECTOR';
   const sanitized = rows.map(u => ({
     id: u.id,
     orgId: u.org_id,
@@ -47,7 +47,6 @@ userRouter.get('/', requirePermission('users:read'), async (req: Request, res: R
     twoFactorEnabled: Boolean(u.two_factor_enabled),
     avatar: u.avatar || '',
     status: u.status || 'ACTIVE',
-    inviteToken: isAdminOrDirector ? u.invite_token || undefined : undefined,
     invitedAt: u.invited_at || undefined
   }));
 
@@ -95,12 +94,15 @@ userRouter.post('/invite', requirePermission('users:invite'), async (req: Reques
     if (existingUser.status === 'INVITED') {
       // Re-issue a fresh invite token for this pending user!
       const freshToken = generateSecureToken('inv');
+      const freshTokenHash = hashToken(freshToken);
       const freshInvitedAt = new Date().toISOString();
+      const freshExpiresAt = new Date(Date.now() + 48 * 3600 * 1000).toISOString().slice(0, 19).replace('T', ' ');
       await query(
-        'UPDATE `users` SET `invite_token` = ?, `invited_at` = ?, `full_name` = ?, `role` = ?, `department_id` = ?, `department_name` = ?, `branch_id` = ?, `branch_name` = ? WHERE `id` = ?;',
+        'UPDATE `users` SET `invite_token_hash` = ?, `invited_at` = ?, `invite_expires_at` = ?, `full_name` = ?, `role` = ?, `department_id` = ?, `department_name` = ?, `branch_id` = ?, `branch_name` = ? WHERE `id` = ?;',
         [
-          freshToken,
+          freshTokenHash,
           freshInvitedAt,
+          freshExpiresAt,
           data.fullName.trim(),
           data.role || 'USER',
           departmentId,
@@ -110,6 +112,7 @@ userRouter.post('/invite', requirePermission('users:invite'), async (req: Reques
           existingUser.id
         ]
       );
+      await sendInviteEmail(cleanEmail, freshToken);
       res.status(200).json({
         success: true,
         userId: existingUser.id,
@@ -126,15 +129,17 @@ userRouter.post('/invite', requirePermission('users:invite'), async (req: Reques
 
   const userId = data.id || `usr-${Date.now()}`;
   const inviteToken = generateSecureToken('inv');
+  const inviteTokenHash = hashToken(inviteToken);
   const invitedAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 48 * 3600 * 1000).toISOString().slice(0, 19).replace('T', ' ');
 
   try {
     await withTransaction(async (tx) => {
       await tx(`
         INSERT INTO \`users\` (
           \`id\`, \`org_id\`, \`email\`, \`full_name\`, \`role\`, \`department_id\`,
-          \`department_name\`, \`branch_id\`, \`branch_name\`, \`status\`, \`invite_token\`, \`invited_at\`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'INVITED', ?, ?);
+          \`department_name\`, \`branch_id\`, \`branch_name\`, \`status\`, \`invite_token_hash\`, \`invited_at\`, \`invite_expires_at\`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'INVITED', ?, ?, ?);
       `, [
         userId,
         orgId, // Derived strictly from session!
@@ -145,8 +150,9 @@ userRouter.post('/invite', requirePermission('users:invite'), async (req: Reques
         departmentName,
         branchId,
         branchName,
-        inviteToken,
-        invitedAt
+        inviteTokenHash,
+        invitedAt,
+        expiresAt
       ]);
 
       await recordAuditEvent(tx, {
@@ -166,6 +172,8 @@ userRouter.post('/invite', requirePermission('users:invite'), async (req: Reques
         ipAddress
       });
     });
+
+    await sendInviteEmail(cleanEmail, inviteToken);
 
     res.status(201).json({
       success: true,
@@ -199,11 +207,13 @@ userRouter.post('/:id/reinvite', requirePermission('users:invite'), async (req: 
 
   const user = users[0];
   const newInviteToken = generateSecureToken('inv');
+  const tokenHash = hashToken(newInviteToken);
   const invitedAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 48 * 3600 * 1000).toISOString().slice(0, 19).replace('T', ' ');
 
   await query(
-    "UPDATE `users` SET `invite_token` = ?, `invited_at` = ?, `status` = 'INVITED' WHERE `id` = ?;",
-    [newInviteToken, invitedAt, targetId]
+    "UPDATE `users` SET `invite_token_hash` = ?, `invited_at` = ?, `invite_expires_at` = ?, `status` = 'INVITED' WHERE `id` = ?;",
+    [tokenHash, invitedAt, expiresAt, targetId]
   );
 
   await recordAuditEvent(query, {
@@ -218,6 +228,8 @@ userRouter.post('/:id/reinvite', requirePermission('users:invite'), async (req: 
     changes: { email: user.email, action: 'RE_INVITE' },
     ipAddress
   });
+
+  await sendInviteEmail(user.email, newInviteToken);
 
   res.json({
     success: true,
@@ -288,12 +300,15 @@ userRouter.put('/:id', requirePermission('users:update'), async (req: Request, r
     targetBranchName = branchRows[0].name;
   }
 
+  const shouldBumpToken = targetRole !== existing.role || targetBranchId !== existing.branch_id || targetStatus !== existing.status;
+
   try {
     await withTransaction(async (tx) => {
       await tx(`
         UPDATE \`users\` SET
           \`full_name\` = ?, \`role\` = ?, \`status\` = ?, \`department_id\` = ?, \`department_name\` = ?,
-          \`branch_id\` = ?, \`branch_name\` = ?, \`version\` = \`version\` + 1
+          \`branch_id\` = ?, \`branch_name\` = ?, \`version\` = \`version\` + 1,
+          \`token_version\` = \`token_version\` + ${shouldBumpToken ? 1 : 0}
         WHERE \`id\` = ? AND \`org_id\` = ?;
       `, [
         data.fullName || existing.full_name,
@@ -326,6 +341,8 @@ userRouter.put('/:id', requirePermission('users:update'), async (req: Request, r
         ipAddress
       });
     });
+
+    invalidateUserCache(targetUserId);
 
     res.json({ success: true, message: 'User updated successfully.' });
   } catch (err: any) {
@@ -380,6 +397,8 @@ userRouter.delete('/:id', requirePermission('users:delete'), async (req: Request
         ipAddress
       });
     });
+
+    invalidateUserCache(targetUserId);
 
     res.json({ success: true, message: 'User account permanently removed.' });
   } catch (err: any) {

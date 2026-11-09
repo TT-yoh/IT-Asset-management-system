@@ -149,8 +149,8 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
       return;
     }
 
-    if (newPassword.length < 8) {
-      setPwErrorMsg('New password must be at least 8 characters long.');
+    if (newPassword.length < 12) {
+      setPwErrorMsg('New password must be at least 12 characters long.');
       return;
     }
 
@@ -534,9 +534,9 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                   {/* Password Requirements Checklist */}
                   <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 text-[10px] space-y-1">
                     <div className="font-semibold text-slate-400">Password Requirements:</div>
-                    <div className={`flex items-center gap-1.5 ${newPassword.length >= 8 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                    <div className={`flex items-center gap-1.5 ${newPassword.length >= 12 ? 'text-emerald-400' : 'text-slate-500'}`}>
                       <CheckCircle2 className="w-3 h-3" />
-                      <span>At least 8 characters in length</span>
+                      <span>At least 12 characters in length</span>
                     </div>
                     <div className={`flex items-center gap-1.5 ${/[a-zA-Z]/.test(newPassword) && /[0-9]/.test(newPassword) ? 'text-emerald-400' : 'text-slate-500'}`}>
                       <CheckCircle2 className="w-3 h-3" />
@@ -606,7 +606,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                 <div className="text-xs font-bold text-white">Session & Compliance Specs</div>
                 <div className="grid grid-cols-2 gap-2 text-[11px] font-mono text-slate-400">
                   <div>Session Storage: <span className="text-emerald-400">HTTP-Only Signed Cookie</span></div>
-                  <div>Idle Timeout: <span className="text-slate-300">2 Hours</span></div>
+                  <div>Idle Timeout: <span className="text-slate-300">60 Minutes (Sliding)</span></div>
                   <div>Database Encryption: <span className="text-emerald-400">TLS 1.3 / bcrypt-12</span></div>
                   <div>Access Governance: <span className="text-slate-300">Role-Based Access Control</span></div>
                 </div>

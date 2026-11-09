@@ -25,8 +25,8 @@ export const validatePasswordPolicy = (pwd: string): { valid: boolean; message: 
   if (!pwd || typeof pwd !== 'string') {
     return { valid: false, message: 'Password is required.' };
   }
-  if (pwd.length < 8) {
-    return { valid: false, message: 'Password must be at least 8 characters long.' };
+  if (pwd.length < 12) {
+    return { valid: false, message: 'Password must be at least 12 characters long.' };
   }
   if (!/[a-zA-Z]/.test(pwd) || !/[0-9]/.test(pwd)) {
     return { valid: false, message: 'Password must contain at least one letter and one number.' };
@@ -376,9 +376,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           inviteToken: cleanToken,
           invite_token: cleanToken,
           newPassword,
-          password: newPassword,
-          twoFactorEnabled,
-          two_factor_enabled: twoFactorEnabled
+          password: newPassword
         })
       });
 

@@ -305,3 +305,4 @@ Cryptographic registry of applied versioned migration files.
 - **Check Status**: `npm run db:status`
 - **Dry Run**: `npm run db:dry-run`
 - **Apply Migrations**: `npm run db:migrate`
+

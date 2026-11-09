@@ -39,12 +39,19 @@ async function run() {
 
   const adminHeaders = (extra: Record<string, string> = {}) => ({
     'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
     ...(adminCookie ? { Cookie: adminCookie } : {}),
     ...extra
   });
 
   // 1. Login as Admin
   console.log('1. Authenticating as Admin...');
+  await query('DELETE FROM users WHERE email = ? OR id = ?;', [testAdminEmail, 'usr-test-invite-admin']);
+  await query(`
+    INSERT INTO branches (id, org_id, name, code, location, city, country, manager_name)
+    VALUES ('branch-main', 'org-omnitech', 'Global Headquarters', 'HQ', '100 Main St', 'New York', 'USA', 'HQ Manager')
+    ON DUPLICATE KEY UPDATE name = VALUES(name);
+  `);
   const hash = await hashPassword(testAdminPassword);
   await query(`
     INSERT INTO users (id, org_id, email, password_hash, full_name, role, status, branch_id, branch_name)
@@ -90,7 +97,8 @@ async function run() {
       email: inviteEmail,
       role: 'USER',
       departmentName: 'Engineering',
-      branchName: 'Harare HQ'
+      branchId: 'branch-main',
+      branchName: 'Global Headquarters'
     })
   });
 
@@ -107,15 +115,17 @@ async function run() {
   const testUserId = inviteData.userId;
   console.log(`   User invited! Token: ${firstToken}, User ID: ${testUserId}`);
 
-  // 3. Verify GET /api/users returns the inviteToken to Admin
-  console.log('3. Verifying GET /api/users includes inviteToken for admin copy link...');
+  // 3. Verify GET /api/users does NOT leak the inviteToken (Phase 4.10 zero-leakage)
+  console.log('3. Verifying GET /api/users does NOT leak inviteToken (zero-leakage)...');
   const usersRes = await fetch(`${BASE_URL}/api/users`, { headers: adminHeaders() });
   const usersData = await usersRes.json();
   const invitedInList = usersData.users.find((u: any) => u.email === inviteEmail);
   if (!invitedInList) throw new Error('Invited user not found in GET /api/users');
   if (invitedInList.status !== 'INVITED') throw new Error(`Expected status INVITED, got ${invitedInList.status}`);
-  if (invitedInList.inviteToken !== firstToken) throw new Error('inviteToken missing or mismatch in GET /api/users');
-  console.log('   GET /api/users correctly contains inviteToken!');
+  if (invitedInList.inviteToken !== undefined || invitedInList.invite_token !== undefined) {
+    throw new Error('inviteToken must NOT be leaked in GET /api/users (Phase 4.10 violation)');
+  }
+  console.log('   GET /api/users correctly omits inviteToken (zero-leakage verified)!');
 
   // 4. Test Public GET /api/auth/invite/:token (NO COOKIES / UNKNOWN CLIENT)
   console.log('4. Testing public GET /api/auth/invite/:token (Unauthenticated client)...');

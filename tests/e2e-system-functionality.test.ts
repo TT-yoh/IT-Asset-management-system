@@ -43,6 +43,7 @@ let testUserId = '';
 function headers(extra: Record<string, string> = {}) {
   const h: Record<string, string> = {
     'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
     ...extra
   };
   if (sessionCookie) {
@@ -62,9 +63,9 @@ test('1. Health Check Endpoint (/api/health)', async () => {
 // 2. Administrator Login
 test('2. Administrator Login', async () => {
   await query('DELETE FROM `audit_logs` WHERE `org_id` = ?;', [testOrgId]);
-  await query('DELETE FROM `checkouts` WHERE `org_id` = ?;', [testOrgId]);
-  await query('DELETE FROM `maintenances` WHERE `org_id` = ?;', [testOrgId]);
-  await query('DELETE FROM `assets` WHERE `org_id` = ?;', [testOrgId]);
+  await query('DELETE FROM `checkouts` WHERE `org_id` = ? OR `id` LIKE "e2e-%" OR `asset_id` LIKE "e2e-%";', [testOrgId]);
+  await query('DELETE FROM `maintenances` WHERE `org_id` = ? OR `id` LIKE "e2e-%" OR `asset_id` LIKE "e2e-%";', [testOrgId]);
+  await query('DELETE FROM `assets` WHERE `org_id` = ? OR `id` LIKE "e2e-%";', [testOrgId]);
   await query('DELETE FROM `users` WHERE `org_id` = ? OR `email` = ?;', [testOrgId, testAdminEmail]);
   await query('DELETE FROM `branches` WHERE `org_id` = ?;', [testOrgId]);
   await query('DELETE FROM `budgets` WHERE `org_id` = ?;', [testOrgId]);

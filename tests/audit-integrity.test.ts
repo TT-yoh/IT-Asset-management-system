@@ -59,6 +59,7 @@ async function apiRequest(
 async function cleanAuditTestData() {
   await query('DELETE FROM `audit_logs` WHERE `org_id` = ?;', ['test-audit-org']);
   await query('DELETE FROM `assets` WHERE `org_id` = ?;', ['test-audit-org']);
+  await query('DELETE FROM `users` WHERE `org_id` = ?;', ['test-audit-org']);
   await query('DELETE FROM `branches` WHERE `org_id` = ?;', ['test-audit-org']);
   await query('DELETE FROM `organizations` WHERE `id` = ?;', ['test-audit-org']);
 }
@@ -74,6 +75,11 @@ async function setupAuditTestData() {
   await query(`
     INSERT INTO \`branches\` (\`id\`, \`org_id\`, \`name\`, \`code\`, \`location\`, \`city\`, \`country\`, \`manager_name\`)
     VALUES ('test-audit-br', 'test-audit-org', 'Main Lab', 'LAB-1', 'Central Lab', 'Sydney', 'Australia', 'Lab Manager');
+  `);
+
+  await query(`
+    INSERT INTO \`users\` (\`id\`, \`org_id\`, \`branch_id\`, \`email\`, \`full_name\`, \`role\`, \`status\`, \`token_version\`)
+    VALUES ('test-admin-audit', 'test-audit-org', 'test-audit-br', 'admin@audittest.com', 'Audit Admin', 'ADMIN', 'ACTIVE', 1);
   `);
 
   await query(`

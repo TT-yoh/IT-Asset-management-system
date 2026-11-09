@@ -33,6 +33,7 @@ let testBranchId = '';
 function headers(extra: Record<string, string> = {}) {
   const h: Record<string, string> = {
     'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
     ...extra
   };
   if (sessionCookie) {

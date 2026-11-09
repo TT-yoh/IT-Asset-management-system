@@ -1,14 +1,14 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import config from './config';
-import { AuthContextPayload } from './permissions';
+import { query } from './db';
 
-const BCRYPT_ROUNDS = 12;
-const SESSION_TTL_SECONDS = 2 * 60 * 60; // 2 hours
-const MAX_FAILED_ATTEMPTS = 5;
-const LOCKOUT_MINUTES = 15;
+export const BCRYPT_ROUNDS = 12;
+export const SESSION_TTL_SECONDS = 60 * 60; // 60 minutes
+export const MAX_FAILED_ATTEMPTS = 5;
 
-const SESSION_SECRET = config.SESSION_SECRET;
+// Precomputed cost-12 bcrypt hash used for timing equalization on non-existent users
+export const DUMMY_BCRYPT_HASH = '$2a$12$e8nz14/o1a3L4oXz1u2uXe1p9YqI0n/fMqvZ.eA3Y9Qj0JqK0e2Oe';
 
 /**
  * Hash a password using bcrypt with cost 12
@@ -24,75 +24,169 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
   return bcrypt.compare(plain, hash);
 }
 
-/**
- * Create a cryptographically signed session token
- */
-export function createSessionToken(payload: AuthContextPayload): string {
-  const issuedAt = Math.floor(Date.now() / 1000);
-  const expiresAt = issuedAt + SESSION_TTL_SECONDS;
-  const data = JSON.stringify({ ...payload, exp: expiresAt, iat: issuedAt });
-  const b64Data = Buffer.from(data).toString('base64url');
-  const signature = crypto.createHmac('sha256', SESSION_SECRET).update(b64Data).digest('base64url');
-  return `${b64Data}.${signature}`;
+// ============================================================================
+// Session Tokens: exactly two dot-separated parts (base64url payload . signature)
+// Claims: userId, ver (users.token_version), jti, iat, exp
+// ============================================================================
+
+export interface SessionClaims {
+  userId: string;
+  ver: number;
+  jti: string;
+  iat: number;
+  exp: number;
 }
 
-/**
- * Verifies a session token signature and expiration
- */
-export function verifySessionToken(token: string): (AuthContextPayload & { exp: number }) | null {
-  if (!token || !token.includes('.')) return null;
-  const [b64Data, signature] = token.split('.');
-  if (!b64Data || !signature) return null;
+export function createSessionToken(claims: { userId: string; ver: number }): string {
+  const iat = Math.floor(Date.now() / 1000);
+  const exp = iat + SESSION_TTL_SECONDS;
+  const jti = crypto.randomUUID();
 
-  const expectedSig = crypto.createHmac('sha256', SESSION_SECRET).update(b64Data).digest('base64url');
+  const payload: SessionClaims = {
+    userId: claims.userId,
+    ver: Number(claims.ver || 1),
+    jti,
+    iat,
+    exp
+  };
+
+  const b64Payload = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = crypto.createHmac('sha256', config.SESSION_SECRET).update(b64Payload).digest('base64url');
+  return `${b64Payload}.${signature}`;
+}
+
+export function verifySessionToken(token: string): SessionClaims | null {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+
+  const [b64Payload, signature] = parts;
+  if (!b64Payload || !signature) return null;
+
+  const expectedSignature = crypto.createHmac('sha256', config.SESSION_SECRET).update(b64Payload).digest('base64url');
   const sigBuf = Buffer.from(signature);
-  const expBuf = Buffer.from(expectedSig);
+  const expSigBuf = Buffer.from(expectedSignature);
 
-  if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+  if (sigBuf.length !== expSigBuf.length || !crypto.timingSafeEqual(sigBuf, expSigBuf)) {
     return null;
   }
 
   try {
-    const json = JSON.parse(Buffer.from(b64Data, 'base64url').toString('utf8'));
+    const claims = JSON.parse(Buffer.from(b64Payload, 'base64url').toString('utf8')) as SessionClaims;
+    if (!claims.userId || typeof claims.ver !== 'number' || !claims.exp) {
+      return null;
+    }
     const now = Math.floor(Date.now() / 1000);
-    if (!json.exp || json.exp < now) {
+    if (claims.exp < now) {
       return null; // Expired
     }
-    return json;
+    return claims;
   } catch {
     return null;
   }
 }
 
 // ============================================================================
-// Standard RFC 6238 TOTP (Time-Based One-Time Password) Implementation
-// Uses Node.js crypto HMAC-SHA1 and Base32 encoding
+// 2FA Pending Challenge Tokens (5-minute single-use signed tokens)
+// ============================================================================
+
+export function create2FAPendingToken(userId: string): string {
+  const iat = Math.floor(Date.now() / 1000);
+  const exp = iat + 300; // 5 minutes
+  const jti = crypto.randomUUID();
+
+  const payload = {
+    userId,
+    type: '2fa_pending',
+    jti,
+    iat,
+    exp
+  };
+
+  const b64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = crypto.createHmac('sha256', config.SESSION_SECRET).update(b64).digest('base64url');
+  return `${b64}.${sig}`;
+}
+
+export function verify2FAPendingToken(token: string): { userId: string } | null {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+
+  const [b64, sig] = parts;
+  if (!b64 || !sig) return null;
+
+  const expectedSig = crypto.createHmac('sha256', config.SESSION_SECRET).update(b64).digest('base64url');
+  const sBuf = Buffer.from(sig);
+  const expBuf = Buffer.from(expectedSig);
+  if (sBuf.length !== expBuf.length || !crypto.timingSafeEqual(sBuf, expBuf)) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(Buffer.from(b64, 'base64url').toString('utf8'));
+    if (payload.type !== '2fa_pending' || !payload.userId) return null;
+    if (payload.exp < Math.floor(Date.now() / 1000)) return null;
+    return { userId: payload.userId };
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================================
+// RFC 4648 Base32 & RFC 6238 TOTP Implementation
+// >= 160-bit secrets (20 random bytes => 32 Base32 characters)
 // ============================================================================
 
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
-export function generateBase32Secret(length = 20): string {
-  const bytes = crypto.randomBytes(length);
-  let secret = '';
-  for (let i = 0; i < bytes.length; i++) {
-    secret += BASE32_ALPHABET[bytes[i]! % 32];
+export function encodeBase32(buffer: Buffer): string {
+  let bits = 0;
+  let value = 0;
+  let output = '';
+
+  for (let i = 0; i < buffer.length; i++) {
+    value = (value << 8) | buffer[i]!;
+    bits += 8;
+
+    while (bits >= 5) {
+      output += BASE32_ALPHABET[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
   }
-  return secret;
+
+  if (bits > 0) {
+    output += BASE32_ALPHABET[(value << (5 - bits)) & 31];
+  }
+
+  return output;
 }
 
-function base32ToBuffer(base32: string): Buffer {
+export function decodeBase32(base32: string): Buffer {
   const clean = base32.toUpperCase().replace(/=+$/, '').replace(/\s+/g, '');
-  let bits = '';
+  let bits = 0;
+  let value = 0;
+  const bytes: number[] = [];
+
   for (let i = 0; i < clean.length; i++) {
     const val = BASE32_ALPHABET.indexOf(clean[i]!);
     if (val === -1) continue;
-    bits += val.toString(2).padStart(5, '0');
+    value = (value << 5) | val;
+    bits += 5;
+
+    if (bits >= 8) {
+      bytes.push((value >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
   }
-  const bytes: number[] = [];
-  for (let i = 0; i + 8 <= bits.length; i += 8) {
-    bytes.push(parseInt(bits.substring(i, i + 8), 2));
-  }
+
   return Buffer.from(bytes);
+}
+
+export function generateBase32Secret(byteLength = 20): string {
+  // 20 bytes = 160 bits => exactly 32 Base32 characters
+  const bytes = crypto.randomBytes(Math.max(20, byteLength));
+  return encodeBase32(bytes);
 }
 
 export function generateTOTPCode(secretBase32: string, timeStepWindow = 0): string {
@@ -101,7 +195,7 @@ export function generateTOTPCode(secretBase32: string, timeStepWindow = 0): stri
   const timeBuffer = Buffer.alloc(8);
   timeBuffer.writeBigInt64BE(BigInt(timeStep));
 
-  const keyBuffer = base32ToBuffer(secretBase32);
+  const keyBuffer = decodeBase32(secretBase32);
   const hmac = crypto.createHmac('sha1', keyBuffer).update(timeBuffer).digest();
 
   // Dynamic truncation (RFC 4226)
@@ -117,66 +211,379 @@ export function generateTOTPCode(secretBase32: string, timeStepWindow = 0): stri
 }
 
 /**
- * Verifies a 6-digit TOTP code with -1, 0, +1 window tolerance
+ * Validates 6-digit TOTP code with replay protection via totp_last_step.
+ * Strictly validates /^\d{6}$/ format before Buffer creation to avoid RangeError.
  */
-export function verifyTOTPCode(secretBase32: string, userCode: string): boolean {
-  if (!secretBase32 || !userCode || userCode.trim().length !== 6) return false;
+export function verifyTOTPCode(
+  secretBase32: string,
+  userCode: string,
+  lastStep?: number | null
+): { valid: boolean; step?: number } {
+  if (!secretBase32 || typeof userCode !== 'string') return { valid: false };
   const cleanCode = userCode.trim();
+  if (!/^\d{6}$/.test(cleanCode)) {
+    return { valid: false };
+  }
+
+  const currentEpoch = Math.floor(Date.now() / 1000);
+  const baseStep = Math.floor(currentEpoch / 30);
+  const cleanBuf = Buffer.from(cleanCode, 'ascii');
 
   // Check windows: 0 (current), -1 (30s ago), +1 (30s future)
   for (const window of [0, -1, 1]) {
-    const valid = generateTOTPCode(secretBase32, window);
-    if (crypto.timingSafeEqual(Buffer.from(valid), Buffer.from(cleanCode))) {
-      return true;
+    const step = baseStep + window;
+    // Replay Protection: Reject codes whose step is <= last accepted step
+    if (lastStep !== null && lastStep !== undefined && step <= Number(lastStep)) {
+      continue;
+    }
+
+    const timeBuffer = Buffer.alloc(8);
+    timeBuffer.writeBigInt64BE(BigInt(step));
+    const keyBuffer = decodeBase32(secretBase32);
+    const hmac = crypto.createHmac('sha1', keyBuffer).update(timeBuffer).digest();
+    const offset = hmac[hmac.length - 1]! & 0x0f;
+    const binary =
+      ((hmac[offset]! & 0x7f) << 24) |
+      ((hmac[offset + 1]! & 0xff) << 16) |
+      ((hmac[offset + 2]! & 0xff) << 8) |
+      (hmac[offset + 3]! & 0xff);
+    const generated = (binary % 1000000).toString().padStart(6, '0');
+    const genBuf = Buffer.from(generated, 'ascii');
+
+    if (genBuf.length === cleanBuf.length && crypto.timingSafeEqual(genBuf, cleanBuf)) {
+      return { valid: true, step };
     }
   }
-  return false;
+
+  return { valid: false };
 }
 
-// In-memory lockout and rate limiting table
-interface LoginTracker {
-  attempts: number;
-  lockedUntil: number | null;
-}
-const loginAttempts = new Map<string, LoginTracker>();
+// ============================================================================
+// AES-256-GCM Encryption for TOTP Secrets at Rest
+// ============================================================================
 
-export function checkLockout(email: string): { isLocked: boolean; remainingMinutes?: number } {
-  const record = loginAttempts.get(email.toLowerCase());
-  if (!record || !record.lockedUntil) return { isLocked: false };
-
-  const now = Date.now();
-  if (record.lockedUntil > now) {
-    const remaining = Math.ceil((record.lockedUntil - now) / (60 * 1000));
-    return { isLocked: true, remainingMinutes: remaining };
-  } else {
-    // Lockout expired: reset
-    loginAttempts.delete(email.toLowerCase());
-    return { isLocked: false };
+export function getTotpEncryptionKey(): Buffer {
+  const rawKey = config.TOTP_ENCRYPTION_KEY;
+  if (rawKey) {
+    const trimmed = rawKey.trim();
+    if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
+      return Buffer.from(trimmed, 'hex');
+    }
+    const buf = Buffer.from(trimmed, 'utf8');
+    if (buf.length === 32) return buf;
   }
+  // Fallback in dev/test only: derive deterministic 32-byte key from SESSION_SECRET
+  return crypto.createHash('sha256').update(`${config.SESSION_SECRET}:totp-encryption-key`).digest();
 }
 
-export function recordFailedLogin(email: string): { lockedNow: boolean; attempts: number } {
-  const key = email.toLowerCase();
-  const current = loginAttempts.get(key) || { attempts: 0, lockedUntil: null };
-  current.attempts += 1;
+export function encryptTotpSecret(secret: string): string {
+  const key = getTotpEncryptionKey();
+  const iv = crypto.randomBytes(12); // Standard 96-bit IV
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
+}
 
-  if (current.attempts >= MAX_FAILED_ATTEMPTS) {
-    current.lockedUntil = Date.now() + LOCKOUT_MINUTES * 60 * 1000;
-    loginAttempts.set(key, current);
-    return { lockedNow: true, attempts: current.attempts };
+export function decryptTotpSecret(encryptedString: string): string {
+  if (!encryptedString) return '';
+  const parts = encryptedString.split(':');
+  if (parts.length !== 3) {
+    // Unencrypted legacy base32 string: return as-is
+    return encryptedString;
+  }
+  const [ivHex, tagHex, cipherHex] = parts;
+  const key = getTotpEncryptionKey();
+  const iv = Buffer.from(ivHex!, 'hex');
+  const tag = Buffer.from(tagHex!, 'hex');
+  const cipherBuffer = Buffer.from(cipherHex!, 'hex');
+
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+  const decrypted = Buffer.concat([decipher.update(cipherBuffer), decipher.final()]);
+  return decrypted.toString('utf8');
+}
+
+// ============================================================================
+// One-Time Backup Recovery Codes
+// ============================================================================
+
+export function generateRecoveryCodes(count = 8): { plainCodes: string[]; hashedCodes: string[] } {
+  const plainCodes: string[] = [];
+  const hashedCodes: string[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const code = crypto.randomBytes(5).toString('hex'); // 10 hex characters
+    plainCodes.push(code);
+    hashedCodes.push(crypto.createHash('sha256').update(code).digest('hex'));
   }
 
-  loginAttempts.set(key, current);
-  return { lockedNow: false, attempts: current.attempts };
+  return { plainCodes, hashedCodes };
 }
 
-export function recordSuccessfulLogin(email: string): void {
-  loginAttempts.delete(email.toLowerCase());
+// ============================================================================
+// Token Hashing & Safe Generation (SHA-256)
+// ============================================================================
+
+export function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token.trim()).digest('hex');
 }
 
-/**
- * Generate secure random token (for reset or invite)
- */
 export function generateSecureToken(prefix = 'tok'): string {
-  return `${prefix}_${crypto.randomBytes(24).toString('base64url')}`;
+  return `${prefix}_${crypto.randomBytes(32).toString('base64url')}`;
+}
+
+export function timingSafeTokenEqual(a: string, b: string): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+// ============================================================================
+// Corporate Password Policy Validator
+// ============================================================================
+
+const COMMON_PASSWORDS = new Set([
+  'password1234',
+  'password123!',
+  'admin1234567',
+  'admin123456!',
+  'qwerty123456',
+  'welcome12345',
+  'welcome1234!',
+  'letmein12345',
+  'omniasset123',
+  'omniasset123!'
+]);
+
+export function validatePasswordPolicy(
+  password: string,
+  user?: { email?: string; fullName?: string }
+): { valid: boolean; error?: string } {
+  if (!password || typeof password !== 'string') {
+    return { valid: false, error: 'Password is required.' };
+  }
+
+  if (password.length < 12) {
+    return { valid: false, error: 'Password must be at least 12 characters long.' };
+  }
+
+  const lower = password.toLowerCase();
+  if (COMMON_PASSWORDS.has(lower)) {
+    return { valid: false, error: 'Password is too common. Please choose a more complex passphrase.' };
+  }
+
+  if (user?.email) {
+    const emailLower = user.email.toLowerCase().trim();
+    const localPart = emailLower.split('@')[0] || '';
+    if (lower === emailLower || (localPart.length >= 3 && lower.includes(localPart))) {
+      return { valid: false, error: 'Password must not contain your email address.' };
+    }
+  }
+
+  if (user?.fullName) {
+    const nameLower = user.fullName.toLowerCase().trim();
+    const words = nameLower.split(/\s+/).filter(w => w.length >= 3);
+    for (const w of words) {
+      if (lower.includes(w)) {
+        return { valid: false, error: 'Password must not contain parts of your name.' };
+      }
+    }
+  }
+
+  return { valid: true };
+}
+
+// ============================================================================
+// Database-Backed Login Throttling & Account Lockout
+// ============================================================================
+
+export function parseDbDate(val: any): Date {
+  if (!val) return new Date(0);
+  if (val instanceof Date) return val;
+  const str = String(val).trim();
+  if (str.endsWith('Z') || /[+-]\d{2}(:\d{2})?$/.test(str)) {
+    return new Date(str);
+  }
+  return new Date(str.replace(' ', 'T') + 'Z');
+}
+
+export async function checkLockout(email: string, ip?: string): Promise<{ isLocked: boolean; remainingMinutes?: number }> {
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanIp = ip ? ip.trim() : '';
+
+  try {
+    // 1. Check (email, ip) or email-specific lockout
+    let rows = await query<any>(
+      'SELECT failures, locked_until FROM login_attempts WHERE email = ? AND ip = ? LIMIT 1;',
+      [cleanEmail, cleanIp || '0.0.0.0']
+    );
+
+    if (rows.length === 0 && !cleanIp) {
+      rows = await query<any>(
+        'SELECT failures, locked_until FROM login_attempts WHERE email = ? LIMIT 1;',
+        [cleanEmail]
+      );
+    }
+
+    if (rows.length > 0 && rows[0]?.locked_until) {
+      const lockedUntil = parseDbDate(rows[0].locked_until).getTime();
+      const now = Date.now();
+      if (lockedUntil > now) {
+        return { isLocked: true, remainingMinutes: Math.max(1, Math.ceil((lockedUntil - now) / 60000)) };
+      }
+    }
+
+    // 2. Check global IP lockout
+    if (cleanIp) {
+      const ipRows = await query<any>(
+        'SELECT failures, locked_until FROM login_attempts WHERE email = "__GLOBAL_IP__" AND ip = ? LIMIT 1;',
+        [cleanIp]
+      );
+      if (ipRows.length > 0 && ipRows[0]?.locked_until) {
+        const lockedUntil = parseDbDate(ipRows[0].locked_until).getTime();
+        const now = Date.now();
+        if (lockedUntil > now) {
+          return { isLocked: true, remainingMinutes: Math.max(1, Math.ceil((lockedUntil - now) / 60000)) };
+        }
+      }
+    }
+  } catch (err: any) {
+    console.error('[AUTH LOCKOUT CHECK ERROR]', err.message);
+  }
+
+  return { isLocked: false };
+}
+
+export async function recordFailedLogin(
+  email: string,
+  ip?: string
+): Promise<{ lockedNow: boolean; remainingMinutes?: number; attempts: number }> {
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanIp = ip ? ip.trim() : '0.0.0.0';
+
+  let maxFailures = 0;
+  let isLocked = false;
+  let remainingMinutes = 0;
+
+  try {
+    const pairRows = await query<any>(
+      'SELECT id, failures FROM login_attempts WHERE email = ? AND ip = ? LIMIT 1;',
+      [cleanEmail, cleanIp]
+    );
+    let pairFailures = 1;
+    if (pairRows.length > 0) {
+      pairFailures = (pairRows[0]!.failures || 0) + 1;
+    }
+    maxFailures = pairFailures;
+
+    let lockedUntilStr: string | null = null;
+    if (pairFailures >= 5) {
+      const lockMinutes = Math.min(60, Math.pow(2, pairFailures - 5) * 5); // 5, 10, 20, 40, 60
+      const lockTime = new Date(Date.now() + lockMinutes * 60000);
+      lockedUntilStr = lockTime.toISOString().slice(0, 19).replace('T', ' ');
+      isLocked = true;
+      remainingMinutes = lockMinutes;
+    }
+
+    if (pairRows.length > 0) {
+      await query('UPDATE login_attempts SET failures = ?, locked_until = ?, updated_at = NOW() WHERE id = ?;', [
+        pairFailures,
+        lockedUntilStr,
+        pairRows[0]!.id
+      ]);
+    } else {
+      await query('INSERT INTO login_attempts (id, email, ip, failures, locked_until) VALUES (?, ?, ?, ?, ?);', [
+        `att-${crypto.randomUUID()}`,
+        cleanEmail,
+        cleanIp,
+        pairFailures,
+        lockedUntilStr
+      ]);
+    }
+
+    // IP-wide brute-force tracking
+    if (cleanIp && cleanIp !== '0.0.0.0') {
+      const ipRows = await query<any>(
+        'SELECT id, failures FROM login_attempts WHERE email = "__GLOBAL_IP__" AND ip = ? LIMIT 1;',
+        [cleanIp]
+      );
+      let ipFailures = 1;
+      if (ipRows.length > 0) {
+        ipFailures = (ipRows[0]!.failures || 0) + 1;
+      }
+
+      let ipLockedUntilStr: string | null = null;
+      if (ipFailures >= 15) {
+        const lockMinutes = Math.min(60, Math.pow(2, ipFailures - 15) * 5);
+        ipLockedUntilStr = new Date(Date.now() + lockMinutes * 60000).toISOString().slice(0, 19).replace('T', ' ');
+        isLocked = true;
+        remainingMinutes = Math.max(remainingMinutes, lockMinutes);
+      }
+
+      if (ipRows.length > 0) {
+        await query('UPDATE login_attempts SET failures = ?, locked_until = ?, updated_at = NOW() WHERE id = ?;', [
+          ipFailures,
+          ipLockedUntilStr,
+          ipRows[0]!.id
+        ]);
+      } else {
+        await query('INSERT INTO login_attempts (id, email, ip, failures, locked_until) VALUES (?, ?, ?, ?, ?);', [
+          `att-${crypto.randomUUID()}`,
+          '__GLOBAL_IP__',
+          cleanIp,
+          ipFailures,
+          ipLockedUntilStr
+        ]);
+      }
+    }
+  } catch (err: any) {
+    console.error('[RECORD FAILED LOGIN ERROR]', err.message);
+  }
+
+  return { lockedNow: isLocked, remainingMinutes, attempts: maxFailures };
+}
+
+export async function recordSuccessfulLogin(email: string, ip?: string): Promise<void> {
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanIp = ip ? ip.trim() : '';
+
+  try {
+    await query('DELETE FROM login_attempts WHERE email = ? AND ip = ?;', [cleanEmail, cleanIp || '0.0.0.0']);
+    await query('DELETE FROM login_attempts WHERE email = ?;', [cleanEmail]);
+    if (cleanIp) {
+      await query('DELETE FROM login_attempts WHERE email = "__GLOBAL_IP__" AND ip = ?;', [cleanIp]);
+    }
+  } catch (err: any) {
+    console.error('[CLEAR LOGIN ATTEMPTS ERROR]', err.message);
+  }
+}
+
+export async function recordFailedTotpAttempt(userId: string): Promise<{ locked: boolean; remainingAttempts: number }> {
+  try {
+    const rows = await query<any>('SELECT failed_login_attempts FROM users WHERE id = ? LIMIT 1;', [userId]);
+    const current = (rows[0]?.failed_login_attempts || 0) + 1;
+
+    if (current >= 5) {
+      const lockedUntil = new Date(Date.now() + 15 * 60000).toISOString().slice(0, 19).replace('T', ' ');
+      await query('UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?;', [current, lockedUntil, userId]);
+      return { locked: true, remainingAttempts: 0 };
+    }
+
+    await query('UPDATE users SET failed_login_attempts = ? WHERE id = ?;', [current, userId]);
+    return { locked: false, remainingAttempts: 5 - current };
+  } catch (err: any) {
+    console.error('[RECORD FAILED TOTP ERROR]', err.message);
+    return { locked: false, remainingAttempts: 4 };
+  }
+}
+
+export async function clearFailedTotpAttempts(userId: string): Promise<void> {
+  try {
+    await query('UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?;', [userId]);
+  } catch (err: any) {
+    console.error('[CLEAR FAILED TOTP ERROR]', err.message);
+  }
 }

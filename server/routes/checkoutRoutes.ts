@@ -77,10 +77,10 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), async (req: Requ
 
   const insertSql = `
     INSERT INTO \`checkouts\` (
-      \`id\`, \`asset_id\`, \`asset_code\`, \`asset_name\`, \`checked_out_by\`,
+      \`id\`, \`org_id\`, \`branch_id\`, \`asset_id\`, \`asset_code\`, \`asset_name\`, \`checked_out_by\`,
       \`checked_out_to_user_id\`, \`checked_out_to_user_name\`, \`checked_out_at\`,
       \`expected_return_date\`, \`reason\`, \`status\`, \`notes\`
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, 'ACTIVE', ?);
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, 'ACTIVE', ?);
   `;
 
   try {
@@ -98,6 +98,8 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), async (req: Requ
 
       await tx(insertSql, [
         chkId,
+        orgId,
+        asset.branch_id || null,
         asset.id,
         asset.asset_code,
         asset.name,

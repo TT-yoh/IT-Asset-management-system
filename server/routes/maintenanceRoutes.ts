@@ -47,16 +47,19 @@ maintenanceRouter.post('/', requirePermission('maintenance:create'), async (req:
 
   const insertSql = `
     INSERT INTO \`maintenances\` (
-      \`id\`, \`asset_id\`, \`asset_code\`, \`asset_name\`, \`type\`, \`status\`,
+      \`id\`, \`org_id\`, \`branch_id\`, \`reported_by_user_id\`, \`asset_id\`, \`asset_code\`, \`asset_name\`, \`type\`, \`status\`,
       \`priority\`, \`description\`, \`reported_by\`, \`assigned_technician\`,
       \`start_date\`, \`expected_completion\`, \`cost\`, \`parts_replaced\`, \`notes\`
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
   `;
 
   try {
     await withTransaction(async (tx) => {
       await tx(insertSql, [
         mntId,
+        orgId,
+        asset.branch_id || null,
+        actorId,
         asset.id,
         asset.asset_code,
         asset.name,
