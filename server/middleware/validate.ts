@@ -73,3 +73,4 @@ export const userStatusEnum = z.enum(['INVITED', 'ACTIVE', 'SUSPENDED', 'DELETED
 export const assetStatusEnum = z.enum(['ACTIVE', 'DAMAGED', 'REPAIR', 'DEPRECATED', 'SOLD', 'DISPOSED']);
 export const assetConditionEnum = z.enum(['NEW', 'GOOD', 'FAIR', 'POOR']);
 export const priorityEnum = z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
+

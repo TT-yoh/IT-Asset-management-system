@@ -487,7 +487,11 @@ authRouter.get('/invite/:token', async (req: Request, res: Response) => {
 
   const user = users[0]!;
   if (user.status !== 'INVITED') {
-    res.status(409).json({ valid: false, error: 'This invitation token has already been activated. Please sign in with your password.' });
+    res.status(409).json({
+      valid: false,
+      error: 'This invitation token has already been activated. Please sign in with your password.',
+      code: 'INVITATION_ALREADY_ACTIVATED'
+    });
     return;
   }
 

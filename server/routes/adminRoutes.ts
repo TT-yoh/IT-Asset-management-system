@@ -87,3 +87,4 @@ adminRouter.get('/organizations', async (_req: Request, res: Response) => {
   );
   res.json({ organizations: orgs });
 });
+

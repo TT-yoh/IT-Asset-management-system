@@ -1,157 +1,503 @@
 import { Request, Response, NextFunction } from 'express';
-import { query } from '../db';
+import crypto from 'crypto';
+import config from '../config';
+import { query, QueryExecutor } from '../db';
 
-interface InFlightResult {
-  status: number;
-  body: any;
+export interface IdempotencyOptions {
+  ttlHours?: number; // default: 24
+  cacheStatuses?: number[]; // default: [200, 201, 202, 204]
+  storeBody?: boolean; // default: true
+  required?: boolean; // default: false (or config.IDEMPOTENCY_REQUIRED)
 }
 
-const inFlightMap = new Map<string, Promise<InFlightResult>>();
+export interface IdempotencyContext {
+  orgId: string;
+  userId: string;
+  key: string;
+  requestHash: string;
+  isCompleted: boolean;
+  complete: (tx: QueryExecutor | null, status: number, body: any, contentType?: string) => Promise<void>;
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      idempotency?: IdempotencyContext;
+    }
+  }
+}
+
+const IDEMPOTENCY_KEY_REGEX = /^[A-Za-z0-9._:-]{8,128}$/;
+const MAX_CACHED_BODY_BYTES = 256 * 1024; // 256 KB
+const LOCK_LEASE_SECONDS = 30;
+const WAIT_TIMEOUT_MS = 5000;
+const POLL_INTERVAL_MS = 200;
+
+interface InFlightEntry {
+  promise: Promise<{ status: number; contentType: string; body: any }>;
+  resolve: (res: { status: number; contentType: string; body: any }) => void;
+  reject: (err: any) => void;
+}
+
+const inFlightMap = new Map<string, InFlightEntry>();
 
 /**
- * Idempotency Middleware for API Mutations
- * Deduplicates repeated requests that carry an Idempotency-Key header.
- * If a matching request has already succeeded or completed, returns the cached
- * response immediately without re-executing business logic or creating duplicate audit entries.
- * In-flight lock deduplicates concurrent parallel bursts sharing the exact same key.
+ * Deterministic JSON stringifier to guarantee identical hashes for structurally equivalent payloads.
+ * Recursively sorts keys of objects.
  */
-export async function idempotencyMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
-  // Only apply to mutating HTTP methods
-  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
-    return next();
+export function canonicalJsonStringify(obj: any): string {
+  if (obj === null || obj === undefined) return '';
+  if (typeof obj !== 'object') return JSON.stringify(obj);
+  if (Array.isArray(obj)) {
+    return '[' + obj.map(canonicalJsonStringify).join(',') + ']';
+  }
+  const keys = Object.keys(obj).sort();
+  return '{' + keys.map(k => `${JSON.stringify(k)}:${canonicalJsonStringify(obj[k])}`).join(',') + '}';
+}
+
+/**
+ * Computes SHA-256 fingerprint from HTTP method, normalized route, and canonical body.
+ */
+export function computeRequestFingerprint(method: string, route: string, body: any): string {
+  const normMethod = method.toUpperCase();
+  const normRoute = route.split('?')[0].replace(/\/+$/, '') || '/';
+  const canonicalBody = canonicalJsonStringify(body);
+  return crypto
+    .createHash('sha256')
+    .update(`${normMethod}:${normRoute}:${canonicalBody}`)
+    .digest('hex');
+}
+
+/**
+ * Sanitizes response payload before storing in the database.
+ * Strips tokens, passwords, session credentials, and cookies.
+ */
+export function sanitizeResponseBody(body: any, storeBody: boolean): string {
+  if (!storeBody) {
+    if (body && typeof body === 'object' && body.id) {
+      return JSON.stringify({ id: body.id });
+    }
+    return '';
   }
 
-  const rawKey = req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
-  if (!rawKey || typeof rawKey !== 'string' || rawKey.trim().length === 0) {
-    return next();
-  }
-
-  const trimmedKey = rawKey.trim();
-  const orgId = req.auth?.orgId || 'public';
-  const clientId = (req.headers['x-client-id'] as string) || 'client-unknown';
-  const clientSeq = Number(req.headers['x-client-seq']) || 1;
-
-  // 1. Check in-flight concurrent requests lock
-  const existingInFlight = inFlightMap.get(trimmedKey);
-  if (existingInFlight) {
+  if (typeof body === 'string') {
     try {
-      const inFlightRes = await existingInFlight;
-      res.setHeader('X-Cache-Lookup', 'HIT-IN-FLIGHT');
-      res.setHeader('Idempotency-Key', trimmedKey);
-      res.status(inFlightRes.status).json(inFlightRes.body);
-      return;
-    } catch (err: any) {
-      console.warn('In-flight idempotency resolution error:', err.message);
+      body = JSON.parse(body);
+    } catch {
+      return body.length > MAX_CACHED_BODY_BYTES ? '' : body;
     }
   }
 
-  // Claim in-flight lock SYNCHRONOUSLY before any async await statement
-  let resolveInFlight!: (result: InFlightResult) => void;
-  const inFlightPromise = new Promise<InFlightResult>((resolve) => {
-    resolveInFlight = resolve;
-  });
-  inFlightMap.set(trimmedKey, inFlightPromise);
+  if (typeof body === 'object' && body !== null) {
+    const sanitized = JSON.parse(JSON.stringify(body));
+    const sensitiveKeys = [
+      'password',
+      'password_hash',
+      'token',
+      'sessionToken',
+      'refreshToken',
+      'secret',
+      'two_factor_secret_enc',
+      'recovery_codes',
+      'invite_token_hash',
+      'reset_token_hash',
+      'cookie',
+      'authorization'
+    ];
 
-  const cleanupInFlight = () => {
-    if (inFlightMap.get(trimmedKey) === inFlightPromise) {
-      inFlightMap.delete(trimmedKey);
-    }
-  };
-
-  res.on('finish', cleanupInFlight);
-  res.on('close', cleanupInFlight);
-
-  try {
-    // 2. Look up cached response by primary key from persistent store
-    const existing = await query<any>(
-      'SELECT `org_id`, `response_status`, `response_body` FROM `idempotency_keys` WHERE `key` = ? LIMIT 1;',
-      [trimmedKey]
-    );
-
-    if (existing && existing.length > 0) {
-      const cached = existing[0];
-      // Tenant boundary guard: if authenticated, verify matching tenant
-      if (req.auth?.orgId && cached.org_id && cached.org_id !== 'public' && cached.org_id !== req.auth.orgId) {
-        cleanupInFlight();
-        return next();
+    const stripKeys = (target: any) => {
+      if (typeof target !== 'object' || target === null) return;
+      for (const k of Object.keys(target)) {
+        if (sensitiveKeys.some(sk => k.toLowerCase().includes(sk.toLowerCase()))) {
+          delete target[k];
+        } else if (typeof target[k] === 'object') {
+          stripKeys(target[k]);
+        }
       }
+    };
+    stripKeys(sanitized);
+    const resultStr = JSON.stringify(sanitized);
+    return resultStr.length > MAX_CACHED_BODY_BYTES ? '' : resultStr;
+  }
 
-      res.setHeader('X-Cache-Lookup', 'HIT');
-      res.setHeader('Idempotency-Key', trimmedKey);
+  const str = String(body);
+  return str.length > MAX_CACHED_BODY_BYTES ? '' : str;
+}
 
-      let parsedBody: any;
+/**
+ * Opportunistically purges expired idempotency records (1% probability).
+ */
+async function opportunisticPurge(): Promise<void> {
+  if (Math.random() < 0.01) {
+    try {
+      await query('DELETE FROM `idempotency_keys_v2` WHERE `expires_at` < NOW() LIMIT 500;');
+    } catch {
+      // Non-fatal background purge
+    }
+  }
+}
+
+/**
+ * Idempotency Middleware Factory (Per-Route Opt-In).
+ *
+ * Requirements:
+ * - Runs strictly AFTER authentication, permissions, and CSRF protection.
+ * - Header: only Idempotency-Key (8-128 chars, ^[A-Za-z0-9._:-]+$).
+ * - Scoped strictly to (org_id, user_id, idem_key) from session.
+ * - Atomic claim protocol: state = 'PROCESSING' with 30s locked_until lease.
+ * - Conflict resolution: 422 on payload fingerprint mismatch, replay on COMPLETED,
+ *   poll/503 on valid lock, compare-and-swap takeover on expired lock.
+ * - Exposes req.idempotency.complete(tx, status, body) for atomic transaction commits.
+ */
+export function idempotent(options: IdempotencyOptions = {}) {
+  const ttlHours = options.ttlHours ?? 24;
+  const cacheStatuses = options.cacheStatuses ?? [200, 201, 202, 204];
+  const storeBody = options.storeBody ?? true;
+  const isRequired = options.required ?? config.IDEMPOTENCY_REQUIRED;
+
+  return async function idempotencyHandler(req: Request, res: Response, next: NextFunction): Promise<void> {
+    const rawKey = req.headers['idempotency-key'];
+
+    // 1. Missing header handling
+    if (!rawKey || typeof rawKey !== 'string' || rawKey.trim().length === 0) {
+      if (isRequired) {
+        res.status(400).json({
+          error: 'Idempotency-Key header is required for this mutation',
+          code: 'IDEMPOTENCY_REQUIRED'
+        });
+        return;
+      }
+      return next();
+    }
+
+    const trimmedKey = rawKey.trim();
+
+    // 2. Format validation (8 to 128 characters, strictly ^[A-Za-z0-9._:-]+$)
+    if (!IDEMPOTENCY_KEY_REGEX.test(trimmedKey)) {
+      res.status(400).json({
+        error: 'Invalid Idempotency-Key header format. Must be 8-128 characters matching ^[A-Za-z0-9._:-]+$',
+        code: 'INVALID_IDEMPOTENCY_KEY'
+      });
+      return;
+    }
+
+    // 3. Authentication guard (fail-closed if unauthenticated)
+    if (!req.auth || !req.auth.orgId || !req.auth.userId) {
+      res.status(401).json({
+        error: 'Authentication required for idempotent mutations',
+        code: 'UNAUTHORIZED'
+      });
+      return;
+    }
+
+    const orgId = req.auth.orgId;
+    const userId = req.auth.userId;
+    const compositeKey = `${orgId}:${userId}:${trimmedKey}`;
+    const method = req.method.toUpperCase();
+    const normalizedRoute = (req.baseUrl + req.path).split('?')[0].replace(/\/+$/, '') || '/';
+    const requestHash = computeRequestFingerprint(method, normalizedRoute, req.body);
+
+    // Opportunistic 1% cleanup in background
+    opportunisticPurge().catch(() => {});
+
+    // 4. In-process in-flight concurrent burst optimization
+    const existingInFlight = inFlightMap.get(compositeKey);
+    if (existingInFlight) {
       try {
-        parsedBody = JSON.parse(cached.response_body);
-      } catch {
-        parsedBody = cached.response_body;
+        const inFlightRes = await Promise.race([
+          existingInFlight.promise,
+          new Promise<null>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), WAIT_TIMEOUT_MS))
+        ]);
+
+        if (inFlightRes) {
+          res.setHeader('Idempotent-Replayed', 'true');
+          res.setHeader('X-Cache-Lookup', 'HIT');
+          res.setHeader('Idempotency-Key', trimmedKey);
+          if (inFlightRes.contentType) {
+            res.setHeader('Content-Type', inFlightRes.contentType);
+          }
+          res.status(inFlightRes.status).send(inFlightRes.body);
+          return;
+        }
+      } catch (err: any) {
+        // Fall through to database authoritative lookup
+      }
+    }
+
+    // Prepare in-flight promise entry for this process
+    let resolveInFlight!: (res: { status: number; contentType: string; body: any }) => void;
+    let rejectInFlight!: (err: any) => void;
+    const inFlightPromise = new Promise<{ status: number; contentType: string; body: any }>((resolve, reject) => {
+      resolveInFlight = resolve;
+      rejectInFlight = reject;
+    });
+    const inFlightEntry: InFlightEntry = { promise: inFlightPromise, resolve: resolveInFlight, reject: rejectInFlight };
+
+    // 5. Atomic Claim Protocol against Database (Fail-Closed)
+    const now = new Date();
+    const lockedUntil = new Date(now.getTime() + LOCK_LEASE_SECONDS * 1000);
+    const expiresAt = new Date(now.getTime() + ttlHours * 3600 * 1000);
+
+    const formatDbDate = (d: Date) => d.toISOString().slice(0, 19).replace('T', ' ');
+    const lockedUntilStr = formatDbDate(lockedUntil);
+    const nowStr = formatDbDate(now);
+    const expiresAtStr = formatDbDate(expiresAt);
+
+    let isClaimOwner = false;
+
+    try {
+      await query(
+        `INSERT INTO \`idempotency_keys_v2\` (
+          \`org_id\`, \`user_id\`, \`idem_key\`, \`method\`, \`route\`, \`request_hash\`,
+          \`state\`, \`locked_until\`, \`created_at\`, \`expires_at\`
+        ) VALUES (?, ?, ?, ?, ?, ?, 'PROCESSING', ?, ?, ?);`,
+        [orgId, userId, trimmedKey, method, normalizedRoute, requestHash, lockedUntilStr, nowStr, expiresAtStr]
+      );
+      isClaimOwner = true;
+      inFlightMap.set(compositeKey, inFlightEntry);
+    } catch (err: any) {
+      if (err.code === 'ER_DUP_ENTRY' || err.errno === 1062) {
+        // Key exists: evaluate duplicate / conflict / lock state
+        isClaimOwner = false;
+      } else {
+        // Fail closed on unexpected database error: mutation MUST NOT proceed
+        console.error('[IDEMPOTENCY] Claim insertion database error:', err.message);
+        res.setHeader('Retry-After', '1');
+        res.status(503).json({
+          error: 'Idempotency service temporarily unavailable',
+          code: 'IDEMPOTENCY_UNAVAILABLE'
+        });
+        return;
+      }
+    }
+
+    // 6. Handle Existing Key on ER_DUP_ENTRY
+    if (!isClaimOwner) {
+      try {
+        const rows = await query<any>(
+          'SELECT `request_hash`, `state`, `response_status`, `response_content_type`, `response_body`, `locked_until` FROM `idempotency_keys_v2` WHERE `org_id` = ? AND `user_id` = ? AND `idem_key` = ? LIMIT 1;',
+          [orgId, userId, trimmedKey]
+        );
+
+        if (rows.length === 0) {
+          // Row was deleted or rolled back by aborted previous request; fail closed with retry
+          res.setHeader('Retry-After', '1');
+          res.status(503).json({
+            error: 'Request is currently being processed',
+            code: 'IDEMPOTENCY_IN_PROGRESS'
+          });
+          return;
+        }
+
+        const existing = rows[0];
+
+        // 6.1 Fingerprint Mismatch Check (HTTP 422)
+        if (existing.request_hash !== requestHash) {
+          res.status(422).json({
+            error: 'Idempotency key reused with different request payload',
+            code: 'IDEMPOTENCY_FINGERPRINT_MISMATCH'
+          });
+          return;
+        }
+
+        // 6.2 COMPLETED State: Replay Original Response
+        if (existing.state === 'COMPLETED') {
+          res.setHeader('Idempotent-Replayed', 'true');
+          res.setHeader('X-Cache-Lookup', 'HIT');
+          res.setHeader('Idempotency-Key', trimmedKey);
+          if (existing.response_content_type) {
+            res.setHeader('Content-Type', existing.response_content_type);
+          }
+
+          let responseData = existing.response_body;
+          if (typeof responseData === 'string' && (existing.response_content_type?.includes('json') || responseData.startsWith('{') || responseData.startsWith('['))) {
+            try {
+              responseData = JSON.parse(responseData);
+            } catch {
+              // Keep raw string if parsing fails
+            }
+          }
+
+          res.status(Number(existing.response_status) || 200).send(responseData);
+          return;
+        }
+
+        // 6.3 PROCESSING State: Evaluate Lease Lock & Poll
+        const lockExpiration = new Date(existing.locked_until).getTime();
+        const currentTime = Date.now();
+
+        if (lockExpiration > currentTime) {
+          // Lock is actively held: Poll database up to WAIT_TIMEOUT_MS
+          const pollStartTime = Date.now();
+          while (Date.now() - pollStartTime < WAIT_TIMEOUT_MS) {
+            await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+            const pollRows = await query<any>(
+              'SELECT `state`, `response_status`, `response_content_type`, `response_body`, `locked_until` FROM `idempotency_keys_v2` WHERE `org_id` = ? AND `user_id` = ? AND `idem_key` = ? LIMIT 1;',
+              [orgId, userId, trimmedKey]
+            );
+
+            if (pollRows.length > 0) {
+              const currentPoll = pollRows[0];
+              if (currentPoll.state === 'COMPLETED') {
+                res.setHeader('Idempotent-Replayed', 'true');
+                res.setHeader('X-Cache-Lookup', 'HIT');
+                res.setHeader('Idempotency-Key', trimmedKey);
+                if (currentPoll.response_content_type) {
+                  res.setHeader('Content-Type', currentPoll.response_content_type);
+                }
+
+                let pollData = currentPoll.response_body;
+                if (typeof pollData === 'string' && (currentPoll.response_content_type?.includes('json') || pollData.startsWith('{') || pollData.startsWith('['))) {
+                  try {
+                    pollData = JSON.parse(pollData);
+                  } catch {}
+                }
+                res.status(Number(currentPoll.response_status) || 200).send(pollData);
+                return;
+              }
+            }
+          }
+
+          // Polling timed out while still PROCESSING
+          res.setHeader('Retry-After', '1');
+          res.status(503).json({
+            error: 'Request is currently being processed',
+            code: 'IDEMPOTENCY_IN_PROGRESS'
+          });
+          return;
+        } else {
+          // Lock has expired: Attempt compare-and-swap takeover
+          const takeoverResult = await query(
+            `UPDATE \`idempotency_keys_v2\`
+             SET \`state\` = 'PROCESSING',
+                 \`method\` = ?,
+                 \`route\` = ?,
+                 \`request_hash\` = ?,
+                 \`locked_until\` = ?,
+                 \`expires_at\` = ?
+             WHERE \`org_id\` = ? AND \`user_id\` = ? AND \`idem_key\` = ? AND \`locked_until\` = ?;`,
+            [method, normalizedRoute, requestHash, lockedUntilStr, expiresAtStr, orgId, userId, trimmedKey, existing.locked_until]
+          );
+
+          const affected = (takeoverResult as any)?.affectedRows ?? 0;
+          if (affected === 1) {
+            isClaimOwner = true;
+            inFlightMap.set(compositeKey, inFlightEntry);
+          } else {
+            // Concurrent process acquired takeover
+            res.setHeader('Retry-After', '1');
+            res.status(503).json({
+              error: 'Request is currently being processed',
+              code: 'IDEMPOTENCY_IN_PROGRESS'
+            });
+            return;
+          }
+        }
+      } catch (lookupErr: any) {
+        console.error('[IDEMPOTENCY] Conflict resolution error:', lookupErr.message);
+        res.setHeader('Retry-After', '1');
+        res.status(503).json({
+          error: 'Idempotency service temporarily unavailable',
+          code: 'IDEMPOTENCY_UNAVAILABLE'
+        });
+        return;
+      }
+    }
+
+    // 7. Attach Idempotency Context to Request
+    let isCompleted = false;
+
+    const completeContext = async (tx: QueryExecutor | null, status: number, body: any, contentType: string = 'application/json'): Promise<void> => {
+      if (isCompleted) return;
+      isCompleted = true;
+
+      const sanitizedBodyStr = sanitizeResponseBody(body, storeBody);
+      const executeQuery = tx || query;
+
+      try {
+        await executeQuery(
+          `UPDATE \`idempotency_keys_v2\`
+           SET \`state\` = 'COMPLETED',
+               \`response_status\` = ?,
+               \`response_content_type\` = ?,
+               \`response_body\` = ?
+           WHERE \`org_id\` = ? AND \`user_id\` = ? AND \`idem_key\` = ?;`,
+          [status, contentType, sanitizedBodyStr, orgId, userId, trimmedKey]
+        );
+      } catch (compErr: any) {
+        console.error('[IDEMPOTENCY] Transactional completion update warning:', compErr.message);
       }
 
-      const status = Number(cached.response_status);
-      resolveInFlight({ status, body: parsedBody });
-      res.status(status).json(parsedBody);
-      return;
-    }
-  } catch (err: any) {
-    console.warn('Idempotency lookup warning:', err.message);
-  }
+      // Notify in-process in-flight waiters
+      resolveInFlight({ status, contentType, body });
+      inFlightMap.delete(compositeKey);
+    };
 
-  // 3. Intercept response to capture and persist status and body
-  const originalJson = res.json.bind(res);
-  const originalSend = res.send.bind(res);
+    req.idempotency = {
+      orgId,
+      userId,
+      key: trimmedKey,
+      requestHash,
+      get isCompleted() {
+        return isCompleted;
+      },
+      complete: completeContext
+    };
 
-  res.json = function (body: any): Response {
-    try {
-      const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
-      const status = res.statusCode || 200;
-      const effectiveOrgId = req.auth?.orgId || orgId || 'public';
-      saveIdempotencyKey(trimmedKey, effectiveOrgId, clientId, clientSeq, status, bodyStr);
-      resolveInFlight({ status, body });
+    // 8. Single Capture Point Hooking res.send
+    const originalSend = res.send.bind(res);
+    let capturedBody: any = null;
+
+    res.send = function (body?: any): Response {
+      capturedBody = body;
       res.setHeader('Idempotency-Key', trimmedKey);
-    } catch (saveErr) {
-      console.warn('Failed to capture idempotency json:', saveErr);
-      resolveInFlight({ status: res.statusCode || 200, body });
-    }
-    return originalJson(body);
-  };
+      return originalSend(body);
+    };
 
-  res.send = function (body: any): Response {
-    try {
-      const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
-      const status = res.statusCode || 200;
-      saveIdempotencyKey(trimmedKey, orgId, clientId, clientSeq, status, bodyStr);
-      resolveInFlight({ status, body });
-      res.setHeader('Idempotency-Key', trimmedKey);
-    } catch (saveErr) {
-      console.warn('Failed to capture idempotency send:', saveErr);
-      resolveInFlight({ status: res.statusCode || 200, body });
-    }
-    return originalSend(body);
-  };
+    // 9. Finish / Close Event Handlers
+    const cleanupClaimOnFailure = async () => {
+      inFlightMap.delete(compositeKey);
+      rejectInFlight(new Error('REQUEST_FAILED_OR_ABORTED'));
+      try {
+        await query(
+          'DELETE FROM `idempotency_keys_v2` WHERE `org_id` = ? AND `user_id` = ? AND `idem_key` = ? AND `state` = \'PROCESSING\';',
+          [orgId, userId, trimmedKey]
+        );
+      } catch {
+        // Non-fatal cleanup
+      }
+    };
 
-  next();
+    res.on('finish', async () => {
+      if (isCompleted) {
+        inFlightMap.delete(compositeKey);
+        return;
+      }
+
+      const statusCode = res.statusCode || 200;
+
+      if (cacheStatuses.includes(statusCode)) {
+        // Success status: persist COMPLETED record
+        const contentType = String(res.getHeader('content-type') || 'application/json');
+        await completeContext(null, statusCode, capturedBody, contentType);
+      } else {
+        // Non-cacheable response (401, 403, 409, 429, 5xx): delete claim so retries are permitted
+        await cleanupClaimOnFailure();
+      }
+    });
+
+    res.on('close', async () => {
+      if (!res.writableEnded && !isCompleted) {
+        // Aborted connection before response finished
+        await cleanupClaimOnFailure();
+      }
+    });
+
+    next();
+  };
 }
 
-async function saveIdempotencyKey(
-  key: string,
-  orgId: string,
-  clientId: string,
-  clientSeq: number,
-  status: number,
-  body: string
-) {
-  // Only cache non-fatal responses (status < 500)
-  if (status >= 500) return;
-
-  try {
-    await query(`
-      INSERT INTO \`idempotency_keys\` (
-        \`key\`, \`org_id\`, \`client_id\`, \`client_seq\`, \`response_status\`, \`response_body\`
-      ) VALUES (?, ?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE
-        \`response_status\` = VALUES(\`response_status\`),
-        \`response_body\` = VALUES(\`response_body\`);
-    `, [key, orgId, clientId, clientSeq, status, body]);
-  } catch (err: any) {
-    console.warn(`Could not save idempotency record for key ${key}:`, err.message);
-  }
-}
+/**
+ * Legacy export for backwards compatibility during migration.
+ */
+export const idempotencyMiddleware = idempotent();

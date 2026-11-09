@@ -149,7 +149,10 @@ branchRouter.delete('/:id', requirePermission('branches:manage'), async (req: Re
   // Check if active assets belong to this branch
   const assetsCount = await query<any>('SELECT COUNT(*) as cnt FROM \`assets\` WHERE \`branch_id\` = ? AND \`org_id\` = ?;', [branchId, orgId]);
   if (assetsCount[0]?.cnt > 0) {
-    res.status(409).json({ error: `Cannot delete branch with ${assetsCount[0].cnt} associated asset(s). Reassign assets first.` });
+    res.status(409).json({
+      error: `Cannot delete branch with ${assetsCount[0].cnt} associated asset(s). Reassign assets first.`,
+      code: 'BRANCH_HAS_ASSETS'
+    });
     return;
   }
 

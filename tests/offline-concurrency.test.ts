@@ -14,7 +14,7 @@ process.env.NODE_ENV = 'test';
 import http from 'http';
 import { app } from '../server/index';
 import { createSessionToken } from '../server/auth';
-import { query } from '../server/db';
+import { query, closePool } from '../server/db';
 
 let server: http.Server;
 let baseUrl = '';
@@ -53,6 +53,7 @@ async function apiRequest(
 }
 
 async function cleanTestData() {
+  await query('DELETE FROM `idempotency_keys_v2` WHERE `org_id` = ?;', ['test-sync-org']);
   await query('DELETE FROM `idempotency_keys` WHERE `org_id` = ?;', ['test-sync-org']);
   await query('DELETE FROM `audit_logs` WHERE `org_id` = ?;', ['test-sync-org']);
   await query('DELETE FROM `checkouts` WHERE `org_id` = ?;', ['test-sync-org']);
@@ -160,6 +161,7 @@ async function runTests() {
 
   assert(res2.status === 201, 'Replayed duplicate POST returns identical HTTP 201 status');
   assert(res2.headers.get('x-cache-lookup') === 'HIT', 'Response header has X-Cache-Lookup: HIT');
+  assert(res2.headers.get('idempotent-replayed') === 'true', 'Response header has Idempotent-Replayed: true');
   assert(res2.body.id === 'test-ast-idemp-1', 'Cached response body matches original');
 
   // Verify DB state: Exactly 1 asset row exists and exactly 1 audit entry created
@@ -171,6 +173,47 @@ async function runTests() {
     ['test-sync-org', 'test-ast-idemp-1']
   );
   assert(auditsInDb.length === 1, 'Only one audit log was created (idempotency prevented duplicate audit events)');
+
+  // Verify idempotency record in idempotency_keys_v2 table
+  const idempInDb = await query(
+    'SELECT * FROM `idempotency_keys_v2` WHERE `org_id` = ? AND `idem_key` = ?;',
+    ['test-sync-org', idempKey]
+  );
+  assert(idempInDb.length === 1, 'Idempotency record persisted in idempotency_keys_v2 table');
+  assert(idempInDb[0]?.state === 'COMPLETED', 'Idempotency record is in COMPLETED state');
+  assert(Number(idempInDb[0]?.response_status) === 201, 'Persisted response_status is 201');
+
+  // Verify format validation rejection: short key (<8 chars)
+  const invalidKeyRes = await apiRequest('POST', '/api/assets', tokenAdmin, {
+    ...assetPayload,
+    id: 'test-ast-invalid-key',
+    assetCode: 'TERM-INV-KEY'
+  }, {
+    'Idempotency-Key': 'short'
+  });
+  assert(invalidKeyRes.status === 400, 'Invalid key (< 8 chars) rejected with HTTP 400 Bad Request');
+  assert(invalidKeyRes.body.code === 'INVALID_IDEMPOTENCY_KEY', 'Error carries code: INVALID_IDEMPOTENCY_KEY');
+
+  // Verify format validation rejection: illegal characters
+  const illegalCharRes = await apiRequest('POST', '/api/assets', tokenAdmin, {
+    ...assetPayload,
+    id: 'test-ast-illegal-key',
+    assetCode: 'TERM-ILL-KEY'
+  }, {
+    'Idempotency-Key': 'validprefix*illegalchar!'
+  });
+  assert(illegalCharRes.status === 400, 'Invalid key with illegal chars rejected with HTTP 400 Bad Request');
+  assert(illegalCharRes.body.code === 'INVALID_IDEMPOTENCY_KEY', 'Error carries code: INVALID_IDEMPOTENCY_KEY');
+
+  // Verify fingerprint mismatch rejection (HTTP 422)
+  const mismatchRes = await apiRequest('POST', '/api/assets', tokenAdmin, {
+    ...assetPayload,
+    name: 'Different Payload With Same Key'
+  }, {
+    'Idempotency-Key': idempKey
+  });
+  assert(mismatchRes.status === 422, 'Reused key with altered payload rejected with HTTP 422 Unprocessable Entity');
+  assert(mismatchRes.body.code === 'IDEMPOTENCY_FINGERPRINT_MISMATCH', 'Conflict carries code: IDEMPOTENCY_FINGERPRINT_MISMATCH');
 
   // --------------------------------------------------------------------------
   // 2. OPTIMISTIC CONCURRENCY - SUCCESSFUL SEQUENTIAL UPDATES
@@ -205,6 +248,7 @@ async function runTests() {
   });
 
   assert(staleUpdateRes.status === 409, 'Stale baseVersion = 1 rejected with HTTP 409 Conflict');
+  assert(staleUpdateRes.body.code === 'VERSION_CONFLICT', 'Conflict response carries structured code: VERSION_CONFLICT');
   assert(staleUpdateRes.body.currentVersion === 2, 'Conflict response indicates currentVersion = 2');
   assert(staleUpdateRes.body.expectedVersion === 1, 'Conflict response indicates expectedVersion = 1');
 
@@ -223,6 +267,7 @@ async function runTests() {
     baseVersion: 1
   });
   assert(staleDeleteRes.status === 409, 'DELETE with stale baseVersion = 1 rejected with HTTP 409 Conflict');
+  assert(staleDeleteRes.body.code === 'VERSION_CONFLICT', 'Delete conflict response carries code: VERSION_CONFLICT');
 
   // Delete with correct current version 2
   const validDeleteRes = await apiRequest('DELETE', '/api/assets/test-ast-idemp-1', tokenAdmin, {
@@ -244,6 +289,7 @@ async function runTests() {
     baseVersion: 99
   });
   assert(userConflictRes.status === 409, 'PUT /api/users/:id with stale baseVersion = 99 returns HTTP 409 Conflict');
+  assert(userConflictRes.body.code === 'VERSION_CONFLICT', 'User conflict response carries code: VERSION_CONFLICT');
 
   // Valid user update with baseVersion = 1
   const userValidRes = await apiRequest('PUT', '/api/users/test-sync-usr', tokenAdmin, {
@@ -257,17 +303,15 @@ async function runTests() {
 
   // Clean up test data
   await cleanTestData();
-  server.close();
+  await closePool();
 
   console.log(`\n==========================================`);
   console.log(`Results: ${passed} Passed, ${failed} Failed`);
   console.log(`==========================================\n`);
 
-  if (failed > 0) {
-    process.exit(1);
-  } else {
-    process.exit(0);
-  }
+  server.close(() => {
+    process.exit(failed > 0 ? 1 : 0);
+  });
 }
 
 runTests().catch(err => {

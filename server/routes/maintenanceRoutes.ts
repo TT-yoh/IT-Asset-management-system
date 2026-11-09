@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../db';
-import { authenticate, requirePermission } from '../middleware';
+import { authenticate, requirePermission, idempotent } from '../middleware';
 import { recordAuditEvent } from '../audit';
 
 export const maintenanceRouter = Router();
@@ -41,7 +41,7 @@ maintenanceRouter.get('/', requirePermission('maintenance:read'), async (req: Re
  * POST /api/maintenance
  * Records CREATE_MAINTENANCE in the same DB transaction!
  */
-maintenanceRouter.post('/', requirePermission('maintenance:create'), async (req: Request, res: Response) => {
+maintenanceRouter.post('/', requirePermission('maintenance:create'), idempotent(), async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const data = req.body;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -111,6 +111,10 @@ maintenanceRouter.post('/', requirePermission('maintenance:create'), async (req:
         },
         ipAddress
       });
+
+      if (req.idempotency) {
+        await req.idempotency.complete(tx, 201, { success: true, id: mntId });
+      }
     });
 
     res.status(201).json({ success: true, id: mntId });
@@ -150,6 +154,7 @@ maintenanceRouter.put('/:id', requirePermission('maintenance:update'), async (re
     if (!isNaN(expectedVersion) && expectedVersion !== currentVersion) {
       res.status(409).json({
         error: `Conflict: Maintenance record version mismatch. Server is at version ${currentVersion}, but update was based on version ${expectedVersion}.`,
+        code: 'VERSION_CONFLICT',
         currentVersion,
         expectedVersion
       });

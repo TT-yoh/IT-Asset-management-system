@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../db';
-import { authenticate, requirePermission } from '../middleware';
+import { authenticate, requirePermission, idempotent } from '../middleware';
 import { canApproveWriteOff } from '../permissions';
 import { recordAuditEvent } from '../audit';
 import { normalizeCondition } from './assetRoutes';
@@ -43,7 +43,7 @@ checkoutRouter.get('/', requirePermission('checkouts:read'), async (req: Request
  * POST /api/checkouts
  * Records CHECKOUT_ASSET in the same DB transaction!
  */
-checkoutRouter.post('/', requirePermission('checkouts:create'), async (req: Request, res: Response) => {
+checkoutRouter.post('/', requirePermission('checkouts:create'), idempotent(), async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const data = req.body;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -62,7 +62,10 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), async (req: Requ
 
   const asset = assets[0]!;
   if (asset.status !== 'ACTIVE') {
-    res.status(409).json({ error: `Asset is currently "${asset.status}" and cannot be checked out.` });
+    res.status(409).json({
+      error: `Asset is currently "${asset.status}" and cannot be checked out.`,
+      code: 'ASSET_NOT_ACTIVE'
+    });
     return;
   }
 
@@ -73,7 +76,8 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), async (req: Requ
   );
   if (activeCheckouts.length > 0) {
     res.status(409).json({
-      error: `Asset "${asset.name}" is already actively checked out to ${activeCheckouts[0].checked_out_to_user_name || 'another user'}.`
+      error: `Asset "${asset.name}" is already actively checked out to ${activeCheckouts[0].checked_out_to_user_name || 'another user'}.`,
+      code: 'ALREADY_CHECKED_OUT'
     });
     return;
   }
@@ -100,6 +104,7 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), async (req: Requ
       if (concurrentCheck.length > 0) {
         const err: any = new Error(`Asset is already actively checked out.`);
         err.statusCode = 409;
+        err.code = 'ALREADY_CHECKED_OUT';
         throw err;
       }
 
@@ -128,6 +133,7 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), async (req: Requ
       if (affected !== undefined && affected === 0) {
         const err: any = new Error(`Asset is already actively checked out or assigned.`);
         err.statusCode = 409;
+        err.code = 'ALREADY_CHECKED_OUT';
         throw err;
       }
 
@@ -149,6 +155,10 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), async (req: Requ
         },
         ipAddress
       });
+
+      if (req.idempotency) {
+        await req.idempotency.complete(tx, 201, { success: true, id: chkId });
+      }
     });
 
     res.status(201).json({ success: true, id: chkId });
@@ -162,7 +172,7 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), async (req: Requ
  * POST /api/checkouts/:id/return
  * Records RETURN_ASSET in the same DB transaction!
  */
-checkoutRouter.post('/:id/return', requirePermission('checkouts:return'), async (req: Request, res: Response) => {
+checkoutRouter.post('/:id/return', requirePermission('checkouts:return'), idempotent(), async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const chkId = req.params.id;
   const { returnCondition, damageReported, damageDescription, notes } = req.body;
@@ -234,10 +244,90 @@ checkoutRouter.post('/:id/return', requirePermission('checkouts:return'), async 
         },
         ipAddress
       });
+
+      if (req.idempotency) {
+        await req.idempotency.complete(tx, 200, { success: true, message: 'Asset checked in successfully.' });
+      }
     });
 
     res.json({ success: true, message: 'Asset checked in successfully.' });
   } catch (err: any) {
     res.status(500).json({ error: `Return transaction failed: ${err.message}` });
+  }
+});
+
+/**
+ * POST /api/checkouts/:id/writeoff
+ * Certifies damage write-off or loss waiver with Separation of Duties guard.
+ */
+checkoutRouter.post('/:id/writeoff', requirePermission('checkouts:writeoff'), idempotent(), async (req: Request, res: Response) => {
+  const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
+  const chkId = req.params.id;
+  const { reason, notes } = req.body;
+  const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
+
+  const checkouts = await query<any>(`
+    SELECT c.* FROM \`checkouts\` c
+    INNER JOIN \`assets\` a ON c.asset_id = a.id
+    WHERE c.id = ? AND a.org_id = ?;
+  `, [chkId, orgId]);
+
+  if (checkouts.length === 0) {
+    res.status(404).json({ error: 'Checkout record not found in organization.' });
+    return;
+  }
+
+  const chk = checkouts[0]!;
+
+  if (!canApproveWriteOff(actorId, chk.checked_out_to_user_id, role)) {
+    res.status(403).json({
+      error: 'Separation of Duties violation: The custody holder cannot certify a damage write-off or loss waiver.'
+    });
+    return;
+  }
+
+  try {
+    await withTransaction(async (tx) => {
+      await tx(`
+        UPDATE \`checkouts\` SET
+          \`checked_in_at\` = NOW(),
+          \`return_condition\` = 'POOR',
+          \`damage_reported\` = 1,
+          \`damage_description\` = ?,
+          \`status\` = 'RETURNED',
+          \`notes\` = ?
+        WHERE \`id\` = ?;
+      `, [reason || 'Written off due to loss or damage', notes || null, chkId]);
+
+      await tx(
+        'UPDATE `assets` SET `status` = \'DISPOSED\', `assigned_to_user_id` = NULL, `assigned_to_user_name` = NULL, `assigned_at` = NULL, `asset_condition` = \'POOR\', `version` = `version` + 1 WHERE `id` = ?;',
+        [chk.asset_id]
+      );
+
+      await recordAuditEvent(tx, {
+        orgId,
+        actorId,
+        userName: actorName,
+        role,
+        action: 'WRITE_OFF_ASSET',
+        entityType: 'Checkout',
+        entityId: chkId,
+        entityName: chk.asset_name,
+        changes: {
+          assetId: chk.asset_id,
+          reason: reason || 'Loss/Damage write-off',
+          status: 'DISPOSED'
+        },
+        ipAddress
+      });
+
+      if (req.idempotency) {
+        await req.idempotency.complete(tx, 200, { success: true, message: 'Asset write-off approved and certified successfully.' });
+      }
+    });
+
+    res.json({ success: true, message: 'Asset write-off approved and certified successfully.' });
+  } catch (err: any) {
+    res.status(500).json({ error: `Write-off transaction failed: ${err.message}` });
   }
 });

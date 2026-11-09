@@ -346,10 +346,18 @@ export function executeInMemoryQuery<T = any>(sql: string, params: any[]): T[] {
           // Check for upsert / primary key conflict
           const existingIdx = rows.findIndex(existing => 
             (newRow.id && existing.id === newRow.id) || 
-            (newRow.key && existing.key === newRow.key)
+            (newRow.key && existing.key === newRow.key) ||
+            (newRow.org_id && newRow.user_id && newRow.idem_key &&
+             existing.org_id === newRow.org_id && existing.user_id === newRow.user_id && existing.idem_key === newRow.idem_key)
           );
 
           if (existingIdx !== -1) {
+            if (tableName === 'idempotency_keys_v2' && !lower.includes('on duplicate key update')) {
+              const dupErr: any = new Error("ER_DUP_ENTRY: Duplicate entry for key 'PRIMARY'");
+              dupErr.code = 'ER_DUP_ENTRY';
+              dupErr.errno = 1062;
+              throw dupErr;
+            }
             const existingOrgId = rows[existingIdx].org_id;
             const merged = { ...rows[existingIdx], ...newRow };
             // Merge semantics: NEVER overwrite existing org_id
@@ -434,18 +442,46 @@ export function executeInMemoryQuery<T = any>(sql: string, params: any[]): T[] {
       const tableName = tableMatch[1];
       let rows = inMemoryStore.get(tableName) || [];
 
-      // Check WHERE condition
-      const whereMatch = lower.match(/where\s+[`]?([a-zA-Z0-9_]+)[`]?\s*=\s*\?/);
-      if (whereMatch && whereMatch[1]) {
-        const col = whereMatch[1];
-        const param = params[0];
-        // If WHERE param is null or undefined, matches NOTHING (0 rows deleted)
-        if (param === null || param === undefined) {
-          return [] as T[];
-        }
-        rows = rows.filter(r => r[col] != param);
+      // Check WHERE conditions
+      const whereMatch = normalized.match(/where\s+(.+)/i);
+      if (whereMatch) {
+        const whereClause = whereMatch[1];
+        const whereConds = whereClause.match(/[`]?([a-zA-Z0-9_]+)[`]?\s*(=|!=|<|>|<=|>=)\s*(\?|'[^']*'|\d+)/g) || [];
+        let pIdx = 0;
+        let matchingIndices = rows.map((_, i) => i);
+
+        whereConds.forEach((cond) => {
+          const match = cond.match(/[`]?([a-zA-Z0-9_]+)[`]?\s*(=|!=|<|>|<=|>=)\s*(\?|'[^']*'|\d+)/);
+          if (match) {
+            const col = match[1];
+            const op = match[2];
+            const rawVal = match[3];
+            let val: any;
+            if (rawVal === '?') {
+              val = params[pIdx++];
+            } else if (rawVal.startsWith("'")) {
+              val = rawVal.replace(/^'|'$/g, '');
+            } else {
+              val = Number(rawVal);
+            }
+
+            if (val === null || val === undefined) {
+              matchingIndices = [];
+            } else if (op === '=') {
+              matchingIndices = matchingIndices.filter(i => rows[i][col] == val);
+            } else if (op === '!=') {
+              matchingIndices = matchingIndices.filter(i => rows[i][col] != val);
+            }
+          }
+        });
+
+        const deletedCount = matchingIndices.length;
+        rows = rows.filter((_, i) => !matchingIndices.includes(i));
         inMemoryStore.set(tableName, rows);
+        return [{ affectedRows: deletedCount }] as any;
       }
+      inMemoryStore.set(tableName, []);
+      return [{ affectedRows: rows.length }] as any;
     }
     return [] as T[];
   }

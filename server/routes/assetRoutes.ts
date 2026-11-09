@@ -1,6 +1,6 @@
 import express, { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../db';
-import { authenticate, requirePermission } from '../middleware';
+import { authenticate, requirePermission, idempotent } from '../middleware';
 import { recordAuditEvent } from '../audit';
 
 export const assetRouter = Router();
@@ -145,7 +145,7 @@ export function normalizeStatus(status?: string): string {
  * Creates asset with org_id derived strictly from session
  * Records CREATE_ASSET in the same DB transaction!
  */
-assetRouter.post('/', requirePermission('assets:create'), async (req: Request, res: Response) => {
+assetRouter.post('/', requirePermission('assets:create'), idempotent(), async (req: Request, res: Response) => {
   const { orgId, role, userId: actorId, fullName: actorName, branchId: userBranchId } = req.auth!;
   const data = req.body;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -212,6 +212,7 @@ assetRouter.post('/', requirePermission('assets:create'), async (req: Request, r
 
     res.status(409).json({
       error: `Redundant data detected: ${conflictField} "${conflictVal}" is already registered to "${match.name}" (Tag: ${match.asset_code}).`,
+      code: 'DUPLICATE_ASSET_DATA',
       conflictField,
       conflictAsset: {
         id: match.id,
@@ -276,6 +277,10 @@ assetRouter.post('/', requirePermission('assets:create'), async (req: Request, r
         },
         ipAddress
       });
+
+      if (req.idempotency) {
+        await req.idempotency.complete(tx, 201, { success: true, id: assetId });
+      }
     });
 
     res.status(201).json({ success: true, id: assetId });
@@ -288,7 +293,7 @@ assetRouter.post('/', requirePermission('assets:create'), async (req: Request, r
  * POST /api/assets/bulk
  * High-throughput batch ingestion of multiple assets in a single database transaction
  */
-assetRouter.post('/bulk', express.json({ limit: '5mb' }), requirePermission('assets:create'), async (req: Request, res: Response) => {
+assetRouter.post('/bulk', express.json({ limit: '5mb' }), requirePermission('assets:create'), idempotent(), async (req: Request, res: Response) => {
   const { orgId, role, userId: actorId, fullName: actorName, branchId: userBranchId } = req.auth!;
   const { assets: rawAssets } = req.body;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -383,6 +388,10 @@ assetRouter.post('/bulk', express.json({ limit: '5mb' }), requirePermission('ass
           ipAddress
         });
       }
+
+      if (req.idempotency) {
+        await req.idempotency.complete(tx, 201, { success: true, ...results });
+      }
     });
 
     res.status(201).json({ success: true, ...results });
@@ -424,6 +433,7 @@ assetRouter.put('/:id', requirePermission('assets:update'), async (req: Request,
     if (!isNaN(expectedVersion) && expectedVersion !== currentVersion) {
       res.status(409).json({
         error: `Conflict: Asset version mismatch. Server is at version ${currentVersion}, but update was based on version ${expectedVersion}.`,
+        code: 'VERSION_CONFLICT',
         currentVersion,
         expectedVersion
       });
@@ -461,6 +471,7 @@ assetRouter.put('/:id', requirePermission('assets:update'), async (req: Request,
       if (rawExpected !== undefined && affected !== undefined && affected === 0) {
         const err: any = new Error(`Conflict: Asset version mismatch. Concurrent update already modified this asset.`);
         err.statusCode = 409;
+        err.code = 'VERSION_CONFLICT';
         throw err;
       }
 
@@ -492,7 +503,7 @@ assetRouter.put('/:id', requirePermission('assets:update'), async (req: Request,
  * DELETE /api/assets/:id
  * Only ADMIN or FINANCE (for write-off) can delete, recorded in audit transaction!
  */
-assetRouter.delete('/:id', requirePermission('assets:delete'), async (req: Request, res: Response) => {
+assetRouter.delete('/:id', requirePermission('assets:delete'), idempotent(), async (req: Request, res: Response) => {
   const { orgId, role, userId: actorId, fullName: actorName } = req.auth!;
   const assetId = req.params.id;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -510,6 +521,7 @@ assetRouter.delete('/:id', requirePermission('assets:delete'), async (req: Reque
     if (!isNaN(expectedVersion) && expectedVersion !== currentVersion) {
       res.status(409).json({
         error: `Conflict: Asset version mismatch on delete. Server is at version ${currentVersion}, but deletion was based on version ${expectedVersion}.`,
+        code: 'VERSION_CONFLICT',
         currentVersion,
         expectedVersion
       });
@@ -549,6 +561,13 @@ assetRouter.delete('/:id', requirePermission('assets:delete'), async (req: Reque
         changes: { deletedAssetId: assetId, status: 'DISPOSED', preservedCustodyHistory: hasLinkedRecords },
         ipAddress
       });
+
+      if (req.idempotency) {
+        await req.idempotency.complete(tx, 200, {
+          success: true,
+          message: hasLinkedRecords ? 'Asset written off and archived to preserve custody audit history.' : 'Asset deleted successfully.'
+        });
+      }
     });
 
     res.json({ success: true, message: hasLinkedRecords ? 'Asset written off and archived to preserve custody audit history.' : 'Asset deleted successfully.' });

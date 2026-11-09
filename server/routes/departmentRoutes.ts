@@ -134,7 +134,10 @@ departmentRouter.delete('/:id', requirePermission('departments:manage'), async (
   // Check if active users belong to this department
   const usersCount = await query<any>('SELECT COUNT(*) as cnt FROM `users` WHERE `department_id` = ? AND `org_id` = ?;', [deptId, orgId]);
   if (usersCount[0]?.cnt > 0) {
-    res.status(409).json({ error: `Cannot delete department with ${usersCount[0].cnt} associated staff member(s). Reassign staff first.` });
+    res.status(409).json({
+      error: `Cannot delete department with ${usersCount[0].cnt} associated staff member(s). Reassign staff first.`,
+      code: 'DEPARTMENT_HAS_USERS'
+    });
     return;
   }
 

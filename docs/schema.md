@@ -268,24 +268,25 @@ Serializes sequence assignment per organization with row-level locks (`SELECT ..
 ---
 
 ### 2.11 `idempotency_keys_v2`
-Offline mutation replay prevention and duplicate request protection.
+Offline mutation replay prevention and atomic lease-based duplicate suppression.
 | Column | Type | Constraints | Description |
 |---|---|---|---|
-| `key` | VARCHAR(128) | NOT NULL | Client idempotency UUID |
 | `org_id` | VARCHAR(64) | NOT NULL | Tenant ID |
-| `user_id` | VARCHAR(64) | NULL | Submitting user ID |
-| `request_path` | VARCHAR(255) | NOT NULL | Target API path |
+| `user_id` | VARCHAR(64) | NOT NULL | Submitting authenticated user ID |
+| `idem_key` | VARCHAR(128) | NOT NULL | Client idempotency key (8-128 chars) |
+| `method` | VARCHAR(10) | NOT NULL | HTTP mutation method (POST, PUT, DELETE) |
+| `route` | VARCHAR(255) | NOT NULL | Normalized endpoint route |
 | `request_hash` | VARCHAR(64) | NOT NULL | SHA-256 payload digest |
-| `status` | ENUM | NOT NULL DEFAULT 'PROCESSING' | 'PROCESSING', 'COMPLETED', 'FAILED' |
+| `state` | ENUM | NOT NULL DEFAULT 'PROCESSING' | 'PROCESSING', 'COMPLETED' |
 | `response_status` | INT | NULL | HTTP response status code |
+| `response_content_type` | VARCHAR(128) | NULL | HTTP response content type header |
 | `response_body` | MEDIUMTEXT | NULL | Cached HTTP response payload |
-| `response_headers` | TEXT | NULL | Cached HTTP response headers |
-| `created_at` | TIMESTAMP | DEFAULT CURRENT_TIMESTAMP | Submission timestamp |
-| `expires_at` | TIMESTAMP | NOT NULL | TTL expiration timestamp |
+| `locked_until` | DATETIME | NOT NULL | Distributed lock expiration lease |
+| `created_at` | DATETIME | DEFAULT CURRENT_TIMESTAMP | Submission timestamp |
+| `expires_at` | DATETIME | NOT NULL | TTL expiration timestamp |
 
 **Indexes & Constraints**:
-- `PRIMARY KEY (key, org_id)`
-- `INDEX idx_idemp_v2_org_created (org_id, created_at)`
+- `PRIMARY KEY (org_id, user_id, idem_key)`
 - `INDEX idx_idemp_v2_expires (expires_at)`
 
 ---

@@ -123,7 +123,10 @@ userRouter.post('/invite', requirePermission('users:invite'), async (req: Reques
       return;
     }
 
-    res.status(409).json({ error: 'An active account with this email address already exists.' });
+    res.status(409).json({
+      error: 'An active account with this email address already exists.',
+      code: 'EMAIL_ALREADY_EXISTS'
+    });
     return;
   }
 
@@ -264,6 +267,7 @@ userRouter.put('/:id', requirePermission('users:update'), async (req: Request, r
     if (!isNaN(expectedVersion) && expectedVersion !== currentVersion) {
       res.status(409).json({
         error: `Conflict: User record version mismatch. Server is at version ${currentVersion}, but update was based on version ${expectedVersion}.`,
+        code: 'VERSION_CONFLICT',
         currentVersion,
         expectedVersion
       });

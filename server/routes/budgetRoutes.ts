@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../db';
-import { authenticate, requirePermission } from '../middleware';
+import { authenticate, requirePermission, idempotent } from '../middleware';
 import { recordAuditEvent } from '../audit';
 
 export const budgetRouter = Router();
@@ -24,7 +24,7 @@ budgetRouter.get('/', requirePermission('budgets:read'), async (req: Request, re
  * POST /api/budgets
  * Records SET_BUDGET in the same DB transaction!
  */
-budgetRouter.post('/', requirePermission('budgets:manage'), async (req: Request, res: Response) => {
+budgetRouter.post('/', requirePermission('budgets:manage'), idempotent(), async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const data = req.body;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -73,6 +73,10 @@ budgetRouter.post('/', requirePermission('budgets:manage'), async (req: Request,
         },
         ipAddress
       });
+
+      if (req.idempotency) {
+        await req.idempotency.complete(tx, 201, { success: true, id: budgetId });
+      }
     });
 
     res.status(201).json({ success: true, id: budgetId });
@@ -84,7 +88,7 @@ budgetRouter.post('/', requirePermission('budgets:manage'), async (req: Request,
 /**
  * PUT /api/budgets/:id
  */
-budgetRouter.put('/:id', requirePermission('budgets:manage'), async (req: Request, res: Response) => {
+budgetRouter.put('/:id', requirePermission('budgets:manage'), idempotent(), async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const budgetId = req.params.id;
   const data = req.body;
@@ -126,6 +130,10 @@ budgetRouter.put('/:id', requirePermission('budgets:manage'), async (req: Reques
         },
         ipAddress
       });
+
+      if (req.idempotency) {
+        await req.idempotency.complete(tx, 200, { success: true, message: 'Budget updated successfully.' });
+      }
     });
 
     res.json({ success: true, message: 'Budget updated successfully.' });

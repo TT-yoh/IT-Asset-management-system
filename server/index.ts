@@ -12,7 +12,6 @@ import {
   cookieParserMiddleware,
   csrfProtection,
   authenticate,
-  idempotencyMiddleware,
   requestLogger
 } from './middleware';
 
@@ -126,10 +125,9 @@ app.use('/api', globalApiLimiter);
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
-// 9. Cookie parser & CSRF & Idempotency
+// 9. Cookie parser & CSRF
 app.use(cookieParserMiddleware);
 app.use(csrfProtection);
-app.use(idempotencyMiddleware);
 
 // 10. Health & Readiness checks
 app.get(config.ALLOW_ROOT_ROUTES ? ['/api/health', '/health'] : ['/api/health'], (_req: Request, res: Response) => {
