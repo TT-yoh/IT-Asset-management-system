@@ -272,7 +272,7 @@ export function executeInMemoryQuery<T = any>(sql: string, params: any[]): T[] {
     let rows = [...(inMemoryStore.get(tableName) || [])];
 
     // Systematic WHERE parameter parsing
-    const whereMatch = lower.match(/where\s+(.+?)(?:\s+order|\s+group|\s+limit|$)/);
+    const whereMatch = lower.match(/where\s+(.+?)(?:\s+order|\s+group|\s+limit|\s+for\s+update|$)/);
     if (whereMatch && whereMatch[1]) {
       const whereClause = whereMatch[1];
       const condRegex = /[`]?([a-zA-Z0-9_]+)[`]?\s*=\s*\?/g;
@@ -347,6 +347,7 @@ export function executeInMemoryQuery<T = any>(sql: string, params: any[]): T[] {
           const existingIdx = rows.findIndex(existing => 
             (newRow.id && existing.id === newRow.id) || 
             (newRow.key && existing.key === newRow.key) ||
+            (tableName === 'audit_chain_heads' && existing.org_id === newRow.org_id) ||
             (newRow.org_id && newRow.user_id && newRow.idem_key &&
              existing.org_id === newRow.org_id && existing.user_id === newRow.user_id && existing.idem_key === newRow.idem_key)
           );

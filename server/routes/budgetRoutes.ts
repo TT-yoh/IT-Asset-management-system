@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../db';
 import { authenticate, requirePermission, idempotent } from '../middleware';
@@ -6,14 +7,19 @@ import { recordAuditEvent } from '../audit';
 export const budgetRouter = Router();
 budgetRouter.use(authenticate);
 
+const EXPLICIT_BUDGET_COLUMNS = `
+  \`id\`, \`org_id\`, \`department_name\`, \`branch_name\`, \`fiscal_year\`, \`allocated\`, \`spent\`, \`created_at\`
+`;
+
 /**
  * GET /api/budgets
+ * Scoped strictly by tenant org_id with explicit columns
  */
 budgetRouter.get('/', requirePermission('budgets:read'), async (req: Request, res: Response) => {
   const { orgId } = req.auth!;
 
   const rows = await query(
-    'SELECT * FROM `budgets` WHERE `org_id` = ? ORDER BY `fiscal_year` DESC;',
+    `SELECT ${EXPLICIT_BUDGET_COLUMNS} FROM \`budgets\` WHERE \`org_id\` = ? ORDER BY \`fiscal_year\` DESC;`,
     [orgId]
   );
 
@@ -34,8 +40,8 @@ budgetRouter.post('/', requirePermission('budgets:manage'), idempotent(), async 
     return;
   }
 
-  const budgetId = data.id || `bg-${Date.now()}`;
-  const year = data.fiscalYear || new Date().getFullYear();
+  const budgetId = (data.id && typeof data.id === 'string' && /^[a-zA-Z0-9_-]{3,64}$/.test(data.id)) ? data.id : crypto.randomUUID();
+  const year = Number(data.fiscalYear) || new Date().getFullYear();
 
   try {
     await withTransaction(async (tx) => {
@@ -51,8 +57,8 @@ budgetRouter.post('/', requirePermission('budgets:manage'), idempotent(), async 
       `, [
         budgetId,
         orgId,
-        data.departmentName,
-        data.branchName,
+        data.departmentName.trim(),
+        data.branchName.trim(),
         year,
         Number(data.allocated) || 0,
         Number(data.spent) || 0
@@ -66,7 +72,7 @@ budgetRouter.post('/', requirePermission('budgets:manage'), idempotent(), async 
         action: 'SET_BUDGET',
         entityType: 'Budget',
         entityId: budgetId,
-        entityName: `${data.departmentName} - ${data.branchName}`,
+        entityName: `${data.departmentName.trim()} - ${data.branchName.trim()}`,
         changes: {
           allocated: Number(data.allocated),
           fiscalYear: year
@@ -80,8 +86,8 @@ budgetRouter.post('/', requirePermission('budgets:manage'), idempotent(), async 
     });
 
     res.status(201).json({ success: true, id: budgetId });
-  } catch (err: any) {
-    res.status(500).json({ error: `Budget allocation transaction failed: ${err.message}` });
+  } catch (_err) {
+    res.status(500).json({ error: 'Budget allocation transaction failed.' });
   }
 });
 
@@ -94,16 +100,16 @@ budgetRouter.put('/:id', requirePermission('budgets:manage'), idempotent(), asyn
   const data = req.body;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
-  const existing = await query<any>('SELECT * FROM \`budgets\` WHERE \`id\` = ? AND \`org_id\` = ? LIMIT 1;', [budgetId, orgId]);
+  const existing = await query<any>('SELECT * FROM `budgets` WHERE `id` = ? AND `org_id` = ? LIMIT 1;', [budgetId, orgId]);
   if (existing.length === 0) {
     res.status(404).json({ error: 'Budget record not found in organization.' });
     return;
   }
 
   const prev = existing[0]!;
-  const departmentName = data.departmentName || prev.department_name;
-  const branchName = data.branchName || prev.branch_name;
-  const fiscalYear = data.fiscalYear || prev.fiscal_year;
+  const departmentName = (data.departmentName && String(data.departmentName).trim()) || prev.department_name;
+  const branchName = (data.branchName && String(data.branchName).trim()) || prev.branch_name;
+  const fiscalYear = data.fiscalYear ? Number(data.fiscalYear) : prev.fiscal_year;
   const allocated = data.allocated !== undefined ? Number(data.allocated) : Number(prev.allocated);
   const spent = data.spent !== undefined ? Number(data.spent) : Number(prev.spent);
 
@@ -137,8 +143,8 @@ budgetRouter.put('/:id', requirePermission('budgets:manage'), idempotent(), asyn
     });
 
     res.json({ success: true, message: 'Budget updated successfully.' });
-  } catch (err: any) {
-    res.status(500).json({ error: `Budget update transaction failed: ${err.message}` });
+  } catch (_err) {
+    res.status(500).json({ error: 'Budget update transaction failed.' });
   }
 });
 
@@ -150,7 +156,7 @@ budgetRouter.delete('/:id', requirePermission('budgets:manage'), async (req: Req
   const budgetId = req.params.id;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
-  const existing = await query<any>('SELECT * FROM \`budgets\` WHERE \`id\` = ? AND \`org_id\` = ? LIMIT 1;', [budgetId, orgId]);
+  const existing = await query<any>('SELECT * FROM `budgets` WHERE `id` = ? AND `org_id` = ? LIMIT 1;', [budgetId, orgId]);
   if (existing.length === 0) {
     res.status(404).json({ error: 'Budget record not found in organization.' });
     return;
@@ -158,7 +164,7 @@ budgetRouter.delete('/:id', requirePermission('budgets:manage'), async (req: Req
 
   try {
     await withTransaction(async (tx) => {
-      await tx('DELETE FROM \`budgets\` WHERE \`id\` = ? AND \`org_id\` = ?;', [budgetId, orgId]);
+      await tx('DELETE FROM `budgets` WHERE `id` = ? AND `org_id` = ?;', [budgetId, orgId]);
 
       await recordAuditEvent(tx, {
         orgId,
@@ -175,7 +181,7 @@ budgetRouter.delete('/:id', requirePermission('budgets:manage'), async (req: Req
     });
 
     res.json({ success: true, message: 'Budget record removed.' });
-  } catch (err: any) {
-    res.status(500).json({ error: `Budget deletion transaction failed: ${err.message}` });
+  } catch (_err) {
+    res.status(500).json({ error: 'Budget deletion transaction failed.' });
   }
 });

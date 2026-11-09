@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../db';
 import { authenticate, requirePermission } from '../middleware';
@@ -6,14 +7,19 @@ import { recordAuditEvent } from '../audit';
 export const departmentRouter = Router();
 departmentRouter.use(authenticate);
 
+const EXPLICIT_DEPARTMENT_COLUMNS = `
+  \`id\`, \`org_id\`, \`name\`, \`head_count\`, \`budget_allocated\`, \`created_at\`
+`;
+
 /**
  * GET /api/departments
+ * Scoped strictly by tenant org_id with explicit columns
  */
 departmentRouter.get('/', requirePermission('departments:read'), async (req: Request, res: Response) => {
   const { orgId } = req.auth!;
 
   const rows = await query(
-    'SELECT * FROM `departments` WHERE `org_id` = ? ORDER BY `name` ASC;',
+    `SELECT ${EXPLICIT_DEPARTMENT_COLUMNS} FROM \`departments\` WHERE \`org_id\` = ? ORDER BY \`name\` ASC;`,
     [orgId]
   );
 
@@ -33,7 +39,7 @@ departmentRouter.post('/', requirePermission('departments:manage'), async (req: 
     return;
   }
 
-  const deptId = data.id || `dept-${Date.now()}`;
+  const deptId = (data.id && typeof data.id === 'string' && /^[a-zA-Z0-9_-]{3,64}$/.test(data.id)) ? data.id : crypto.randomUUID();
   const name = data.name.trim();
   const budgetAllocated = parseFloat(data.budgetAllocated || data.budget_allocated) || 0;
   const headCount = parseInt(data.headCount || data.head_count, 10) || 0;
@@ -63,8 +69,8 @@ departmentRouter.post('/', requirePermission('departments:manage'), async (req: 
     });
 
     res.status(201).json({ success: true, id: deptId });
-  } catch (err: any) {
-    res.status(500).json({ error: `Department creation transaction failed: ${err.message}` });
+  } catch (_err) {
+    res.status(500).json({ error: 'Department creation transaction failed.' });
   }
 });
 
@@ -112,8 +118,8 @@ departmentRouter.put('/:id', requirePermission('departments:manage'), async (req
     });
 
     res.json({ success: true, message: 'Department updated successfully.' });
-  } catch (err: any) {
-    res.status(500).json({ error: `Department update transaction failed: ${err.message}` });
+  } catch (_err) {
+    res.status(500).json({ error: 'Department update transaction failed.' });
   }
 });
 
@@ -132,8 +138,8 @@ departmentRouter.delete('/:id', requirePermission('departments:manage'), async (
   }
 
   // Check if active users belong to this department
-  const usersCount = await query<any>('SELECT COUNT(*) as cnt FROM `users` WHERE `department_id` = ? AND `org_id` = ?;', [deptId, orgId]);
-  if (usersCount[0]?.cnt > 0) {
+  const usersCount = await query<any>("SELECT COUNT(*) as cnt FROM `users` WHERE `department_id` = ? AND `org_id` = ? AND `status` != 'DELETED';", [deptId, orgId]);
+  if ((usersCount[0]?.cnt || 0) > 0) {
     res.status(409).json({
       error: `Cannot delete department with ${usersCount[0].cnt} associated staff member(s). Reassign staff first.`,
       code: 'DEPARTMENT_HAS_USERS'
@@ -160,7 +166,7 @@ departmentRouter.delete('/:id', requirePermission('departments:manage'), async (
     });
 
     res.json({ success: true, message: 'Department removed successfully.' });
-  } catch (err: any) {
-    res.status(500).json({ error: `Department deletion transaction failed: ${err.message}` });
+  } catch (_err) {
+    res.status(500).json({ error: 'Department deletion transaction failed.' });
   }
 });

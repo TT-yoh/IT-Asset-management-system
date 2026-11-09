@@ -58,6 +58,7 @@ async function apiRequest(
 
 async function cleanAuditTestData() {
   await query('DELETE FROM `audit_logs` WHERE `org_id` = ?;', ['test-audit-org']);
+  await query('DELETE FROM `audit_chain_heads` WHERE `org_id` = ?;', ['test-audit-org']);
   await query('DELETE FROM `assets` WHERE `org_id` = ?;', ['test-audit-org']);
   await query('DELETE FROM `users` WHERE `org_id` = ?;', ['test-audit-org']);
   await query('DELETE FROM `branches` WHERE `org_id` = ?;', ['test-audit-org']);

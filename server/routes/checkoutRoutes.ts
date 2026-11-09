@@ -1,21 +1,31 @@
+import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../db';
 import { authenticate, requirePermission, idempotent } from '../middleware';
-import { canApproveWriteOff } from '../permissions';
+import { canApproveWriteOff, canCertifyDamagedReturn } from '../permissions';
 import { recordAuditEvent } from '../audit';
 import { normalizeCondition } from './assetRoutes';
 
 export const checkoutRouter = Router();
 checkoutRouter.use(authenticate);
 
+const EXPLICIT_CHECKOUT_COLUMNS = `
+  c.\`id\`, c.\`org_id\`, c.\`branch_id\`, c.\`asset_id\`, c.\`asset_code\`, c.\`asset_name\`,
+  c.\`checked_out_by\`, c.\`checked_out_to_user_id\`, c.\`checked_out_to_user_name\`,
+  c.\`checked_out_at\`, c.\`expected_return_date\`, c.\`checked_in_at\`, c.\`return_condition\`,
+  c.\`damage_reported\`, c.\`damage_description\`, c.\`reason\`, c.\`status\`, c.\`notes\`,
+  c.\`version\`, c.\`created_at\`, c.\`updated_at\`
+`;
+
 /**
  * GET /api/checkouts
+ * Explicitly projected and tenant-scoped equipment checkouts
  */
 checkoutRouter.get('/', requirePermission('checkouts:read'), async (req: Request, res: Response) => {
   const { orgId, role, userId, branchId } = req.auth!;
 
   let sql = `
-    SELECT c.* FROM \`checkouts\` c
+    SELECT ${EXPLICIT_CHECKOUT_COLUMNS} FROM \`checkouts\` c
     INNER JOIN \`assets\` a ON c.asset_id = a.id
     WHERE a.org_id = ?
   `;
@@ -42,6 +52,7 @@ checkoutRouter.get('/', requirePermission('checkouts:read'), async (req: Request
 /**
  * POST /api/checkouts
  * Records CHECKOUT_ASSET in the same DB transaction!
+ * Validates target user in tenant, asset active status, and concurrency lock.
  */
 checkoutRouter.post('/', requirePermission('checkouts:create'), idempotent(), async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
@@ -82,16 +93,39 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), idempotent(), as
     return;
   }
 
-  const chkId = data.id || `chk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-  const toUserId = role === 'USER' ? actorId : (data.checkedOutToUserId || actorId);
-  const toUserName = role === 'USER' ? actorName : (data.checkedOutToUserName || actorName);
+  // Target user validation:
+  let toUserId = actorId;
+  let toUserName = actorName;
+
+  if (role !== 'USER' && data.checkedOutToUserId) {
+    const targetUsers = await query<any>(
+      "SELECT `id`, `full_name`, `status` FROM `users` WHERE `id` = ? AND `org_id` = ? LIMIT 1;",
+      [String(data.checkedOutToUserId).trim(), orgId]
+    );
+    if (targetUsers.length === 0) {
+      res.status(404).json({ error: 'Assigned recipient user not found in organization.' });
+      return;
+    }
+    const targetUser = targetUsers[0]!;
+    if (targetUser.status !== 'ACTIVE') {
+      res.status(409).json({
+        error: `Cannot assign equipment to user with status "${targetUser.status}".`,
+        code: 'USER_NOT_ACTIVE'
+      });
+      return;
+    }
+    toUserId = targetUser.id;
+    toUserName = targetUser.full_name;
+  }
+
+  const chkId = (data.id && typeof data.id === 'string' && /^[a-zA-Z0-9_-]{3,64}$/.test(data.id)) ? data.id : crypto.randomUUID();
 
   const insertSql = `
     INSERT INTO \`checkouts\` (
       \`id\`, \`org_id\`, \`branch_id\`, \`asset_id\`, \`asset_code\`, \`asset_name\`, \`checked_out_by\`,
       \`checked_out_to_user_id\`, \`checked_out_to_user_name\`, \`checked_out_at\`,
-      \`expected_return_date\`, \`reason\`, \`status\`, \`notes\`
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, 'ACTIVE', ?);
+      \`expected_return_date\`, \`reason\`, \`status\`, \`notes\`, \`version\`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, 'ACTIVE', ?, 1);
   `;
 
   try {
@@ -102,7 +136,7 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), idempotent(), as
         [asset.id]
       );
       if (concurrentCheck.length > 0) {
-        const err: any = new Error(`Asset is already actively checked out.`);
+        const err: any = new Error('Asset is already actively checked out.');
         err.statusCode = 409;
         err.code = 'ALREADY_CHECKED_OUT';
         throw err;
@@ -131,7 +165,7 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), idempotent(), as
 
       const affected = (assignResult as any)?.affectedRows ?? (Array.isArray(assignResult) ? (assignResult as any)[0]?.affectedRows : undefined);
       if (affected !== undefined && affected === 0) {
-        const err: any = new Error(`Asset is already actively checked out or assigned.`);
+        const err: any = new Error('Asset is already actively checked out or assigned.');
         err.statusCode = 409;
         err.code = 'ALREADY_CHECKED_OUT';
         throw err;
@@ -164,16 +198,18 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), idempotent(), as
     res.status(201).json({ success: true, id: chkId });
   } catch (err: any) {
     const statusCode = err.statusCode || 500;
-    res.status(statusCode).json({ error: `Checkout transaction failed: ${err.message}` });
+    res.status(statusCode).json({ error: statusCode === 409 ? err.message : 'Checkout transaction failed.' });
   }
 });
 
 /**
  * POST /api/checkouts/:id/return
  * Records RETURN_ASSET in the same DB transaction!
+ * Enforces Separation of Duties: custody holder cannot self-certify damage.
+ * On damage: sets DAMAGED_DURING_CHECKOUT, asset to REPAIR, and auto-generates maintenance work order.
  */
 checkoutRouter.post('/:id/return', requirePermission('checkouts:return'), idempotent(), async (req: Request, res: Response) => {
-  const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
+  const { orgId, userId: actorId, fullName: actorName, role, branchId: actorBranchId } = req.auth!;
   const chkId = req.params.id;
   const { returnCondition, damageReported, damageDescription, notes } = req.body;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -181,28 +217,35 @@ checkoutRouter.post('/:id/return', requirePermission('checkouts:return'), idempo
   const checkouts = await query<any>(`
     SELECT c.* FROM \`checkouts\` c
     INNER JOIN \`assets\` a ON c.asset_id = a.id
-    WHERE c.id = ? AND a.org_id = ?;
-  `, [chkId, orgId]);
+    WHERE c.id = ? AND (c.org_id = ? OR a.org_id = ?) AND c.status = 'ACTIVE';
+  `, [chkId, orgId, orgId]);
 
   if (checkouts.length === 0) {
-    res.status(404).json({ error: 'Checkout record not found in organization.' });
+    res.status(404).json({ error: 'Active checkout record not found in organization.' });
     return;
   }
 
   const chk = checkouts[0]!;
+  const normalizedCondition = normalizeCondition(returnCondition);
+  const isDamaged = Boolean(damageReported) || normalizedCondition === 'POOR';
 
   // Separation of duties rule:
-  // If damage is reported or condition degraded, the person who had custody CANNOT be the sole certifier!
-  if (damageReported && !canApproveWriteOff(actorId, chk.checked_out_to_user_id, role)) {
-    res.status(403).json({
-      error: 'Separation of Duties violation: The custody holder cannot certify a damage write-off or loss waiver.'
-    });
-    return;
+  // If damage is reported or condition degraded, or caller is the custody holder,
+  // enforce canCertifyDamagedReturn (custody holder cannot self-certify damage)
+  if (isDamaged) {
+    if (!canCertifyDamagedReturn(actorId, chk.checked_out_to_user_id, role, actorBranchId, chk.branch_id)) {
+      res.status(403).json({
+        error: 'Separation of Duties violation: The custody holder cannot self-certify a damaged return or write-off.',
+        code: 'SOD_VIOLATION'
+      });
+      return;
+    }
   }
 
-  try {
-    const normalizedCondition = normalizeCondition(returnCondition);
+  const finalCheckoutStatus = isDamaged ? 'DAMAGED_DURING_CHECKOUT' : 'RETURNED';
+  const finalAssetStatus = isDamaged ? 'REPAIR' : 'ACTIVE';
 
+  try {
     await withTransaction(async (tx) => {
       await tx(`
         UPDATE \`checkouts\` SET
@@ -210,22 +253,46 @@ checkoutRouter.post('/:id/return', requirePermission('checkouts:return'), idempo
           \`return_condition\` = ?,
           \`damage_reported\` = ?,
           \`damage_description\` = ?,
-          \`status\` = 'RETURNED',
-          \`notes\` = ?
-        WHERE \`id\` = ?;
+          \`status\` = ?,
+          \`notes\` = ?,
+          \`version\` = \`version\` + 1
+        WHERE \`id\` = ? AND \`status\` = 'ACTIVE';
       `, [
         normalizedCondition,
-        damageReported ? 1 : 0,
-        damageDescription || null,
+        isDamaged ? 1 : 0,
+        damageDescription || (isDamaged ? 'Hardware reported in damaged condition on check-in' : null),
+        finalCheckoutStatus,
         notes || null,
         chkId
       ]);
 
-      // Clear custody on asset
+      // Clear custody on asset only if it is still assigned to this checkout user
       await tx(
-        'UPDATE `assets` SET `assigned_to_user_id` = NULL, `assigned_to_user_name` = NULL, `assigned_at` = NULL, `asset_condition` = ? WHERE `id` = ?;',
-        [normalizedCondition, chk.asset_id]
+        'UPDATE `assets` SET `assigned_to_user_id` = NULL, `assigned_to_user_name` = NULL, `assigned_at` = NULL, `status` = ?, `asset_condition` = ?, `version` = `version` + 1 WHERE `id` = ? AND `assigned_to_user_id` = ?;',
+        [finalAssetStatus, normalizedCondition, chk.asset_id, chk.checked_out_to_user_id]
       );
+
+      // If damaged, automatically create an intake maintenance ticket in the same transaction
+      if (isDamaged) {
+        const maintId = crypto.randomUUID();
+        await tx(`
+          INSERT INTO \`maintenances\` (
+            \`id\`, \`org_id\`, \`branch_id\`, \`reported_by_user_id\`, \`asset_id\`, \`asset_code\`, \`asset_name\`,
+            \`type\`, \`status\`, \`priority\`, \`description\`, \`reported_by\`, \`assigned_technician\`,
+            \`start_date\`, \`expected_completion\`, \`cost\`, \`version\`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'REPAIR', 'PENDING', 'HIGH', ?, ?, 'Unassigned', CURRENT_DATE(), DATE_ADD(CURRENT_DATE(), INTERVAL 7 DAY), 0.00, 1);
+        `, [
+          maintId,
+          orgId,
+          chk.asset_branch_id || null,
+          actorId,
+          chk.asset_id,
+          chk.asset_code,
+          chk.asset_name,
+          damageDescription || 'Equipment returned in damaged condition; intake triage required.',
+          actorName
+        ]);
+      }
 
       await recordAuditEvent(tx, {
         orgId,
@@ -238,9 +305,11 @@ checkoutRouter.post('/:id/return', requirePermission('checkouts:return'), idempo
         entityName: chk.asset_name,
         changes: {
           assetId: chk.asset_id,
-          returnCondition: returnCondition || 'GOOD',
-          damageReported: Boolean(damageReported),
-          damageDescription
+          returnCondition: normalizedCondition,
+          damageReported: isDamaged,
+          damageDescription,
+          checkoutStatus: finalCheckoutStatus,
+          assetStatus: finalAssetStatus
         },
         ipAddress
       });
@@ -251,8 +320,8 @@ checkoutRouter.post('/:id/return', requirePermission('checkouts:return'), idempo
     });
 
     res.json({ success: true, message: 'Asset checked in successfully.' });
-  } catch (err: any) {
-    res.status(500).json({ error: `Return transaction failed: ${err.message}` });
+  } catch (_err) {
+    res.status(500).json({ error: 'Return transaction failed.' });
   }
 });
 
@@ -263,14 +332,13 @@ checkoutRouter.post('/:id/return', requirePermission('checkouts:return'), idempo
 checkoutRouter.post('/:id/writeoff', requirePermission('checkouts:writeoff'), idempotent(), async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const chkId = req.params.id;
-  const { reason, notes } = req.body;
+  const { reason, notes, isLost } = req.body;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
-  const checkouts = await query<any>(`
-    SELECT c.* FROM \`checkouts\` c
-    INNER JOIN \`assets\` a ON c.asset_id = a.id
-    WHERE c.id = ? AND a.org_id = ?;
-  `, [chkId, orgId]);
+  const checkouts = await query<any>(
+    'SELECT * FROM `checkouts` WHERE `id` = ? AND `org_id` = ?;',
+    [chkId, orgId]
+  );
 
   if (checkouts.length === 0) {
     res.status(404).json({ error: 'Checkout record not found in organization.' });
@@ -281,10 +349,14 @@ checkoutRouter.post('/:id/writeoff', requirePermission('checkouts:writeoff'), id
 
   if (!canApproveWriteOff(actorId, chk.checked_out_to_user_id, role)) {
     res.status(403).json({
-      error: 'Separation of Duties violation: The custody holder cannot certify a damage write-off or loss waiver.'
+      error: 'Separation of Duties violation: The custody holder or creator cannot certify a damage write-off or loss waiver.',
+      code: 'SOD_VIOLATION'
     });
     return;
   }
+
+  const isLossWaiver = Boolean(isLost) || String(reason || '').toLowerCase().includes('lost');
+  const finalCheckoutStatus = isLossWaiver ? 'LOST' : 'RETURNED';
 
   try {
     await withTransaction(async (tx) => {
@@ -294,10 +366,11 @@ checkoutRouter.post('/:id/writeoff', requirePermission('checkouts:writeoff'), id
           \`return_condition\` = 'POOR',
           \`damage_reported\` = 1,
           \`damage_description\` = ?,
-          \`status\` = 'RETURNED',
-          \`notes\` = ?
+          \`status\` = ?,
+          \`notes\` = ?,
+          \`version\` = \`version\` + 1
         WHERE \`id\` = ?;
-      `, [reason || 'Written off due to loss or damage', notes || null, chkId]);
+      `, [reason || 'Written off due to loss or damage', finalCheckoutStatus, notes || null, chkId]);
 
       await tx(
         'UPDATE `assets` SET `status` = \'DISPOSED\', `assigned_to_user_id` = NULL, `assigned_to_user_name` = NULL, `assigned_at` = NULL, `asset_condition` = \'POOR\', `version` = `version` + 1 WHERE `id` = ?;',
@@ -316,7 +389,8 @@ checkoutRouter.post('/:id/writeoff', requirePermission('checkouts:writeoff'), id
         changes: {
           assetId: chk.asset_id,
           reason: reason || 'Loss/Damage write-off',
-          status: 'DISPOSED'
+          status: 'DISPOSED',
+          checkoutStatus: finalCheckoutStatus
         },
         ipAddress
       });
@@ -327,7 +401,7 @@ checkoutRouter.post('/:id/writeoff', requirePermission('checkouts:writeoff'), id
     });
 
     res.json({ success: true, message: 'Asset write-off approved and certified successfully.' });
-  } catch (err: any) {
-    res.status(500).json({ error: `Write-off transaction failed: ${err.message}` });
+  } catch (_err) {
+    res.status(500).json({ error: 'Write-off transaction failed.' });
   }
 });

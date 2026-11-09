@@ -50,6 +50,7 @@ async function apiRequest(
 
 async function cleanTestData() {
   await query('DELETE FROM `audit_logs` WHERE `org_id` LIKE ?;', ['test-%']);
+  await query('DELETE FROM `audit_chain_heads` WHERE `org_id` LIKE ?;', ['test-%']);
   await query('DELETE FROM `checkouts` WHERE `id` LIKE ? OR `org_id` LIKE ?;', ['test-%', 'test-%']);
   await query('DELETE FROM `maintenances` WHERE `id` LIKE ? OR `org_id` LIKE ?;', ['test-%', 'test-%']);
   await query('DELETE FROM `assets` WHERE `id` LIKE ? OR `org_id` LIKE ?;', ['test-%', 'test-%']);
@@ -258,8 +259,8 @@ async function runTests() {
   // Test 3.3: Separation of Duties on Damage Write-off
   // Create a checkout for test-support-a1 (who has checkouts:return permission)
   await query(`
-    INSERT INTO \`checkouts\` (\`id\`, \`asset_id\`, \`asset_code\`, \`asset_name\`, \`checked_out_by\`, \`checked_out_to_user_id\`, \`checked_out_to_user_name\`, \`status\`)
-    VALUES ('test-chk-1', 'test-ast-a1', 'ALP-001', 'Alpha Laptop Hub 1', 'Alpha Admin', 'test-support-a1', 'Alpha Support 1', 'ACTIVE');
+    INSERT INTO \`checkouts\` (\`id\`, \`org_id\`, \`asset_id\`, \`asset_code\`, \`asset_name\`, \`checked_out_by\`, \`checked_out_to_user_id\`, \`checked_out_to_user_name\`, \`status\`)
+    VALUES ('test-chk-1', 'test-org-alpha', 'test-ast-a1', 'ALP-001', 'Alpha Laptop Hub 1', 'Alpha Admin', 'test-support-a1', 'Alpha Support 1', 'ACTIVE');
   `);
 
   // Custody holder test-support-a1 attempts to certify their own damage write-off

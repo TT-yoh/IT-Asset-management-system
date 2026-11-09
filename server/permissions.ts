@@ -20,6 +20,8 @@ export type PermissionAction =
   | 'assets:create'
   | 'assets:update'
   | 'assets:delete'
+  | 'assets:writeoff'
+  | 'assets:valuation'
   | 'checkouts:read'
   | 'checkouts:create'
   | 'checkouts:return'
@@ -45,6 +47,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly PermissionAction[]> = {
     'assets:create',
     'assets:update',
     'assets:delete',
+    'assets:writeoff',
+    'assets:valuation',
     'checkouts:read',
     'checkouts:create',
     'checkouts:return',
@@ -92,7 +96,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly PermissionAction[]> = {
     'assets:read',
     'assets:create',
     'assets:update',
-    'assets:delete',
+    'assets:writeoff',
     'checkouts:read',
     'checkouts:create',
     'checkouts:return',
@@ -108,7 +112,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly PermissionAction[]> = {
   ],
   FINANCE: [
     'assets:read',
-    'assets:delete', // Write-off asset
+    'assets:writeoff',
+    'assets:valuation',
     'checkouts:read',
     'maintenance:read',
     'budgets:read',
@@ -134,14 +139,102 @@ export function hasPermission(role: UserRole, action: PermissionAction): boolean
   return permissions ? permissions.includes(action) : false;
 }
 
+export const ROLE_HIERARCHY: Record<UserRole, number> = {
+  ADMIN: 100,
+  DIRECTOR: 80,
+  FINANCE: 60,
+  BRANCH_MANAGER: 50,
+  IT_SUPPORT: 40,
+  USER: 10
+};
+
 /**
- * Enforces separation of duties:
- * The person holding custody of an asset cannot approve/certify a damage write-off or loss waiver.
+ * Validates role assignment to prevent privilege escalation:
+ * - Only administrators can grant the ADMIN role.
+ * - Callers can never assign a role ranked higher than their own.
+ * - Nobody can grant SUPER_ADMIN (super admin is a DB flag, not a UserRole).
  */
-export function canApproveWriteOff(actorId: string, custodyUserId: string, role: UserRole): boolean {
-  if (actorId === custodyUserId) {
-    // Separation of duties violation: custody holder cannot self-certify write-off
+export function canAssignRole(callerRole: UserRole, targetRole: UserRole): boolean {
+  if (callerRole !== 'ADMIN') {
     return false;
   }
-  return role === 'ADMIN' || role === 'IT_SUPPORT' || role === 'FINANCE';
+  return ['ADMIN', 'DIRECTOR', 'BRANCH_MANAGER', 'IT_SUPPORT', 'FINANCE', 'USER'].includes(targetRole);
+}
+
+/**
+ * Enforces separation of duties (SoD) for asset write-offs:
+ * - The person holding custody cannot approve/certify a write-off.
+ * - The asset creator cannot approve/certify a write-off (prevents ghost asset creation & write-off).
+ * - The requester cannot approve/certify a write-off.
+ * - For unassigned assets, creator still cannot approve.
+ * - Requires ADMIN, IT_SUPPORT, or FINANCE role.
+ */
+export function canApproveWriteOff(
+  actorId: string | null | undefined,
+  custodyUserId?: string | null | undefined,
+  role?: UserRole,
+  creatorId?: string | null | undefined,
+  requesterId?: string | null | undefined
+): boolean {
+  if (!actorId || !role) {
+    return false;
+  }
+
+  // Must hold writeoff authority
+  if (role !== 'ADMIN' && role !== 'IT_SUPPORT' && role !== 'FINANCE') {
+    return false;
+  }
+
+  // Custody holder cannot self-certify write-off
+  if (custodyUserId && actorId === custodyUserId) {
+    return false;
+  }
+
+  // Asset creator cannot approve write-off
+  if (creatorId && actorId === creatorId) {
+    return false;
+  }
+
+  // Requester cannot approve write-off
+  if (requesterId && actorId === requesterId) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Enforces separation of duties for damaged returns:
+ * - Custody holder cannot self-certify damaged return.
+ * - Allowed for ADMIN, IT_SUPPORT, and FINANCE org-wide.
+ * - Allowed for BRANCH_MANAGER for assets within their assigned branch.
+ */
+export function canCertifyDamagedReturn(
+  actorId: string | null | undefined,
+  custodyUserId: string | null | undefined,
+  role: UserRole,
+  actorBranchId?: string | null | undefined,
+  assetBranchId?: string | null | undefined
+): boolean {
+  if (!actorId || !role) {
+    return false;
+  }
+
+  // Custody holder cannot self-certify damaged return
+  if (custodyUserId && actorId === custodyUserId) {
+    return false;
+  }
+
+  if (role === 'ADMIN' || role === 'IT_SUPPORT' || role === 'FINANCE') {
+    return true;
+  }
+
+  if (role === 'BRANCH_MANAGER') {
+    // Only within their own branch facility
+    if (actorBranchId && assetBranchId && actorBranchId === assetBranchId) {
+      return true;
+    }
+  }
+
+  return false;
 }

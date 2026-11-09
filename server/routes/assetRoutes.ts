@@ -1,21 +1,49 @@
+import crypto from 'crypto';
 import express, { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../db';
 import { authenticate, requirePermission, idempotent } from '../middleware';
+import { hasPermission, canApproveWriteOff } from '../permissions';
 import { recordAuditEvent } from '../audit';
 
 export const assetRouter = Router();
 assetRouter.use(authenticate);
 
+export function normalizeCondition(cond?: string): 'NEW' | 'GOOD' | 'FAIR' | 'POOR' {
+  if (!cond) return 'GOOD';
+  const c = String(cond).toUpperCase().trim();
+  if (['NEW', 'EXCELLENT', 'LIKE NEW', 'BRAND NEW', 'MINT'].includes(c)) return 'NEW';
+  if (['GOOD', 'VERY GOOD', 'FINE'].includes(c)) return 'GOOD';
+  if (['FAIR', 'ACCEPTABLE', 'DEGRADED'].includes(c)) return 'FAIR';
+  if (['POOR', 'DAMAGED', 'BROKEN', 'DEFECTIVE'].includes(c)) return 'POOR';
+  return 'GOOD';
+}
+
+export function normalizeStatus(status?: string): string {
+  if (!status) return 'ACTIVE';
+  const s = String(status).toUpperCase().trim();
+  if (s === 'AVAILABLE') return 'ACTIVE';
+  if (['ACTIVE', 'DAMAGED', 'REPAIR', 'DEPRECATED', 'SOLD', 'DISPOSED'].includes(s)) return s;
+  return 'ACTIVE';
+}
+
+const EXPLICIT_ASSET_COLUMNS = `
+  \`id\`, \`org_id\`, \`branch_id\`, \`branch_name\`, \`category_id\`, \`category_name\`,
+  \`asset_code\`, \`name\`, \`model\`, \`serial_number\`, \`mac_address\`, \`phone_number\`,
+  \`registered_email\`, \`imei_number\`, \`status\`, \`asset_condition\`, \`purchase_date\`,
+  \`purchase_cost\`, \`warranty_expiry\`, \`current_value\`, \`assigned_to_user_id\`,
+  \`assigned_to_user_name\`, \`assigned_to_user_avatar\`, \`assigned_at\`, \`image_url\`,
+  \`notes\`, \`version\`, \`created_at\`, \`updated_at\`
+`;
+
 /**
  * GET /api/assets
- * Strictly scoped by org_id and role's branch constraint
+ * Strictly scoped by session org_id and branch boundary with explicit column projection
  */
 assetRouter.get('/', requirePermission('assets:read'), async (req: Request, res: Response) => {
   const { orgId, role, branchId } = req.auth!;
-  const effectiveOrgId = orgId;
 
-  let sql = 'SELECT * FROM `assets` WHERE `org_id` = ?';
-  const params: any[] = [effectiveOrgId];
+  let sql = `SELECT ${EXPLICIT_ASSET_COLUMNS} FROM \`assets\` WHERE \`org_id\` = ?`;
+  const params: any[] = [orgId];
 
   // Enforce branch boundary for BRANCH_MANAGER and USER (fail closed if branchId is missing)
   if (role === 'BRANCH_MANAGER' || role === 'USER') {
@@ -35,11 +63,10 @@ assetRouter.get('/', requirePermission('assets:read'), async (req: Request, res:
 
 /**
  * GET /api/assets/check-redundancy
- * Pre-flight redundancy check for Asset Tag, Serial, MAC, and IMEI
+ * Scoped pre-flight redundancy check for Asset Tag, Serial, MAC, and IMEI without leaking cross-tenant data
  */
-assetRouter.get('/check-redundancy', async (req: Request, res: Response) => {
-  const { orgId } = req.auth!;
-  const effectiveOrgId = orgId;
+assetRouter.get('/check-redundancy', requirePermission('assets:read'), async (req: Request, res: Response) => {
+  const { orgId, role, branchId } = req.auth!;
 
   const assetCode = String(req.query.assetCode || '').trim();
   const serialNumber = String(req.query.serialNumber || '').trim();
@@ -49,19 +76,18 @@ assetRouter.get('/check-redundancy', async (req: Request, res: Response) => {
 
   const isAutoSerial = serialNumber.toLowerCase().startsWith('sn-ast') || serialNumber.toLowerCase().startsWith('sn-bulk');
 
-  const duplicateQuery = `
-    SELECT id, name, asset_code, serial_number, mac_address, imei_number, branch_name
+  let duplicateQuery = `
+    SELECT \`id\`, \`name\`, \`asset_code\`, \`serial_number\`, \`mac_address\`, \`imei_number\`, \`branch_id\`
     FROM \`assets\`
-    WHERE \`org_id\` = ? AND id != ? AND (
+    WHERE \`org_id\` = ? AND \`id\` != ? AND (
       (? != '' AND LOWER(\`asset_code\`) = LOWER(?))
       OR (? = 1 AND LOWER(\`serial_number\`) = LOWER(?))
       OR (? != '' AND LOWER(\`mac_address\`) = LOWER(?))
       OR (? != '' AND LOWER(\`imei_number\`) = LOWER(?))
-    ) LIMIT 1;
+    )
   `;
-
-  const rows = await query(duplicateQuery, [
-    effectiveOrgId,
+  const params: any[] = [
+    orgId,
     excludeId,
     assetCode,
     assetCode,
@@ -71,7 +97,16 @@ assetRouter.get('/check-redundancy', async (req: Request, res: Response) => {
     macAddress,
     imeiNumber,
     imeiNumber
-  ]);
+  ];
+
+  if ((role === 'BRANCH_MANAGER' || role === 'USER') && branchId) {
+    duplicateQuery += ' AND `branch_id` = ?';
+    params.push(branchId);
+  }
+
+  duplicateQuery += ' LIMIT 1;';
+
+  const rows = await query(duplicateQuery, params);
 
   if (rows.length === 0) {
     res.json({
@@ -106,39 +141,15 @@ assetRouter.get('/check-redundancy', async (req: Request, res: Response) => {
 
   res.json({
     isRedundant: true,
-    tagConflict: isTagMatch ? match : null,
-    serialConflict: isSerialMatch ? match : null,
-    macConflict: isMacMatch ? match : null,
-    imeiConflict: isImeiMatch ? match : null,
+    tagConflict: isTagMatch ? { assetCode: match.asset_code } : null,
+    serialConflict: isSerialMatch ? { serialNumber: match.serial_number } : null,
+    macConflict: isMacMatch ? { macAddress: match.mac_address } : null,
+    imeiConflict: isImeiMatch ? { imeiNumber: match.imei_number } : null,
     conflictField,
     conflictValue: conflictVal,
-    message: `${conflictField} "${conflictVal}" is already registered to "${match.name}" (Tag: ${match.asset_code}, Branch: ${match.branch_name}).`,
-    conflictAsset: {
-      id: match.id,
-      name: match.name,
-      assetCode: match.asset_code,
-      branchName: match.branch_name
-    }
+    message: `${conflictField} "${conflictVal}" is already registered.`
   });
 });
-
-export function normalizeCondition(cond?: string): 'NEW' | 'GOOD' | 'FAIR' | 'POOR' {
-  if (!cond) return 'GOOD';
-  const c = String(cond).toUpperCase().trim();
-  if (['NEW', 'EXCELLENT', 'LIKE NEW', 'BRAND NEW', 'MINT'].includes(c)) return 'NEW';
-  if (['GOOD', 'VERY GOOD', 'FINE'].includes(c)) return 'GOOD';
-  if (['FAIR', 'ACCEPTABLE', 'DEGRADED'].includes(c)) return 'FAIR';
-  if (['POOR', 'DAMAGED', 'BROKEN', 'DEFECTIVE'].includes(c)) return 'POOR';
-  return 'GOOD';
-}
-
-export function normalizeStatus(status?: string): string {
-  if (!status) return 'ACTIVE';
-  const s = String(status).toUpperCase().trim();
-  if (s === 'AVAILABLE') return 'ACTIVE';
-  if (['ACTIVE', 'DAMAGED', 'REPAIR', 'DEPRECATED', 'SOLD', 'DISPOSED'].includes(s)) return s;
-  return 'ACTIVE';
-}
 
 /**
  * POST /api/assets
@@ -159,21 +170,36 @@ assetRouter.post('/', requirePermission('assets:create'), idempotent(), async (r
     return;
   }
 
-  const assetId = data.id || `ast-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-  // Enforce branch scoping: BRANCH_MANAGER can only create within their branch
-  const effectiveBranchId = role === 'BRANCH_MANAGER' ? userBranchId : (data.branchId || data.branch_id || userBranchId);
+  const assetId = (data.id && typeof data.id === 'string' && /^[a-zA-Z0-9_-]{3,64}$/.test(data.id)) ? data.id : crypto.randomUUID();
+
+  // Validate branch: BRANCH_MANAGER restricted to assigned branch; other roles can specify or fallback
+  let effectiveBranchId = role === 'BRANCH_MANAGER' ? userBranchId : (data.branchId || data.branch_id || userBranchId);
+  let effectiveBranchName = data.branchName || data.branch_name || 'Main Hub';
+
+  if (effectiveBranchId) {
+    const branchCheck = await query<any>(
+      'SELECT `id`, `name` FROM `branches` WHERE `id` = ? AND `org_id` = ? LIMIT 1;',
+      [effectiveBranchId, orgId]
+    );
+    if (branchCheck.length === 0) {
+      res.status(400).json({ error: 'Specified branch does not exist in your organization.' });
+      return;
+    }
+    effectiveBranchId = branchCheck[0].id;
+    effectiveBranchName = branchCheck[0].name;
+  }
+
   const condition = normalizeCondition(data.condition || data.assetCondition || data.asset_condition);
-  const effectiveOrgId = orgId;
 
   // Redundancy & Duplicate Data Check
-  const cleanCode = assetCode.trim();
-  const cleanSerial = serialNumber.trim();
+  const cleanCode = String(assetCode).trim();
+  const cleanSerial = String(serialNumber).trim();
   const mac = (data.macAddress || data.mac_address || '').trim();
   const imei = (data.imeiNumber || data.imei_number || '').trim();
 
   const isAutoSerial = cleanSerial.toLowerCase().startsWith('sn-ast') || cleanSerial.toLowerCase().startsWith('sn-bulk');
   const duplicateQuery = `
-    SELECT id, name, asset_code, serial_number, mac_address, imei_number
+    SELECT \`id\`, \`name\`, \`asset_code\`, \`serial_number\`, \`mac_address\`, \`imei_number\`
     FROM \`assets\`
     WHERE \`org_id\` = ? AND (
       LOWER(\`asset_code\`) = LOWER(?)
@@ -184,7 +210,7 @@ assetRouter.post('/', requirePermission('assets:create'), idempotent(), async (r
   `;
 
   const duplicates = await query(duplicateQuery, [
-    effectiveOrgId,
+    orgId,
     cleanCode,
     cleanSerial && !isAutoSerial ? 1 : 0,
     cleanSerial,
@@ -211,7 +237,7 @@ assetRouter.post('/', requirePermission('assets:create'), idempotent(), async (r
     }
 
     res.status(409).json({
-      error: `Redundant data detected: ${conflictField} "${conflictVal}" is already registered to "${match.name}" (Tag: ${match.asset_code}).`,
+      error: `Redundant data detected: ${conflictField} "${conflictVal}" is already registered.`,
       code: 'DUPLICATE_ASSET_DATA',
       conflictField,
       conflictAsset: {
@@ -236,9 +262,9 @@ assetRouter.post('/', requirePermission('assets:create'), idempotent(), async (r
     await withTransaction(async (tx) => {
       await tx(insertSql, [
         assetId,
-        effectiveOrgId,
+        orgId,
         effectiveBranchId,
-        data.branchName || data.branch_name || 'Main Hub',
+        effectiveBranchName,
         data.categoryId || data.category_id || 'cat-gen',
         data.categoryName || data.category_name || 'Hardware',
         assetCode,
@@ -260,7 +286,7 @@ assetRouter.post('/', requirePermission('assets:create'), idempotent(), async (r
       ]);
 
       await recordAuditEvent(tx, {
-        orgId: effectiveOrgId,
+        orgId,
         actorId,
         userName: actorName,
         role,
@@ -284,14 +310,15 @@ assetRouter.post('/', requirePermission('assets:create'), idempotent(), async (r
     });
 
     res.status(201).json({ success: true, id: assetId });
-  } catch (err: any) {
-    res.status(500).json({ error: `Asset creation transaction failed: ${err.message}` });
+  } catch (_err) {
+    res.status(500).json({ error: 'Asset creation transaction failed.' });
   }
 });
 
 /**
  * POST /api/assets/bulk
- * High-throughput batch ingestion of multiple assets in a single database transaction
+ * High-throughput batch ingestion of multiple assets in a single database transaction.
+ * Capped at 500 rows with intra-batch duplicate detection and transactional audit recording.
  */
 assetRouter.post('/bulk', express.json({ limit: '5mb' }), requirePermission('assets:create'), idempotent(), async (req: Request, res: Response) => {
   const { orgId, role, userId: actorId, fullName: actorName, branchId: userBranchId } = req.auth!;
@@ -303,13 +330,19 @@ assetRouter.post('/bulk', express.json({ limit: '5mb' }), requirePermission('ass
     return;
   }
 
-  const effectiveOrgId = orgId;
+  if (rawAssets.length > 500) {
+    res.status(400).json({ error: 'Bulk import exceeds maximum allowed limit of 500 items per request.' });
+    return;
+  }
 
   const results: { imported: number; skipped: number; errors: string[] } = {
     imported: 0,
     skipped: 0,
     errors: []
   };
+
+  const seenCodes = new Set<string>();
+  const seenSerials = new Set<string>();
 
   try {
     await withTransaction(async (tx) => {
@@ -325,13 +358,32 @@ assetRouter.post('/bulk', express.json({ limit: '5mb' }), requirePermission('ass
           continue;
         }
 
+        const cleanCode = assetCode.toLowerCase();
+        if (seenCodes.has(cleanCode)) {
+          results.skipped++;
+          results.errors.push(`Row #${i + 1}: Duplicate asset code "${assetCode}" in batch`);
+          continue;
+        }
+        seenCodes.add(cleanCode);
+
         const serialNumber = String(item.serialNumber || item.serial_number || `SN-${assetCode}`).trim();
-        const assetId = item.id || `ast-bulk-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 6)}`;
+        const isAutoSerial = serialNumber.toLowerCase().startsWith('sn-ast') || serialNumber.toLowerCase().startsWith('sn-bulk');
+        if (!isAutoSerial) {
+          const cleanSerial = serialNumber.toLowerCase();
+          if (seenSerials.has(cleanSerial)) {
+            results.skipped++;
+            results.errors.push(`Row #${i + 1}: Duplicate serial number "${serialNumber}" in batch`);
+            continue;
+          }
+          seenSerials.add(cleanSerial);
+        }
+
+        const assetId = (item.id && typeof item.id === 'string' && /^[a-zA-Z0-9_-]{3,64}$/.test(item.id)) ? item.id : crypto.randomUUID();
         const effectiveBranchId = role === 'BRANCH_MANAGER' ? userBranchId : (item.branchId || item.branch_id || userBranchId);
 
         validRows.push([
           assetId,
-          effectiveOrgId,
+          orgId,
           effectiveBranchId,
           item.branchName || item.branch_name || 'Main Hub',
           item.categoryId || item.category_id || 'cat-gen',
@@ -376,7 +428,7 @@ assetRouter.post('/bulk', express.json({ limit: '5mb' }), requirePermission('ass
 
       if (results.imported > 0) {
         await recordAuditEvent(tx, {
-          orgId: effectiveOrgId,
+          orgId,
           actorId,
           userName: actorName,
           role,
@@ -395,14 +447,15 @@ assetRouter.post('/bulk', express.json({ limit: '5mb' }), requirePermission('ass
     });
 
     res.status(201).json({ success: true, ...results });
-  } catch (err: any) {
-    res.status(500).json({ error: `Bulk asset insertion failed: ${err.message}` });
+  } catch (_err) {
+    res.status(500).json({ error: 'Bulk asset insertion failed.' });
   }
 });
 
 /**
  * PUT /api/assets/:id
  * Updates asset and records UPDATE_ASSET in the same DB transaction!
+ * Enforces mandatory baseVersion (OCC), valuation permissions, and write-off SoD guards.
  */
 assetRouter.put('/:id', requirePermission('assets:update'), async (req: Request, res: Response) => {
   const { orgId, role, userId: actorId, fullName: actorName, branchId: userBranchId } = req.auth!;
@@ -410,7 +463,7 @@ assetRouter.put('/:id', requirePermission('assets:update'), async (req: Request,
   const data = req.body;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
-  let verifySql = 'SELECT * FROM `assets` WHERE `id` = ? AND `org_id` = ?';
+  let verifySql = `SELECT ${EXPLICIT_ASSET_COLUMNS} FROM \`assets\` WHERE \`id\` = ? AND \`org_id\` = ?`;
   const verifyParams: any[] = [assetId, orgId];
   if (role === 'BRANCH_MANAGER') {
     verifySql += ' AND `branch_id` = ?';
@@ -426,50 +479,106 @@ assetRouter.put('/:id', requirePermission('assets:update'), async (req: Request,
   const prev = existing[0]!;
   const currentVersion = Number(prev.version || 1);
 
-  // Optimistic Concurrency Control: compare client baseVersion / version / If-Match
+  // Mandatory baseVersion for Optimistic Concurrency Control (OCC)
   const rawExpected = data.baseVersion ?? data.version ?? (req.headers['if-match'] ? parseInt(String(req.headers['if-match']).replace(/["w/]/gi, ''), 10) : undefined);
-  if (rawExpected !== undefined) {
-    const expectedVersion = Number(rawExpected);
-    if (!isNaN(expectedVersion) && expectedVersion !== currentVersion) {
-      res.status(409).json({
-        error: `Conflict: Asset version mismatch. Server is at version ${currentVersion}, but update was based on version ${expectedVersion}.`,
-        code: 'VERSION_CONFLICT',
-        currentVersion,
-        expectedVersion
-      });
-      return;
+  if (rawExpected === undefined) {
+    res.status(428).json({
+      error: 'baseVersion is required for optimistic concurrency control',
+      code: 'PRECONDITION_REQUIRED'
+    });
+    return;
+  }
+
+  const expectedVersion = Number(rawExpected);
+  if (isNaN(expectedVersion) || expectedVersion !== currentVersion) {
+    res.status(409).json({
+      error: `Conflict: Asset version mismatch. Server is at version ${currentVersion}, but update was based on version ${expectedVersion}.`,
+      code: 'VERSION_CONFLICT',
+      currentVersion,
+      expectedVersion
+    });
+    return;
+  }
+
+  // Permission check for valuation changes (current_value)
+  const isUpdatingValue = data.currentValue !== undefined || data.current_value !== undefined;
+  if (isUpdatingValue) {
+    const proposedValue = Number(data.currentValue ?? data.current_value);
+    if (proposedValue !== Number(prev.current_value)) {
+      if (!hasPermission(role, 'assets:valuation')) {
+        res.status(403).json({
+          error: 'Only administrators and finance personnel are authorized to modify asset valuation.',
+          code: 'FORBIDDEN'
+        });
+        return;
+      }
     }
   }
+
+  // Status transitions & Separation of Duties
+  let targetStatus = prev.status;
+  if (data.status && data.status !== prev.status) {
+    const candidateStatus = normalizeStatus(data.status);
+
+    if (candidateStatus === 'DISPOSED' || candidateStatus === 'SOLD' || candidateStatus === 'DEPRECATED') {
+      if (!hasPermission(role, 'assets:writeoff')) {
+        res.status(403).json({
+          error: 'You do not have permission to write off, dispose, or retire assets.',
+          code: 'FORBIDDEN'
+        });
+        return;
+      }
+
+      if (!canApproveWriteOff(actorId, prev.assigned_to_user_id, role, prev.created_by_user_id)) {
+        res.status(403).json({
+          error: 'Separation of duties violation: custody holder or creator cannot approve asset write-off.',
+          code: 'SOD_VIOLATION'
+        });
+        return;
+      }
+    } else if (candidateStatus === 'REPAIR') {
+      if (prev.status === 'DISPOSED' || prev.status === 'SOLD' || prev.status === 'DEPRECATED') {
+        res.status(400).json({
+          error: `Cannot transition asset in "${prev.status}" state to REPAIR.`,
+          code: 'INVALID_STATUS_TRANSITION'
+        });
+        return;
+      }
+    }
+
+    targetStatus = candidateStatus;
+  }
+
+  const updatedCondition = (data.condition || data.assetCondition || data.asset_condition)
+    ? normalizeCondition(data.condition || data.assetCondition || data.asset_condition)
+    : prev.asset_condition;
+
+  const targetValue = isUpdatingValue ? Number(data.currentValue ?? data.current_value) : prev.current_value;
 
   const updateSql = `
     UPDATE \`assets\` SET
       \`name\` = ?, \`model\` = ?, \`status\` = ?, \`asset_condition\` = ?, \`current_value\` = ?, \`notes\` = ?,
       \`version\` = \`version\` + 1
-    WHERE \`id\` = ? AND \`org_id\` = ? AND (\`version\` = ? OR ? IS NULL);
+    WHERE \`id\` = ? AND \`org_id\` = ? AND \`version\` = ?;
   `;
-
-  const updatedCondition = (data.condition || data.assetCondition || data.asset_condition)
-    ? normalizeCondition(data.condition || data.assetCondition || data.asset_condition)
-    : prev.asset_condition;
 
   try {
     await withTransaction(async (tx) => {
       const updateRes = await tx(updateSql, [
         data.name || prev.name,
         data.model ?? prev.model,
-        data.status ?? prev.status,
+        targetStatus,
         updatedCondition,
-        data.currentValue ?? data.current_value ?? prev.current_value,
+        targetValue,
         data.notes ?? prev.notes,
         assetId,
         orgId,
-        rawExpected !== undefined ? Number(rawExpected) : null,
-        rawExpected !== undefined ? Number(rawExpected) : null
+        currentVersion
       ]);
 
       const affected = (updateRes as any)?.affectedRows ?? (Array.isArray(updateRes) ? (updateRes as any)[0]?.affectedRows : undefined);
-      if (rawExpected !== undefined && affected !== undefined && affected === 0) {
-        const err: any = new Error(`Conflict: Asset version mismatch. Concurrent update already modified this asset.`);
+      if (affected !== undefined && affected === 0) {
+        const err: any = new Error('Conflict: Asset version mismatch. Concurrent update already modified this asset.');
         err.statusCode = 409;
         err.code = 'VERSION_CONFLICT';
         throw err;
@@ -486,7 +595,7 @@ assetRouter.put('/:id', requirePermission('assets:update'), async (req: Request,
         entityName: data.name || prev.name,
         changes: {
           previous: { status: prev.status, condition: prev.asset_condition, value: prev.current_value, version: currentVersion },
-          updated: { status: data.status, condition: data.condition, value: data.currentValue, version: currentVersion + 1 }
+          updated: { status: targetStatus, condition: updatedCondition, value: targetValue, version: currentVersion + 1 }
         },
         ipAddress
       });
@@ -495,26 +604,34 @@ assetRouter.put('/:id', requirePermission('assets:update'), async (req: Request,
     res.json({ success: true, message: 'Asset updated successfully.', version: currentVersion + 1 });
   } catch (err: any) {
     const statusCode = err.statusCode || 500;
-    res.status(statusCode).json({ error: `Asset update transaction failed: ${err.message}` });
+    res.status(statusCode).json({ error: statusCode === 409 ? err.message : 'Asset update transaction failed.' });
   }
 });
 
 /**
  * DELETE /api/assets/:id
- * Only ADMIN or FINANCE (for write-off) can delete, recorded in audit transaction!
+ * Only ADMIN can execute hard deletion, and only on assets with ZERO linked records and NO active assignment.
+ * Assets with history must be written off (status: DISPOSED) to preserve custody ledger integrity.
  */
 assetRouter.delete('/:id', requirePermission('assets:delete'), idempotent(), async (req: Request, res: Response) => {
   const { orgId, role, userId: actorId, fullName: actorName } = req.auth!;
   const assetId = req.params.id;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
-  const existing = await query('SELECT * FROM `assets` WHERE `id` = ? AND `org_id` = ?;', [assetId, orgId]);
+  if (role !== 'ADMIN') {
+    res.status(403).json({ error: 'Only administrators are authorized to purge assets from the registry.' });
+    return;
+  }
+
+  const existing = await query(`SELECT ${EXPLICIT_ASSET_COLUMNS} FROM \`assets\` WHERE \`id\` = ? AND \`org_id\` = ?;`, [assetId, orgId]);
   if (existing.length === 0) {
     res.status(404).json({ error: 'Asset not found in organization.' });
     return;
   }
 
-  const currentVersion = Number(existing[0]!.version || 1);
+  const asset = existing[0]!;
+  const currentVersion = Number(asset.version || 1);
+
   const rawExpected = req.body?.baseVersion ?? req.body?.version;
   if (rawExpected !== undefined) {
     const expectedVersion = Number(rawExpected);
@@ -529,24 +646,37 @@ assetRouter.delete('/:id', requirePermission('assets:delete'), idempotent(), asy
     }
   }
 
-  const assetName = existing[0]!.name || assetId;
+  // Refuse hard delete if asset has linked checkouts, maintenances, or is currently assigned
+  const historyCheck = await query<any>(
+    'SELECT (SELECT COUNT(*) FROM `checkouts` WHERE `asset_id` = ?) + (SELECT COUNT(*) FROM `maintenances` WHERE `asset_id` = ?) AS cnt;',
+    [assetId, assetId]
+  );
+  const hasLinkedRecords = (historyCheck[0]?.cnt || 0) > 0;
+  const isAssigned = Boolean(asset.assigned_to_user_id);
+
+  if (hasLinkedRecords || isAssigned) {
+    res.status(409).json({
+      error: 'Cannot delete asset with associated checkout or maintenance records or active custody. Write off asset (status: DISPOSED) instead.',
+      code: 'ASSET_HAS_HISTORY'
+    });
+    return;
+  }
+
+  const assetName = asset.name || assetId;
 
   try {
-    const historyCheck = await query<any>(
-      'SELECT (SELECT COUNT(*) FROM `checkouts` WHERE `asset_id` = ?) + (SELECT COUNT(*) FROM `maintenances` WHERE `asset_id` = ?) AS cnt;',
-      [assetId, assetId]
-    );
-    const hasLinkedRecords = (historyCheck[0]?.cnt || 0) > 0;
-
     await withTransaction(async (tx) => {
-      if (hasLinkedRecords) {
-        // Soft delete / write-off: preserve custody audit history per ON DELETE RESTRICT constraints
-        await tx(
-          'UPDATE `assets` SET `status` = \'DISPOSED\', `assigned_to_user_id` = NULL, `assigned_to_user_name` = NULL, `version` = `version` + 1 WHERE `id` = ? AND `org_id` = ?;',
-          [assetId, orgId]
-        );
-      } else {
-        await tx('DELETE FROM `assets` WHERE `id` = ? AND `org_id` = ?;', [assetId, orgId]);
+      const deleteRes = await tx(
+        'DELETE FROM `assets` WHERE `id` = ? AND `org_id` = ? AND (`version` = ? OR ? IS NULL);',
+        [assetId, orgId, currentVersion, currentVersion]
+      );
+
+      const affected = (deleteRes as any)?.affectedRows ?? (Array.isArray(deleteRes) ? (deleteRes as any)[0]?.affectedRows : undefined);
+      if (affected !== undefined && affected === 0) {
+        const err: any = new Error('Conflict: Asset version mismatch on delete.');
+        err.statusCode = 409;
+        err.code = 'VERSION_CONFLICT';
+        throw err;
       }
 
       await recordAuditEvent(tx, {
@@ -558,20 +688,20 @@ assetRouter.delete('/:id', requirePermission('assets:delete'), idempotent(), asy
         entityType: 'Asset',
         entityId: assetId,
         entityName: assetName,
-        changes: { deletedAssetId: assetId, status: 'DISPOSED', preservedCustodyHistory: hasLinkedRecords },
+        changes: { deletedAssetId: assetId },
         ipAddress
       });
 
       if (req.idempotency) {
         await req.idempotency.complete(tx, 200, {
           success: true,
-          message: hasLinkedRecords ? 'Asset written off and archived to preserve custody audit history.' : 'Asset deleted successfully.'
+          message: 'Asset purged from registry.'
         });
       }
     });
 
-    res.json({ success: true, message: hasLinkedRecords ? 'Asset written off and archived to preserve custody audit history.' : 'Asset deleted successfully.' });
-  } catch (err: any) {
-    res.status(500).json({ error: `Asset deletion transaction failed: ${err.message}` });
+    res.json({ success: true, message: 'Asset purged from registry.' });
+  } catch (_err) {
+    res.status(500).json({ error: 'Asset deletion transaction failed.' });
   }
 });

@@ -271,10 +271,35 @@ export function generateReport(report_type: string, filters: any, assetList: Ass
 }
 
 /**
- * Export data to Microsoft Excel
+ * Sanitizes input data against CSV / Formula Injection (CWE-1236).
+ * Pre-emptively escapes cells starting with formula trigger characters: '=', '+', '-', '@', '\t', '\r'.
+ */
+export function sanitizeForFormulaInjection(val: any): any {
+  if (typeof val === 'string') {
+    if (/^[=+\-@\t\r]/.test(val)) {
+      return `'${val}`;
+    }
+    return val;
+  }
+  if (Array.isArray(val)) {
+    return val.map(sanitizeForFormulaInjection);
+  }
+  if (val && typeof val === 'object') {
+    const cleaned: Record<string, any> = {};
+    for (const [k, v] of Object.entries(val)) {
+      cleaned[k] = sanitizeForFormulaInjection(v);
+    }
+    return cleaned;
+  }
+  return val;
+}
+
+/**
+ * Export data to Microsoft Excel with Formula Injection Protection
  */
 export function exportToExcel(data: any[], filename: string) {
-  const worksheet = XLSX.utils.json_to_sheet(data);
+  const sanitized = Array.isArray(data) ? data.map(item => sanitizeForFormulaInjection(item)) : [];
+  const worksheet = XLSX.utils.json_to_sheet(sanitized);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Report Data');
   XLSX.writeFile(workbook, `${filename}.xlsx`);

@@ -147,18 +147,28 @@ export async function recordAuditEvent(
   const ipAddress = params.ipAddress || '127.0.0.1';
   const timestamp = normalizeAuditTimestamp(params.timestamp || new Date());
 
-  // Find latest sequence and hash for this tenant
-  const lastLogs = await executor<any>(
-    'SELECT `seq`, `hash` FROM `audit_logs` WHERE `org_id` = ? ORDER BY `seq` DESC LIMIT 1;',
+  // 1. Lock tenant chain head row to serialize audit log sequence and prevent chain forks
+  const headRows = await executor<any>(
+    'SELECT `last_seq`, `last_hash` FROM `audit_chain_heads` WHERE `org_id` = ? FOR UPDATE;',
     [orgId]
   );
 
   let seq = 1;
   let prev_hash = GENESIS_PREV_HASH;
 
-  if (lastLogs && lastLogs.length > 0) {
-    seq = Number(lastLogs[0].seq) + 1;
-    prev_hash = lastLogs[0].hash || GENESIS_PREV_HASH;
+  if (headRows && headRows.length > 0) {
+    seq = Number(headRows[0].last_seq) + 1;
+    prev_hash = headRows[0].last_hash || GENESIS_PREV_HASH;
+  } else {
+    // Fallback: check audit_logs table for legacy or unmigrated head
+    const lastLogs = await executor<any>(
+      'SELECT `seq`, `hash` FROM `audit_logs` WHERE `org_id` = ? ORDER BY `seq` DESC LIMIT 1;',
+      [orgId]
+    );
+    if (lastLogs && lastLogs.length > 0) {
+      seq = Number(lastLogs[0].seq) + 1;
+      prev_hash = lastLogs[0].hash || GENESIS_PREV_HASH;
+    }
   }
 
   const hash = computeAuditHash({
@@ -202,6 +212,13 @@ export async function recordAuditEvent(
     hash,
     ipAddress
   ]);
+
+  // 2. Update the serialized chain head pointer for this organization
+  await executor(`
+    INSERT INTO \`audit_chain_heads\` (\`org_id\`, \`last_seq\`, \`last_hash\`)
+    VALUES (?, ?, ?)
+    ON DUPLICATE KEY UPDATE \`last_seq\` = VALUES(\`last_seq\`), \`last_hash\` = VALUES(\`last_hash\`);
+  `, [orgId, seq, hash]);
 
   return {
     id,

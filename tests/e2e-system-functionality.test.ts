@@ -14,6 +14,7 @@
 import app from '../server/index';
 import { query } from '../server/db';
 import { hashPassword } from '../server/auth';
+import { getLatestTestInviteToken } from '../server/mailer';
 
 const testOrgId = 'org-e2e-test';
 const testAdminEmail = process.env.TEST_ADMIN_EMAIL || 'test-admin-e2e@omniasset.internal';
@@ -63,6 +64,7 @@ test('1. Health Check Endpoint (/api/health)', async () => {
 // 2. Administrator Login
 test('2. Administrator Login', async () => {
   await query('DELETE FROM `audit_logs` WHERE `org_id` = ?;', [testOrgId]);
+  await query('DELETE FROM `audit_chain_heads` WHERE `org_id` = ?;', [testOrgId]);
   await query('DELETE FROM `checkouts` WHERE `org_id` = ? OR `id` LIKE "e2e-%" OR `asset_id` LIKE "e2e-%";', [testOrgId]);
   await query('DELETE FROM `maintenances` WHERE `org_id` = ? OR `id` LIKE "e2e-%" OR `asset_id` LIKE "e2e-%";', [testOrgId]);
   await query('DELETE FROM `assets` WHERE `org_id` = ? OR `id` LIKE "e2e-%";', [testOrgId]);
@@ -85,6 +87,21 @@ test('2. Administrator Login', async () => {
     hash,
     'E2E Test Admin',
     'ADMIN',
+    'ACTIVE',
+    'branch-e2e',
+    'E2E HQ'
+  ]);
+
+  await query(`
+    INSERT INTO users (id, org_id, email, password_hash, full_name, role, status, branch_id, branch_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+  `, [
+    'usr-1',
+    testOrgId,
+    'sarah.jenkins@omnitech.io',
+    hash,
+    'Sarah Jenkins',
+    'USER',
     'ACTIVE',
     'branch-e2e',
     'E2E HQ'
@@ -407,19 +424,33 @@ test('14. Staff Invitation & Status Management (/api/users)', async () => {
     })
   });
   if (!resInvite.ok) throw new Error(`User invite failed: ${await resInvite.text()}`);
+  const inviteData = await resInvite.json();
+  if (inviteData.userId) testUserId = inviteData.userId;
 
-  // 14b. Update User Details
+  // 14b. Update User Details (baseVersion = 1)
   const resUpdate = await fetch(`${BASE_URL}/api/users/${testUserId}`, {
     method: 'PUT',
     headers: headers(),
     body: JSON.stringify({
       fullName: 'E2E Senior Security Engineer',
       role: 'IT_SUPPORT',
-      status: 'ACTIVE',
       baseVersion: 1
     })
   });
   if (!resUpdate.ok) throw new Error(`User update failed: ${await resUpdate.text()}`);
+
+  // 14c. User activates through invitation link token
+  const inviteToken = getLatestTestInviteToken(testEmail);
+  if (!inviteToken) throw new Error('Invite token not found in test mailbox');
+  const resAccept = await fetch(`${BASE_URL}/api/auth/activate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      inviteToken,
+      newPassword: 'StrongPassword123!@#'
+    })
+  });
+  if (!resAccept.ok) throw new Error(`Accept invite failed: ${await resAccept.text()}`);
 });
 
 // 15. Cryptographic SHA-256 Audit Hash Chain Verification
@@ -437,14 +468,39 @@ test('15. Immutable SHA-256 Audit Chain Verification (/api/audit-logs/verify)', 
 
 // 16. Asset Deletion & Cleanup
 test('16. Asset Deletion with Audit Logging (DELETE /api/assets/:id)', async () => {
-  const res = await fetch(`${BASE_URL}/api/assets/${testAssetId}`, {
+  // 16a. Verify hard delete on asset with linked records returns 409 ASSET_HAS_HISTORY
+  const resBlocked = await fetch(`${BASE_URL}/api/assets/${testAssetId}`, {
     method: 'DELETE',
     headers: headers(),
-    body: JSON.stringify({ baseVersion: 2 })
+    body: JSON.stringify({ baseVersion: 3 })
   });
+  if (resBlocked.status !== 409) {
+    throw new Error(`Expected 409 ASSET_HAS_HISTORY when deleting asset with records, got ${resBlocked.status}`);
+  }
 
-  if (!res.ok) throw new Error(`Asset deletion failed: ${await res.text()}`);
-  const data = await res.json();
+  // 16b. Hard purge an unlinked clean asset with 0 checkouts/maintenance
+  const unlinkedAssetCode = `PURGE-${Date.now()}`;
+  const resCreateClean = await fetch(`${BASE_URL}/api/assets`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({
+      name: 'Temporary Clean Asset for Purge',
+      assetCode: unlinkedAssetCode,
+      serialNumber: `SN-${unlinkedAssetCode}`,
+      status: 'ACTIVE',
+      condition: 'NEW'
+    })
+  });
+  if (!resCreateClean.ok) throw new Error(`Failed to create clean asset for purge: ${await resCreateClean.text()}`);
+  const cleanAsset = await resCreateClean.json();
+
+  const resPurge = await fetch(`${BASE_URL}/api/assets/${cleanAsset.id}`, {
+    method: 'DELETE',
+    headers: headers(),
+    body: JSON.stringify({ baseVersion: 1 })
+  });
+  if (!resPurge.ok) throw new Error(`Asset deletion failed: ${await resPurge.text()}`);
+  const data = await resPurge.json();
   if (!data.success) throw new Error('Asset deletion did not return success: true');
 });
 

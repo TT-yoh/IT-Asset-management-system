@@ -13,6 +13,7 @@
 import app from '../server/index';
 import { query } from '../server/db';
 import { hashPassword } from '../server/auth';
+import { getLatestTestInviteToken } from '../server/mailer';
 
 const testAdminEmail = process.env.TEST_ADMIN_EMAIL || 'test-admin-invite@omniasset.internal';
 const testAdminPassword = process.env.TEST_ADMIN_PASSWORD || 'TestPass123!Secure';
@@ -108,12 +109,12 @@ async function run() {
   }
 
   const inviteData = await inviteRes.json();
-  if (!inviteData.inviteToken) {
-    throw new Error('Server did not return inviteToken');
+  const firstToken = getLatestTestInviteToken(inviteEmail);
+  if (!firstToken) {
+    throw new Error('Test mailbox did not receive invite token');
   }
-  const firstToken = inviteData.inviteToken;
   const testUserId = inviteData.userId;
-  console.log(`   User invited! Token: ${firstToken}, User ID: ${testUserId}`);
+  console.log(`   User invited! Token delivered via mailer: ${firstToken}, User ID: ${testUserId}`);
 
   // 3. Verify GET /api/users does NOT leak the inviteToken (Phase 4.10 zero-leakage)
   console.log('3. Verifying GET /api/users does NOT leak inviteToken (zero-leakage)...');
@@ -157,10 +158,10 @@ async function run() {
     throw new Error(`Re-invite failed: ${reinviteRes.status}`);
   }
   const reinviteData = await reinviteRes.json();
-  if (!reinviteData.inviteToken) throw new Error('Re-invite did not return a fresh inviteToken');
-  const freshToken = reinviteData.inviteToken;
+  const freshToken = getLatestTestInviteToken(inviteEmail);
+  if (!freshToken) throw new Error('Re-invite did not deliver a fresh invite token');
   if (freshToken === firstToken) throw new Error('Fresh token must be different from previous token');
-  console.log(`   Fresh token generated: ${freshToken}`);
+  console.log(`   Fresh token generated and delivered: ${freshToken}`);
 
   // Old token should now be invalid
   const oldCheckRes = await fetch(`${BASE_URL}/api/auth/invite/${encodeURIComponent(firstToken)}`);

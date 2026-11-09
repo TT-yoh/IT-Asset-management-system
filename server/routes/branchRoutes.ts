@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../db';
 import { authenticate, requirePermission } from '../middleware';
@@ -6,14 +7,19 @@ import { recordAuditEvent } from '../audit';
 export const branchRouter = Router();
 branchRouter.use(authenticate);
 
+const EXPLICIT_BRANCH_COLUMNS = `
+  \`id\`, \`org_id\`, \`name\`, \`code\`, \`location\`, \`city\`, \`country\`, \`manager_name\`, \`created_at\`
+`;
+
 /**
  * GET /api/branches
+ * Scoped strictly by tenant org_id with explicit columns
  */
 branchRouter.get('/', requirePermission('branches:read'), async (req: Request, res: Response) => {
   const { orgId } = req.auth!;
 
   const rows = await query(
-    'SELECT * FROM `branches` WHERE `org_id` = ? ORDER BY `name` ASC;',
+    `SELECT ${EXPLICIT_BRANCH_COLUMNS} FROM \`branches\` WHERE \`org_id\` = ? ORDER BY \`name\` ASC;`,
     [orgId]
   );
 
@@ -34,7 +40,7 @@ branchRouter.post('/', requirePermission('branches:manage'), async (req: Request
     return;
   }
 
-  const branchId = data.id || `br-${Date.now()}`;
+  const branchId = (data.id && typeof data.id === 'string' && /^[a-zA-Z0-9_-]{3,64}$/.test(data.id)) ? data.id : crypto.randomUUID();
   const code = data.code || `BR-${data.name.slice(0, 3).toUpperCase()}`;
   const managerName = data.managerName || data.manager_name || 'Unassigned';
 
@@ -53,12 +59,12 @@ branchRouter.post('/', requirePermission('branches:manage'), async (req: Request
       `, [
         branchId,
         orgId,
-        data.name,
-        code,
+        data.name.trim(),
+        code.trim(),
         data.location || 'Site Facility',
-        data.city,
+        data.city.trim(),
         data.country || 'Australia',
-        managerName
+        managerName.trim()
       ]);
 
       await recordAuditEvent(tx, {
@@ -69,15 +75,15 @@ branchRouter.post('/', requirePermission('branches:manage'), async (req: Request
         action: 'CREATE_BRANCH',
         entityType: 'Organization',
         entityId: branchId,
-        entityName: data.name,
-        changes: { code, city: data.city, location: data.location, managerName },
+        entityName: data.name.trim(),
+        changes: { code: code.trim(), city: data.city.trim(), location: data.location, managerName },
         ipAddress
       });
     });
 
     res.status(201).json({ success: true, id: branchId });
-  } catch (err: any) {
-    res.status(500).json({ error: `Branch creation transaction failed: ${err.message}` });
+  } catch (_err) {
+    res.status(500).json({ error: 'Branch creation transaction failed.' });
   }
 });
 
@@ -90,18 +96,18 @@ branchRouter.put('/:id', requirePermission('branches:manage'), async (req: Reque
   const data = req.body;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
-  const existing = await query<any>('SELECT * FROM \`branches\` WHERE \`id\` = ? AND \`org_id\` = ? LIMIT 1;', [branchId, orgId]);
+  const existing = await query<any>('SELECT * FROM `branches` WHERE `id` = ? AND `org_id` = ? LIMIT 1;', [branchId, orgId]);
   if (existing.length === 0) {
     res.status(404).json({ error: 'Branch not found in organization.' });
     return;
   }
 
   const prev = existing[0]!;
-  const name = data.name || prev.name;
-  const code = data.code || prev.code;
+  const name = (data.name && String(data.name).trim()) || prev.name;
+  const code = (data.code && String(data.code).trim()) || prev.code;
   const location = data.location ?? prev.location;
-  const city = data.city ?? prev.city;
-  const country = data.country ?? prev.country;
+  const city = (data.city && String(data.city).trim()) ?? prev.city;
+  const country = (data.country && String(data.country).trim()) ?? prev.country;
   const managerName = data.managerName || data.manager_name || prev.manager_name;
 
   try {
@@ -127,8 +133,8 @@ branchRouter.put('/:id', requirePermission('branches:manage'), async (req: Reque
     });
 
     res.json({ success: true, message: 'Branch updated successfully.' });
-  } catch (err: any) {
-    res.status(500).json({ error: `Branch update transaction failed: ${err.message}` });
+  } catch (_err) {
+    res.status(500).json({ error: 'Branch update transaction failed.' });
   }
 });
 
@@ -140,15 +146,15 @@ branchRouter.delete('/:id', requirePermission('branches:manage'), async (req: Re
   const branchId = req.params.id;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
-  const existing = await query<any>('SELECT * FROM \`branches\` WHERE \`id\` = ? AND \`org_id\` = ? LIMIT 1;', [branchId, orgId]);
+  const existing = await query<any>('SELECT * FROM `branches` WHERE `id` = ? AND `org_id` = ? LIMIT 1;', [branchId, orgId]);
   if (existing.length === 0) {
     res.status(404).json({ error: 'Branch not found in organization.' });
     return;
   }
 
   // Check if active assets belong to this branch
-  const assetsCount = await query<any>('SELECT COUNT(*) as cnt FROM \`assets\` WHERE \`branch_id\` = ? AND \`org_id\` = ?;', [branchId, orgId]);
-  if (assetsCount[0]?.cnt > 0) {
+  const assetsCount = await query<any>('SELECT COUNT(*) as cnt FROM `assets` WHERE `branch_id` = ? AND `org_id` = ?;', [branchId, orgId]);
+  if ((assetsCount[0]?.cnt || 0) > 0) {
     res.status(409).json({
       error: `Cannot delete branch with ${assetsCount[0].cnt} associated asset(s). Reassign assets first.`,
       code: 'BRANCH_HAS_ASSETS'
@@ -156,9 +162,19 @@ branchRouter.delete('/:id', requirePermission('branches:manage'), async (req: Re
     return;
   }
 
+  // Check if active staff members belong to this branch
+  const usersCount = await query<any>("SELECT COUNT(*) as cnt FROM `users` WHERE `branch_id` = ? AND `org_id` = ? AND `status` != 'DELETED';", [branchId, orgId]);
+  if ((usersCount[0]?.cnt || 0) > 0) {
+    res.status(409).json({
+      error: `Cannot delete branch with ${usersCount[0].cnt} associated staff member(s). Reassign staff first.`,
+      code: 'BRANCH_HAS_USERS'
+    });
+    return;
+  }
+
   try {
     await withTransaction(async (tx) => {
-      await tx('DELETE FROM \`branches\` WHERE \`id\` = ? AND \`org_id\` = ?;', [branchId, orgId]);
+      await tx('DELETE FROM `branches` WHERE `id` = ? AND `org_id` = ?;', [branchId, orgId]);
 
       await recordAuditEvent(tx, {
         orgId,
@@ -175,7 +191,7 @@ branchRouter.delete('/:id', requirePermission('branches:manage'), async (req: Re
     });
 
     res.json({ success: true, message: 'Branch removed successfully.' });
-  } catch (err: any) {
-    res.status(500).json({ error: `Branch deletion transaction failed: ${err.message}` });
+  } catch (_err) {
+    res.status(500).json({ error: 'Branch deletion transaction failed.' });
   }
 });
