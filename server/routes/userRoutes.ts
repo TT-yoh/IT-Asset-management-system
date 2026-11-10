@@ -325,22 +325,24 @@ userRouter.post('/:id/reinvite', requirePermission('users:invite'), async (req: 
   const invitedAt = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 48 * 3600 * 1000).toISOString().slice(0, 19).replace('T', ' ');
 
-  await query(
-    "UPDATE `users` SET `invite_token_hash` = ?, `invited_at` = ?, `invite_expires_at` = ?, `status` = 'INVITED', `version` = `version` + 1 WHERE `id` = ? AND `org_id` = ?;",
-    [tokenHash, invitedAt, expiresAt, targetId, orgId]
-  );
+  await withTransaction(async (tx) => {
+    await tx(
+      "UPDATE `users` SET `invite_token_hash` = ?, `invited_at` = ?, `invite_expires_at` = ?, `status` = 'INVITED', `version` = `version` + 1 WHERE `id` = ? AND `org_id` = ?;",
+      [tokenHash, invitedAt, expiresAt, targetId, orgId]
+    );
 
-  await recordAuditEvent(query, {
-    orgId,
-    actorId,
-    userName: actorName,
-    role: actorRole,
-    action: 'INVITE_USER',
-    entityType: 'User',
-    entityId: targetId,
-    entityName: user.full_name,
-    changes: { email: user.email, action: 'RE_INVITE' },
-    ipAddress
+    await recordAuditEvent(tx, {
+      orgId,
+      actorId,
+      userName: actorName,
+      role: actorRole,
+      action: 'INVITE_USER',
+      entityType: 'User',
+      entityId: targetId,
+      entityName: user.full_name,
+      changes: { email: user.email, action: 'RE_INVITE' },
+      ipAddress
+    });
   });
 
   await sendInviteEmail(user.email, newInviteToken);

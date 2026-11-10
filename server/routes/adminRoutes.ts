@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { query } from '../db';
+import { query, withTransaction } from '../db';
 import { authenticate, requireSuperAdmin, invalidateUserCache } from '../middleware';
 import { recordAuditEvent } from '../audit';
 import { validateRequest } from '../middleware/validate';
@@ -43,31 +43,33 @@ adminRouter.post(
     const targetOrg = orgs[0];
     const previousOrgId = actor.orgId;
 
-    // Persist new organization scope for the super-admin user
-    await query(
-      'UPDATE `users` SET `org_id` = ?, `updated_at` = NOW() WHERE `id` = ?;',
-      [targetOrg.id, actor.userId]
-    );
+    // Persist new organization scope for the super-admin user atomically with audit log
+    await withTransaction(async (tx) => {
+      await tx(
+        'UPDATE `users` SET `org_id` = ?, `updated_at` = NOW() WHERE `id` = ?;',
+        [targetOrg.id, actor.userId]
+      );
+
+      // Audit log the scope switch
+      await recordAuditEvent(tx, {
+        orgId: targetOrg.id,
+        actorId: actor.userId,
+        userName: actor.fullName,
+        role: actor.role,
+        action: 'SWITCH_ORG',
+        entityType: 'Organization',
+        entityId: targetOrg.id,
+        entityName: targetOrg.name,
+        changes: {
+          previousOrgId,
+          newOrgId: targetOrg.id
+        },
+        ipAddress
+      });
+    });
 
     // Invalidate user cache so subsequent queries immediately pick up new org_id
     invalidateUserCache(actor.userId);
-
-    // Audit log the scope switch
-    await recordAuditEvent(null, {
-      orgId: targetOrg.id,
-      actorId: actor.userId,
-      userName: actor.fullName,
-      role: actor.role,
-      action: 'SWITCH_ORG',
-      entityType: 'Organization',
-      entityId: targetOrg.id,
-      entityName: targetOrg.name,
-      changes: {
-        previousOrgId,
-        newOrgId: targetOrg.id
-      },
-      ipAddress
-    });
 
     res.json({
       success: true,

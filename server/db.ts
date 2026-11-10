@@ -140,7 +140,9 @@ export async function withTransaction<T>(
   const activePool = getDbPool();
   if (!activePool) {
     if (config.isTest) {
-      return callback(query);
+      const mockTx: QueryExecutor = ((sql: string, params: any[] = []) => query(sql, params)) as any;
+      (mockTx as any).isTransaction = true;
+      return callback(mockTx);
     }
     throw new Error('Database pool not available for transaction.');
   }
@@ -154,6 +156,7 @@ export async function withTransaction<T>(
       const [rows] = await conn!.execute(sql, params);
       return rows as any[];
     };
+    (txExecutor as any).isTransaction = true;
 
     const result = await callback(txExecutor);
     await conn.commit();

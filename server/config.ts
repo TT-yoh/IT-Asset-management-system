@@ -74,6 +74,9 @@ const baseConfigSchema = z.object({
   TOTP_ENCRYPTION_KEY: z.string().optional().refine(val => !val || isValid32ByteKey(val), {
     message: 'TOTP_ENCRYPTION_KEY must be a valid 32-byte key (64 hex characters or 32 raw bytes) and not a placeholder'
   }),
+  AUDIT_HMAC_KEY: z.string().min(32, 'AUDIT_HMAC_KEY must be at least 32 characters long').refine(val => !isPlaceholder(val) && isValid32ByteKey(val), {
+    message: 'AUDIT_HMAC_KEY must be a valid 32-byte key (64 hex characters or 32 raw bytes) and not a placeholder'
+  }),
   TRUST_PROXY: z.union([z.boolean(), z.string(), z.number()]).optional(),
   MAIL_HOST: z.string().optional(),
   MAIL_PORT: z.number().int().positive().optional(),
@@ -146,6 +149,7 @@ export function validateConfig(raw: Record<string, any>): Readonly<AppConfig> {
     TIDB_CA_PATH: raw.TIDB_CA_PATH ? String(raw.TIDB_CA_PATH).trim() : undefined,
     CORS_ORIGINS: corsOrigins,
     TOTP_ENCRYPTION_KEY: raw.TOTP_ENCRYPTION_KEY ? String(raw.TOTP_ENCRYPTION_KEY).trim() : undefined,
+    AUDIT_HMAC_KEY: raw.AUDIT_HMAC_KEY ? String(raw.AUDIT_HMAC_KEY).trim() : (isProduction ? '' : 'c4d8e2f1a3b5c7d9e0f2a4b6c8d0e1f3a5b7c9d1e2f4a6b8c0d2e3f5a7b9c1d3'),
     TRUST_PROXY: raw.TRUST_PROXY !== undefined ? raw.TRUST_PROXY : undefined,
     MAIL_HOST: raw.MAIL_HOST ? String(raw.MAIL_HOST).trim() : undefined,
     MAIL_PORT: mailPortVal,
@@ -201,6 +205,12 @@ export function validateConfig(raw: Record<string, any>): Readonly<AppConfig> {
     }
     if (!valid.TOTP_ENCRYPTION_KEY || !isValid32ByteKey(valid.TOTP_ENCRYPTION_KEY)) {
       prodErrors.push('TOTP_ENCRYPTION_KEY is required in production (32-byte key: 64 hex characters or 32 raw bytes)');
+    }
+    if (!valid.AUDIT_HMAC_KEY || !isValid32ByteKey(valid.AUDIT_HMAC_KEY)) {
+      prodErrors.push('AUDIT_HMAC_KEY is required in production (32-byte key: 64 hex characters or 32 raw bytes)');
+    }
+    if (valid.AUDIT_HMAC_KEY && valid.SESSION_SECRET && valid.AUDIT_HMAC_KEY === valid.SESSION_SECRET) {
+      prodErrors.push('AUDIT_HMAC_KEY must be distinct from SESSION_SECRET in production');
     }
     if (raw.USE_IN_MEMORY_DB === true || raw.USE_IN_MEMORY_DB === 'true' || raw.ALLOW_IN_MEMORY_DB === true || raw.ALLOW_IN_MEMORY_DB === 'true') {
       prodErrors.push('USE_IN_MEMORY_DB / ALLOW_IN_MEMORY_DB is strictly prohibited in production');
