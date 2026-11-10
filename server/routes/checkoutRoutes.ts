@@ -197,8 +197,17 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), idempotent(), as
 
     res.status(201).json({ success: true, id: chkId });
   } catch (err: any) {
-    const statusCode = err.statusCode || 500;
-    res.status(statusCode).json({ error: statusCode === 409 ? err.message : 'Checkout transaction failed.' });
+    const isConflict =
+      err.statusCode === 409 ||
+      err.code === 'ER_DUP_ENTRY' ||
+      err.code === 'ALREADY_CHECKED_OUT' ||
+      err.errno === 1062 ||
+      (typeof err.message === 'string' && err.message.includes('Duplicate entry'));
+    const statusCode = isConflict ? 409 : (err.statusCode || 500);
+    res.status(statusCode).json({
+      error: isConflict ? (err.message || 'Asset is already actively checked out.') : 'Checkout transaction failed.',
+      code: isConflict ? 'ALREADY_CHECKED_OUT' : 'CHECKOUT_FAILED'
+    });
   }
 });
 

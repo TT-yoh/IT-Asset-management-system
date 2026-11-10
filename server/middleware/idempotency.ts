@@ -37,6 +37,7 @@ interface InFlightEntry {
   promise: Promise<{ status: number; contentType: string; body: any }>;
   resolve: (res: { status: number; contentType: string; body: any }) => void;
   reject: (err: any) => void;
+  requestHash?: string;
 }
 
 const inFlightMap = new Map<string, InFlightEntry>();
@@ -201,11 +202,21 @@ export function idempotent(options: IdempotencyOptions = {}) {
     opportunisticPurge().catch(() => {});
 
     // 4. In-process in-flight concurrent burst optimization
-    const existingInFlight = inFlightMap.get(compositeKey);
-    if (existingInFlight) {
+    let isInitiator = false;
+    let inFlightEntry = inFlightMap.get(compositeKey);
+
+    if (inFlightEntry) {
+      if (inFlightEntry.requestHash && inFlightEntry.requestHash !== requestHash) {
+        res.status(422).json({
+          error: 'Idempotency key reused with different request payload',
+          code: 'IDEMPOTENCY_FINGERPRINT_MISMATCH'
+        });
+        return;
+      }
+
       try {
         const inFlightRes = await Promise.race([
-          existingInFlight.promise,
+          inFlightEntry.promise,
           new Promise<null>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), WAIT_TIMEOUT_MS))
         ]);
 
@@ -215,22 +226,33 @@ export function idempotent(options: IdempotencyOptions = {}) {
           if (inFlightRes.contentType) {
             res.setHeader('Content-Type', inFlightRes.contentType);
           }
-          res.status(inFlightRes.status).send(inFlightRes.body);
+          let responseData = inFlightRes.body;
+          if (
+            typeof responseData === 'string' &&
+            (inFlightRes.contentType?.includes('json') || responseData.startsWith('{') || responseData.startsWith('['))
+          ) {
+            try {
+              responseData = JSON.parse(responseData);
+            } catch {}
+          }
+          res.status(inFlightRes.status).send(responseData);
           return;
         }
       } catch (err: any) {
         // Fall through to database authoritative lookup
       }
+    } else {
+      isInitiator = true;
+      let resolveInFlight!: (res: { status: number; contentType: string; body: any }) => void;
+      let rejectInFlight!: (err: any) => void;
+      const inFlightPromise = new Promise<{ status: number; contentType: string; body: any }>((resolve, reject) => {
+        resolveInFlight = resolve;
+        rejectInFlight = reject;
+      });
+      inFlightPromise.catch(() => {});
+      inFlightEntry = { promise: inFlightPromise, resolve: resolveInFlight, reject: rejectInFlight, requestHash };
+      inFlightMap.set(compositeKey, inFlightEntry);
     }
-
-    // Prepare in-flight promise entry for this process
-    let resolveInFlight!: (res: { status: number; contentType: string; body: any }) => void;
-    let rejectInFlight!: (err: any) => void;
-    const inFlightPromise = new Promise<{ status: number; contentType: string; body: any }>((resolve, reject) => {
-      resolveInFlight = resolve;
-      rejectInFlight = reject;
-    });
-    const inFlightEntry: InFlightEntry = { promise: inFlightPromise, resolve: resolveInFlight, reject: rejectInFlight };
 
     // 5. Atomic Claim Protocol against Database (Fail-Closed)
     const now = new Date();
@@ -253,13 +275,17 @@ export function idempotent(options: IdempotencyOptions = {}) {
         [orgId, userId, trimmedKey, method, normalizedRoute, requestHash, lockedUntilStr, nowStr, expiresAtStr]
       );
       isClaimOwner = true;
-      inFlightMap.set(compositeKey, inFlightEntry);
     } catch (err: any) {
       if (err.code === 'ER_DUP_ENTRY' || err.errno === 1062) {
         // Key exists: evaluate duplicate / conflict / lock state
         isClaimOwner = false;
+        if (isInitiator) {
+          inFlightMap.delete(compositeKey);
+        }
       } else {
-        // Fail closed on unexpected database error: mutation MUST NOT proceed
+        if (isInitiator) {
+          inFlightMap.delete(compositeKey);
+        }
         console.error('[IDEMPOTENCY] Claim insertion database error:', err.message);
         res.setHeader('Retry-After', '1');
         res.status(503).json({
@@ -426,7 +452,9 @@ export function idempotent(options: IdempotencyOptions = {}) {
       }
 
       // Notify in-process in-flight waiters
-      resolveInFlight({ status, contentType, body });
+      if (inFlightEntry) {
+        inFlightEntry.resolve({ status, contentType, body });
+      }
       inFlightMap.delete(compositeKey);
     };
 
@@ -454,7 +482,9 @@ export function idempotent(options: IdempotencyOptions = {}) {
     // 9. Finish / Close Event Handlers
     const cleanupClaimOnFailure = async () => {
       inFlightMap.delete(compositeKey);
-      rejectInFlight(new Error('REQUEST_FAILED_OR_ABORTED'));
+      if (inFlightEntry) {
+        inFlightEntry.reject(new Error('REQUEST_FAILED_OR_ABORTED'));
+      }
       try {
         await query(
           'DELETE FROM `idempotency_keys_v2` WHERE `org_id` = ? AND `user_id` = ? AND `idem_key` = ? AND `state` = \'PROCESSING\';',

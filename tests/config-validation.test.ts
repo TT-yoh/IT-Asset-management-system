@@ -72,10 +72,10 @@ test('5. Production fails closed when required fields are missing', () => {
       validateConfig({
         NODE_ENV: 'production',
         SESSION_SECRET: '4a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b'
-        // Missing TIDB, CORS, TOTP
+        // Missing TIDB, CORS, TOTP, AUDIT_HMAC_KEY
       });
     },
-    /FATAL: Missing or invalid production environment configuration/
+    /FATAL: (Server configuration validation failed|Missing or invalid production environment configuration)/
   );
 });
 
@@ -92,7 +92,8 @@ test('6. Production fails closed when placeholder values are used', () => {
         TIDB_PASSWORD: 'prod_password_123',
         TIDB_DATABASE: 'it_asset_ledger',
         CORS_ORIGINS: 'https://app.company.com',
-        TOTP_ENCRYPTION_KEY: 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90'
+        TOTP_ENCRYPTION_KEY: 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90',
+        AUDIT_HMAC_KEY: 'c4d8e2f1a3b5c7d9e0f2a4b6c8d0e1f3a5b7c9d1e2f4a6b8c0d2e3f5a7b9c1d3'
       });
     },
     /SESSION_SECRET must not use a placeholder value/
@@ -111,6 +112,7 @@ test('7. Complete valid production configuration passes validation', () => {
     TIDB_DATABASE: 'omniasset_prod',
     CORS_ORIGINS: 'https://app.company.com,https://portal.company.com',
     TOTP_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+    AUDIT_HMAC_KEY: 'c4d8e2f1a3b5c7d9e0f2a4b6c8d0e1f3a5b7c9d1e2f4a6b8c0d2e3f5a7b9c1d3',
     TRUST_PROXY: '1'
   });
 
@@ -132,7 +134,7 @@ test('8. npm start triggers production mode validation via npm_lifecycle_event',
         // Missing prod credentials
       });
     },
-    /FATAL: Missing or invalid production environment configuration/
+    /FATAL: (Server configuration validation failed|Missing or invalid production environment configuration)/
   );
 });
 
