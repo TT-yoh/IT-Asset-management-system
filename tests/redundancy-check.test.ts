@@ -29,12 +29,14 @@ async function run() {
 
   const headers = (extra: Record<string, string> = {}) => ({
     'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
     ...(sessionCookie ? { Cookie: sessionCookie } : {}),
     ...extra
   });
 
   // 1. Login as Admin
   console.log('1. Logging in as Admin...');
+  await query('DELETE FROM users WHERE email = ?', [testAdminEmail]);
   const hash = await hashPassword(testAdminPassword);
   await query(`
     INSERT INTO users (id, org_id, email, password_hash, full_name, role, status, branch_id, branch_name)
