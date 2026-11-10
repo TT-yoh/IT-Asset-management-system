@@ -45,7 +45,7 @@ User roles, tenant IDs (`orgId`), or branch IDs (`branchId`) supplied in request
 | **`branches:read`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | View organization branches and physical site locations. |
 | **`branches:manage`** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | Create, update, or remove physical branch facilities. |
 | **`departments:read`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | View organizational departments and operational units. |
-| **`departments:manage`** | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ | Manage departmental structures and metadata. |
+| **`departments:manage`** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | Manage organizational departmental structures. Only ADMIN holds authority. |
 | **`audit:read`** | ✅ | ✅ | ❌ | ✅ | ✅ | ❌ | Inspect tamper-evident SHA-256 cryptographic audit logs. |
 
 ---

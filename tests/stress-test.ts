@@ -13,7 +13,9 @@
  * 7. Live Production Vercel Edge Gateway Benchmark
  */
 
-process.env.NODE_ENV = 'test';
+if (process.env.NODE_ENV !== 'test') {
+  throw new Error('Test execution aborted: NODE_ENV must be set to "test" via cross-env');
+}
 
 import http from 'http';
 import { app } from '../server/index';

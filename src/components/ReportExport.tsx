@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  FileText, 
-  FileSpreadsheet, 
-  Printer, 
-  Mail, 
-  Download, 
-  CheckCircle, 
+import {
+  FileText,
+  FileSpreadsheet,
+  Printer,
+  Mail,
+  Download,
+  CheckCircle,
   RefreshCw,
   ShieldCheck,
   TrendingDown,
@@ -28,6 +28,7 @@ interface ReportExportProps {
   customHeaders?: string[];
   assets?: Asset[];
   orgId?: string;
+
   orgName?: string;
 }
 
@@ -57,7 +58,7 @@ export const ReportExport: React.FC<ReportExportProps> = ({
     const headers = Object.keys(data[0]);
     const csvRows = [
       headers.join(','),
-      ...data.map(row => 
+      ...data.map(row =>
         headers.map(fieldName => {
           const value = String(row[fieldName] ?? '');
           const escaped = value.replace(/"/g, '""');
@@ -65,7 +66,7 @@ export const ReportExport: React.FC<ReportExportProps> = ({
         }).join(',')
       )
     ];
-    
+
     const csvContent = 'data:text/csv;charset=utf-8,' + csvRows.join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');

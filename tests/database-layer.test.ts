@@ -1,4 +1,6 @@
-process.env.NODE_ENV = 'test';
+if (process.env.NODE_ENV !== 'test') {
+  throw new Error('Test execution aborted: NODE_ENV must be set to "test" via cross-env');
+}
 
 import assert from 'assert';
 import app from '../server/index';

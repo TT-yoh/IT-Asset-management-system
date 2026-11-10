@@ -9,7 +9,9 @@
  * 6. Client sequence and idempotency metadata tracking
  */
 
-process.env.NODE_ENV = 'test';
+if (process.env.NODE_ENV !== 'test') {
+  throw new Error('Test execution aborted: NODE_ENV must be set to "test" via cross-env');
+}
 
 import http from 'http';
 import { app } from '../server/index';
@@ -161,8 +163,7 @@ async function runTests() {
   });
 
   assert(res2.status === 201, 'Replayed duplicate POST returns identical HTTP 201 status');
-  assert(res2.headers.get('x-cache-lookup') === 'HIT', 'Response header has X-Cache-Lookup: HIT');
-  assert(res2.headers.get('idempotent-replayed') === 'true', 'Response header has Idempotent-Replayed: true');
+    assert(res2.headers.get('idempotent-replayed') === 'true', 'Response header has Idempotent-Replayed: true');
   assert(res2.body.id === 'test-ast-idemp-1', 'Cached response body matches original');
 
   // Verify DB state: Exactly 1 asset row exists and exactly 1 audit entry created

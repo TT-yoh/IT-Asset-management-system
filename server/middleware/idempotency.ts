@@ -30,7 +30,7 @@ declare global {
 const IDEMPOTENCY_KEY_REGEX = /^[A-Za-z0-9._:-]{8,128}$/;
 const MAX_CACHED_BODY_BYTES = 256 * 1024; // 256 KB
 const LOCK_LEASE_SECONDS = 30;
-const WAIT_TIMEOUT_MS = 5000;
+const WAIT_TIMEOUT_MS = 10000;
 const POLL_INTERVAL_MS = 200;
 
 interface InFlightEntry {
@@ -211,7 +211,6 @@ export function idempotent(options: IdempotencyOptions = {}) {
 
         if (inFlightRes) {
           res.setHeader('Idempotent-Replayed', 'true');
-          res.setHeader('X-Cache-Lookup', 'HIT');
           res.setHeader('Idempotency-Key', trimmedKey);
           if (inFlightRes.contentType) {
             res.setHeader('Content-Type', inFlightRes.contentType);
@@ -303,7 +302,6 @@ export function idempotent(options: IdempotencyOptions = {}) {
         // 6.2 COMPLETED State: Replay Original Response
         if (existing.state === 'COMPLETED') {
           res.setHeader('Idempotent-Replayed', 'true');
-          res.setHeader('X-Cache-Lookup', 'HIT');
           res.setHeader('Idempotency-Key', trimmedKey);
           if (existing.response_content_type) {
             res.setHeader('Content-Type', existing.response_content_type);
@@ -340,7 +338,6 @@ export function idempotent(options: IdempotencyOptions = {}) {
               const currentPoll = pollRows[0];
               if (currentPoll.state === 'COMPLETED') {
                 res.setHeader('Idempotent-Replayed', 'true');
-                res.setHeader('X-Cache-Lookup', 'HIT');
                 res.setHeader('Idempotency-Key', trimmedKey);
                 if (currentPoll.response_content_type) {
                   res.setHeader('Content-Type', currentPoll.response_content_type);

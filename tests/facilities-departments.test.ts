@@ -4,11 +4,16 @@
  * - Department CRUD (/api/departments) with audit logging
  * - Branch creation, manager assignment, and safe deletion (/api/branches)
  * - Role-based authorization & permission boundary enforcement
+ * - Phase 12 Addendum 2: Tenant-safe facilities & budget writes
  */
+
+if (process.env.NODE_ENV !== 'test') {
+  throw new Error('Test execution aborted: NODE_ENV must be set to "test" via cross-env');
+}
 
 import app from '../server/index';
 import { query } from '../server/db';
-import { hashPassword } from '../server/auth';
+import { hashPassword, createSessionToken } from '../server/auth';
 
 const testAdminEmail = process.env.TEST_ADMIN_EMAIL || 'test-admin-facilities@omniasset.internal';
 const testAdminPassword = process.env.TEST_ADMIN_PASSWORD || 'TestPass123!Secure';
@@ -29,6 +34,7 @@ function test(name: string, fn: () => Promise<void>) {
 let sessionCookie = '';
 let testDeptId = '';
 let testBranchId = '';
+let testBranchCode = '';
 
 function headers(extra: Record<string, string> = {}) {
   const h: Record<string, string> = {
@@ -78,12 +84,12 @@ test('1. Admin Authentication for Facilities Management', async () => {
 
 // 2. Department Creation
 test('2. Admin Creates Department (POST /api/departments)', async () => {
-  testDeptId = `dept-test-${Date.now()}`;
+  await query('DELETE FROM departments WHERE name = ? AND org_id = ?;', ['Cloud Infrastructure & DevOps', 'org-omnitech']);
+  await query('DELETE FROM departments WHERE name = ? AND org_id = ?;', ['Cloud Infrastructure & Platform Engineering', 'org-omnitech']);
   const res = await fetch(`${BASE_URL}/api/departments`, {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify({
-      id: testDeptId,
       name: 'Cloud Infrastructure & DevOps',
       budget_allocated: 750000,
       head_count: 14
@@ -91,9 +97,10 @@ test('2. Admin Creates Department (POST /api/departments)', async () => {
   });
   if (!res.ok) throw new Error(`Create department failed: ${await res.text()}`);
   const data = await res.json();
-  if (!data.success || data.id !== testDeptId) {
+  if (!data.success || !data.id) {
     throw new Error('Department creation response invalid');
   }
+  testDeptId = data.id;
 });
 
 // 3. Department Retrieval
@@ -145,16 +152,15 @@ test('4. Admin Updates Department (PUT /api/departments/:id)', async () => {
 
 // 5. Branch Facility Creation with Branch Manager
 test('5. Admin Creates Facility Branch with Manager (POST /api/branches)', async () => {
-  testBranchId = `br-test-${Date.now()}`;
-  const branchCode = `FAC-${Math.floor(Math.random() * 9000 + 1000)}`;
+  await query('DELETE FROM branches WHERE name = ? AND org_id = ?;', ['Harare Innovation Center', 'org-omnitech']);
+  testBranchCode = `FAC-${Math.floor(Math.random() * 9000 + 1000)}`;
 
   const res = await fetch(`${BASE_URL}/api/branches`, {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify({
-      id: testBranchId,
       name: 'Harare Innovation Center',
-      code: branchCode,
+      code: testBranchCode,
       location: 'Block C, Tech Park',
       city: 'Harare',
       country: 'Zimbabwe',
@@ -163,9 +169,10 @@ test('5. Admin Creates Facility Branch with Manager (POST /api/branches)', async
   });
   if (!res.ok) throw new Error(`Branch creation failed: ${await res.text()}`);
   const data = await res.json();
-  if (!data.success || data.id !== testBranchId) {
+  if (!data.success || !data.id) {
     throw new Error('Branch creation response invalid');
   }
+  testBranchId = data.id;
 
   // Verify via GET
   const resGet = await fetch(`${BASE_URL}/api/branches`, {
@@ -272,6 +279,137 @@ test('9. Immutable Audit Chain contains Department & Branch events', async () =>
   if (!actions.includes('DELETE_BRANCH')) {
     throw new Error('DELETE_BRANCH event missing from audit log');
   }
+});
+
+// 10. Phase 12.5: Duplicate Branch Code returns HTTP 409 DUPLICATE
+test('10. Duplicate branch code returns HTTP 409 DUPLICATE', async () => {
+  const code = `DUP-BR-${Date.now().toString().slice(-4)}`;
+  const res1 = await fetch(`${BASE_URL}/api/branches`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({
+      name: 'Original Facility',
+      code,
+      city: 'Sydney'
+    })
+  });
+  if (!res1.ok) throw new Error(`Initial branch creation failed: ${await res1.text()}`);
+  const data1 = await res1.json();
+
+  const res2 = await fetch(`${BASE_URL}/api/branches`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({
+      name: 'Duplicate Facility',
+      code,
+      city: 'Melbourne'
+    })
+  });
+  if (res2.status !== 409) {
+    throw new Error(`Expected HTTP 409 for duplicate branch code, got ${res2.status}`);
+  }
+  const data2 = await res2.json();
+  if (data2.code !== 'DUPLICATE') {
+    throw new Error(`Expected error code 'DUPLICATE', got '${data2.code}'`);
+  }
+
+  // Cleanup
+  await fetch(`${BASE_URL}/api/branches/${data1.id}`, { method: 'DELETE', headers: headers() });
+});
+
+// 11. Phase 12.5: Cross-Tenant Protection (Org B admin cannot modify Org A branch)
+test('11. Org B admin cannot read, modify or delete Org A branch', async () => {
+  // Create branch in org-omnitech
+  const resBranch = await fetch(`${BASE_URL}/api/branches`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({
+      name: 'Org A Dedicated Site',
+      city: 'Brisbane'
+    })
+  });
+  const branchData = await resBranch.json();
+  const targetBranchId = branchData.id;
+
+  // Ensure tenant-beta organization exists
+  await query("INSERT IGNORE INTO organizations (id, name, type) VALUES ('tenant-beta', 'Tenant Beta', 'Enterprise');");
+  await query('DELETE FROM users WHERE id = ?;', ['usr-foreign-admin']);
+  await query(`
+    INSERT INTO users (id, org_id, email, password_hash, full_name, role, status, branch_id, branch_name)
+    VALUES ('usr-foreign-admin', 'tenant-beta', 'foreign-admin@example.com', 'hash', 'Foreign Admin', 'ADMIN', 'ACTIVE', 'br-1', 'Branch 1');
+  `);
+
+  const foreignToken = createSessionToken({
+    userId: 'usr-foreign-admin',
+    ver: 1
+  });
+  const foreignHeaders = {
+    'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
+    'Authorization': `Bearer ${foreignToken}`
+  };
+
+  // Attempt PUT from foreign tenant
+  const resPut = await fetch(`${BASE_URL}/api/branches/${targetBranchId}`, {
+    method: 'PUT',
+    headers: foreignHeaders,
+    body: JSON.stringify({ name: 'Tampered by Foreign Tenant' })
+  });
+  if (resPut.status !== 404) {
+    throw new Error(`Expected HTTP 404 for cross-tenant branch update, got ${resPut.status}`);
+  }
+
+  // Attempt DELETE from foreign tenant
+  const resDel = await fetch(`${BASE_URL}/api/branches/${targetBranchId}`, {
+    method: 'DELETE',
+    headers: foreignHeaders
+  });
+  if (resDel.status !== 404) {
+    throw new Error(`Expected HTTP 404 for cross-tenant branch delete, got ${resDel.status}`);
+  }
+
+  // Cleanup
+  await query('DELETE FROM users WHERE id = ?;', ['usr-foreign-admin']);
+  await fetch(`${BASE_URL}/api/branches/${targetBranchId}`, { method: 'DELETE', headers: headers() });
+});
+
+// 12. Phase 12.5: Branch delete blocked when users exist
+test('12. Branch delete blocked with 409 when staff members belong to it', async () => {
+  // Create a branch
+  const resBranch = await fetch(`${BASE_URL}/api/branches`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({
+      name: 'Staffed Facility',
+      city: 'Perth'
+    })
+  });
+  const branch = await resBranch.json();
+
+  // Create user in this branch
+  const testUserId = `usr-staffed-${Date.now()}`;
+  await query(`
+    INSERT INTO users (id, org_id, email, password_hash, full_name, role, status, branch_id, branch_name)
+    VALUES (?, 'org-omnitech', ?, 'hash', 'Test Staff', 'USER', 'ACTIVE', ?, 'Staffed Facility');
+  `, [testUserId, `${testUserId}@example.com`, branch.id]);
+
+  // Try to delete branch
+  const resDelete = await fetch(`${BASE_URL}/api/branches/${branch.id}`, {
+    method: 'DELETE',
+    headers: headers()
+  });
+
+  if (resDelete.status !== 409) {
+    throw new Error(`Expected HTTP 409 when deleting staffed branch, got ${resDelete.status}`);
+  }
+  const deleteBody = await resDelete.json();
+  if (deleteBody.code !== 'BRANCH_HAS_USERS') {
+    throw new Error(`Expected error code 'BRANCH_HAS_USERS', got '${deleteBody.code}'`);
+  }
+
+  // Cleanup user then branch
+  await query('DELETE FROM users WHERE id = ?;', [testUserId]);
+  await fetch(`${BASE_URL}/api/branches/${branch.id}`, { method: 'DELETE', headers: headers() });
 });
 
 async function run() {

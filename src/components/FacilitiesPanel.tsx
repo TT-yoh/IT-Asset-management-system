@@ -55,7 +55,8 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
   onNavigateToTab
 }) => {
   const isAdmin = currentUser?.role === 'ADMIN';
-  const canManageDepartments = currentUser?.role === 'ADMIN' || currentUser?.role === 'IT_SUPPORT' || currentUser?.role === 'BRANCH_MANAGER';
+  const canManageDepartments = currentUser?.role === 'ADMIN';
+  const canManageBudgets = currentUser?.role === 'ADMIN' || currentUser?.role === 'FINANCE';
 
   // Sub-tab: 'branches' | 'departments'
   const [activeTab, setActiveTab] = useState<'branches' | 'departments'>(() => {
@@ -869,17 +870,18 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
 
               <div>
                 <label className="block text-[10px] font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Annual Hardware Budget Allocation ($) *
+                  Annual Hardware Budget Allocation ($) {canManageBudgets ? '*' : '(Read-Only - Requires Finance/Admin)'}
                 </label>
                 <input
                   type="number"
                   required
                   min="0"
                   step="1000"
+                  disabled={!canManageBudgets}
                   value={deptBudget}
                   onChange={(e) => setDeptBudget(e.target.value)}
                   placeholder="e.g. 150000"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-emerald-300 font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500"
+                  className={`w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-emerald-300 font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 ${!canManageBudgets ? 'opacity-50 cursor-not-allowed' : ''}`}
                 />
               </div>
 
