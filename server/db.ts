@@ -78,6 +78,8 @@ export function getDbPool(): mysql.Pool | null {
     }
   }
 
+  const isServerless = config.isVercel || process.env.VERCEL === '1';
+
   pool = mysql.createPool({
     host: targetHost,
     port: targetPort,
@@ -88,7 +90,9 @@ export function getDbPool(): mysql.Pool | null {
     timezone: 'Z',
     dateStrings: true,
     waitForConnections: true,
-    connectionLimit: 10,
+    connectionLimit: isServerless ? 3 : 10,
+    maxIdle: isServerless ? 3 : 10,
+    idleTimeout: isServerless ? 10000 : 60000,
     queueLimit: 0,
     enableKeepAlive: true,
     keepAliveInitialDelay: 10000

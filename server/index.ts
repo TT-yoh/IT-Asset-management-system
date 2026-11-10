@@ -430,14 +430,16 @@ app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
 // Process-level unhandled rejection & uncaught exception logging with clean exit
 process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
   console.error('[FATAL] Unhandled Promise Rejection at:', promise, 'reason:', reason);
-  if (!config.isTest) {
+  // Do not call process.exit(1) in serverless / Vercel container or during test execution
+  if (!config.isTest && !config.isVercel && process.env.VERCEL !== '1') {
     process.exit(1);
   }
 });
 
 process.on('uncaughtException', (err: Error) => {
   console.error('[FATAL] Uncaught Exception thrown:', err);
-  if (!config.isTest) {
+  // Do not call process.exit(1) in serverless / Vercel container or during test execution
+  if (!config.isTest && !config.isVercel && process.env.VERCEL !== '1') {
     process.exit(1);
   }
 });
