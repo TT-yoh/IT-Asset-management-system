@@ -412,7 +412,6 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
         twoFactorEnabled: false,
         avatar: `https://images.unsplash.com/photo-${1534528741775 + (users.length % 10)}?w=100&auto=format&fit=crop&q=80`,
         status: 'INVITED',
-        inviteToken: token,
         invitedAt: new Date().toISOString()
       };
 
@@ -443,7 +442,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
       });
       const data = await res.json();
       if (res.ok && data.inviteToken) {
-        const updated = { ...targetUser, inviteToken: data.inviteToken, invitedAt: data.invitedAt };
+        const updated = { ...targetUser, invitedAt: data.invitedAt };
         if (onUpdateUser) onUpdateUser(updated);
         copyInviteLink(data.inviteToken);
         showToast(`Fresh invitation generated & link copied for ${targetUser.fullName}!`);
@@ -458,7 +457,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
   };
 
   const copyInviteLink = (token: string) => {
-    const url = `${window.location.origin}/?invite=${token}`;
+    const url = `${window.location.origin}/#activate?token=${token}`;
     navigator.clipboard.writeText(url);
     setCopiedLink(true);
     showToast('Invitation activation link copied to clipboard.');
@@ -801,17 +800,6 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                         <div className="flex items-center justify-end gap-1.5">
                           {isInvited && (
                             <>
-                              {user.inviteToken ? (
-                                <button
-                                  type="button"
-                                  onClick={() => copyInviteLink(user.inviteToken!)}
-                                  className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg text-[10px] font-bold flex items-center gap-1 transition cursor-pointer"
-                                  title="Copy Invitation Link"
-                                >
-                                  <Copy className="w-3 h-3" />
-                                  <span className="hidden sm:inline">Copy Link</span>
-                                </button>
-                              ) : null}
                               <button
                                 type="button"
                                 onClick={() => handleReinvite(user)}

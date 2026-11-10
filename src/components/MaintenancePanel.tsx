@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { MaintenanceRecord, Asset, User } from '../types';
 import { MaintenanceService } from '../lib/maintenance-service';
+import { escapeCsvRow } from '../lib/csv-sanitizer';
 import { MaintenanceCard } from './MaintenanceCard';
 import { MaintenanceForm } from './MaintenanceForm';
 import { MaintenanceDetailModal } from './MaintenanceDetailModal';
@@ -100,7 +101,7 @@ export const MaintenancePanel: React.FC<MaintenancePanelProps> = ({
       `"${m.partsReplaced || ''}"`
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const csvContent = 'data:text/csv;charset=utf-8,' + encodeURIComponent([escapeCsvRow(headers), ...rows.map(e => escapeCsvRow(e))].join('\n'));
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);

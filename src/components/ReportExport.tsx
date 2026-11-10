@@ -17,6 +17,7 @@ import {
   X
 } from 'lucide-react';
 import { exportToExcel, exportToPDF } from '../lib/report-service';
+import { escapeCsvRow } from '../lib/csv-sanitizer';
 import { fetchTiFlashDepreciationRollup } from '../lib/tidb-client';
 import { generateAuditHash } from '../lib/audit';
 import { Asset } from '../types';
@@ -52,22 +53,16 @@ export const ReportExport: React.FC<ReportExportProps> = ({
     }
   }, [assets, orgId]);
 
-  // Generate CSV string from JSON data
+  // Generate CSV string from JSON data with formula injection sanitization
   const handleCSVExport = () => {
     if (!data || data.length === 0) return;
     const headers = Object.keys(data[0]);
     const csvRows = [
-      headers.join(','),
-      ...data.map(row =>
-        headers.map(fieldName => {
-          const value = String(row[fieldName] ?? '');
-          const escaped = value.replace(/"/g, '""');
-          return escaped.includes(',') || escaped.includes('"') ? `"${escaped}"` : escaped;
-        }).join(',')
-      )
+      escapeCsvRow(headers),
+      ...data.map(row => escapeCsvRow(headers.map(h => row[h])))
     ];
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + csvRows.join('\n');
+    const csvContent = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvRows.join('\n'));
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);

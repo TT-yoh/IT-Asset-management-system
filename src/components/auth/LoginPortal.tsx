@@ -58,22 +58,42 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
   const [matchedInvitedUser, setMatchedInvitedUser] = useState<User | null>(null);
   const [matchedInvitedOrg, setMatchedInvitedOrg] = useState<Organization | null>(null);
 
-  // Auto-detect ?invite= token or URL hash on mount
+  // Auto-detect URL fragment (#activate?token=) or query (?invite=) on mount
   useEffect(() => {
     try {
-      const urlParams = new URLSearchParams(window.location.search);
-      const urlToken = urlParams.get('invite');
-      if (urlToken) {
-        setActivationTokenInput(urlToken);
+      let fragmentToken: string | null = null;
+      const hash = window.location.hash;
+      if (hash && hash.includes('token=')) {
+        const queryStart = hash.indexOf('?');
+        if (queryStart !== -1) {
+          const params = new URLSearchParams(hash.substring(queryStart + 1));
+          fragmentToken = params.get('token') || params.get('invite');
+        }
+      } else if (hash && hash.includes('invite=')) {
+        const queryStart = hash.indexOf('?');
+        if (queryStart !== -1) {
+          const params = new URLSearchParams(hash.substring(queryStart + 1));
+          fragmentToken = params.get('invite');
+        }
+      }
+
+      // Check query param fallback for legacy links
+      if (!fragmentToken && window.location.search) {
+        const urlParams = new URLSearchParams(window.location.search);
+        fragmentToken = urlParams.get('invite') || urlParams.get('token');
+      }
+
+      if (fragmentToken) {
+        setActivationTokenInput(fragmentToken);
         setAuthMode('ACTIVATE');
+        // Immediately strip token from URL to prevent Referer / history exposure
         if (typeof window !== 'undefined') {
-          window.history.replaceState({ mode: 'activate' }, '', '#/activate');
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
         }
         return;
       }
 
-      const hash = window.location.hash.toLowerCase();
-      if (hash.includes('activate')) {
+      if (hash.toLowerCase().includes('activate')) {
         setAuthMode('ACTIVATE');
       } else {
         setAuthMode('SIGNIN');
@@ -81,7 +101,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
           window.history.replaceState({ mode: 'login' }, '', '#/login');
         }
       }
-    } catch (e) {
+    } catch {
       // URL parsing fallback
     }
 
@@ -113,7 +133,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
     }
   };
 
-  // When activationTokenInput changes, find matching user locally or via server API
+  // When activationTokenInput changes, verify with authoritative server API
   useEffect(() => {
     if (!activationTokenInput.trim()) {
       setMatchedInvitedUser(null);
@@ -123,33 +143,6 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
     }
     const cleanToken = activationTokenInput.trim();
 
-    // 1. Instant check in client state if available
-    const localUser = users.find(u => u.inviteToken === cleanToken);
-    if (localUser) {
-      if (localUser.status !== 'INVITED') {
-        setMatchedInvitedUser(null);
-        setMatchedInvitedOrg(null);
-        setError('This invitation token has already been activated.');
-        return;
-      }
-      if (localUser.invitedAt) {
-        const inviteTime = new Date(localUser.invitedAt).getTime();
-        const maxAgeMs = 48 * 60 * 60 * 1000;
-        if (!isNaN(inviteTime) && Date.now() - inviteTime > maxAgeMs) {
-          setMatchedInvitedUser(null);
-          setMatchedInvitedOrg(null);
-          setError('This invitation token has expired (48 hour validity limit).');
-          return;
-        }
-      }
-      setMatchedInvitedUser(localUser);
-      const foundOrg = organizations.find(o => o.id === localUser.orgId) || organizations[0]!;
-      setMatchedInvitedOrg(foundOrg);
-      setError(null);
-      return;
-    }
-
-    // 2. Query TiDB Backend endpoint for real-time verification (for external devices / incognito)
     let isCancelled = false;
     const verifyTokenOnServer = async () => {
       try {
@@ -167,7 +160,6 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
         }
       } catch {
         if (!isCancelled) {
-          // Network offline notice only if we don't already have local match
           setError('Could not verify invitation token with server. Please verify your connection.');
         }
       }
@@ -178,7 +170,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [activationTokenInput, users, organizations]);
+  }, [activationTokenInput, organizations]);
 
   const handleQuickFill = (emailVal: string, passVal: string) => {
     setAuthMode('SIGNIN');

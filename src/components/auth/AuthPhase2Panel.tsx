@@ -231,8 +231,7 @@ export const AuthPhase2Panel: React.FC<AuthPhase2PanelProps> = ({
         departmentId: target.departmentId,
         departmentName: target.departmentName,
         avatar: `https://images.unsplash.com/photo-${Math.floor(1500000000000 + Math.random() * 100000000000)}?w=128&h=128&fit=crop&crop=faces`,
-        twoFactorEnabled: true,
-        twoFactorSecret: 'MOCKSECRET321'
+        twoFactorEnabled: true
       };
 
       if (onRegisterUser) {
@@ -260,8 +259,7 @@ export const AuthPhase2Panel: React.FC<AuthPhase2PanelProps> = ({
       departmentId: directDept,
       departmentName: directDept === 'dept-it' ? 'IT Infrastructure' : directDept === 'dept-fin' ? 'Finance & Budget' : 'Mining Operations',
       avatar: `https://images.unsplash.com/photo-${Math.floor(1500000000000 + Math.random() * 100000000000)}?w=128&h=128&fit=crop&crop=faces`,
-      twoFactorEnabled: true,
-      twoFactorSecret: 'MOCKSECRET321'
+      twoFactorEnabled: true
     };
 
     if (onRegisterUser) {

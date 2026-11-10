@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Asset, Organization } from '../types';
 import { Printer, X, Download, Sparkles } from 'lucide-react';
+import { generateQrDataUrl } from '../lib/qr-generator';
 
 interface BatchLabelPrinterProps {
   assets: Asset[];
@@ -13,6 +14,35 @@ export const BatchLabelPrinter: React.FC<BatchLabelPrinterProps> = ({
   organization,
   onClose
 }) => {
+  const [qrDataUrls, setQrDataUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let isCancelled = false;
+    const generateAll = async () => {
+      const urls: Record<string, string> = {};
+      for (const ast of assets) {
+        try {
+          const payload = JSON.stringify({
+            code: ast.assetCode,
+            sn: ast.serialNumber,
+            org: organization.name,
+            branch: ast.branchName
+          });
+          urls[ast.id] = await generateQrDataUrl(payload, { width: 160 });
+        } catch (err) {
+          console.error('Failed to generate local QR code for asset:', ast.assetCode, err);
+        }
+      }
+      if (!isCancelled) {
+        setQrDataUrls(urls);
+      }
+    };
+    generateAll();
+    return () => {
+      isCancelled = true;
+    };
+  }, [assets, organization.name]);
+
   const handlePrint = () => {
     window.print();
   };
@@ -55,14 +85,7 @@ export const BatchLabelPrinter: React.FC<BatchLabelPrinterProps> = ({
       <div className="w-full max-w-5xl bg-white text-slate-900 rounded-2xl p-6 shadow-2xl print:shadow-none print:p-0 print:rounded-none">
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 print:grid-cols-3 print:gap-3">
           {assets.map((ast) => {
-            const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(
-              JSON.stringify({
-                code: ast.assetCode,
-                sn: ast.serialNumber,
-                org: organization.name,
-                branch: ast.branchName
-              })
-            )}`;
+            const qrUrl = qrDataUrls[ast.id];
 
             return (
               <div
@@ -86,11 +109,15 @@ export const BatchLabelPrinter: React.FC<BatchLabelPrinterProps> = ({
                 {/* Content: QR code + Info */}
                 <div className="flex gap-3 items-center">
                   <div className="w-20 h-20 flex-shrink-0 bg-slate-50 border border-slate-200 rounded-lg p-1 flex items-center justify-center">
-                    <img
-                      src={qrUrl}
-                      alt={ast.assetCode}
-                      className="w-full h-full object-contain"
-                    />
+                    {qrUrl ? (
+                      <img
+                        src={qrUrl}
+                        alt={ast.assetCode}
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <div className="text-[9px] text-slate-400">Loading...</div>
+                    )}
                   </div>
 
                   <div className="flex-1 min-w-0">

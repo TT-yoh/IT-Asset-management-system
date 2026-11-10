@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Asset } from '../../types';
 import { 
   X, 
@@ -21,6 +21,7 @@ import {
   Tag
 } from 'lucide-react';
 import { generateSketchGraph } from '../AssetManager';
+import { generateQrDataUrl } from '../../lib/qr-generator';
 
 interface AssetDetailModalProps {
   asset: Asset | null;
@@ -39,15 +40,22 @@ export const AssetDetailModal: React.FC<AssetDetailModalProps> = ({
 }) => {
   const [showTechnicalSpecs, setShowTechnicalSpecs] = useState<boolean>(false);
   const [showQrPreview, setShowQrPreview] = useState<boolean>(false);
+  const [qrUrl, setQrUrl] = useState<string>('');
+
+  useEffect(() => {
+    if (!asset) return;
+    let isCancelled = false;
+    const origin = typeof window !== 'undefined' && window.location.origin && !window.location.origin.includes('null')
+      ? window.location.origin
+      : 'https://it-asset-management-system-orpin.vercel.app';
+    const payload = `${origin}/?asset=${encodeURIComponent(asset.assetCode)}`;
+    generateQrDataUrl(payload, { width: 240 })
+      .then(url => { if (!isCancelled) setQrUrl(url); })
+      .catch(err => console.error('Failed generating local QR:', err));
+    return () => { isCancelled = true; };
+  }, [asset?.assetCode]);
 
   if (!asset) return null;
-
-  const origin = typeof window !== 'undefined' && window.location.origin && !window.location.origin.includes('null')
-    ? window.location.origin
-    : 'https://it-asset-management-system-orpin.vercel.app';
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
-    `${origin}/?asset=${encodeURIComponent(asset.assetCode)}`
-  )}`;
 
   // Calculate straight-line depreciation
   const purchaseCost = asset.purchaseCost ?? 0;

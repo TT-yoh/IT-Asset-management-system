@@ -46,7 +46,6 @@ interface AuthContextType {
   systemDepartments: Department[];
   currentOrgDepartments: Department[];
   isBranchRestricted: boolean;
-  handleSwitchUser: (user: User | null) => void;
   setCurrentOrg: (org: Organization) => void;
   handleSyncUsers: (users: User[]) => void;
   handleSyncBranches: (branches: Branch[]) => void;
@@ -86,11 +85,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [systemBranches, setSystemBranches] = useState<Branch[]>(INITIAL_BRANCHES);
   const [systemDepartments, setSystemDepartments] = useState<Department[]>(DEPARTMENTS);
 
-  // Synchronously restore last known active session from resilient local storage
-  const initialSession = useMemo(() => getStoredSession(), []);
-
   const [currentOrg, setCurrentOrg] = useState<Organization>(() => {
-    return initialSession.org || ORGANIZATIONS[0] || {
+    return ORGANIZATIONS[0] || {
       id: 'org-omnitech',
       name: 'OmniTech Enterprise Systems',
       type: 'Enterprise',
@@ -99,14 +95,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   });
 
-  const [currentUser, setCurrentUser] = useState<User | null>(() => initialSession.user);
+  // Server session cookie is authoritative; client never trusts localStorage on boot
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isSessionLoading, setIsSessionLoading] = useState<boolean>(true);
 
-  // Non-blocking server session verification against backend /api/auth/me cookie
+  // Server session verification against backend /api/auth/me cookie
   useEffect(() => {
     let isCancelled = false;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
 
     const verifyServerSession = async () => {
       try {
@@ -125,6 +122,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               email: data.user.email,
               fullName: data.user.fullName || data.user.full_name,
               role: data.user.role,
+              isSuperAdmin: Boolean(data.user.isSuperAdmin || data.user.is_super_admin),
               status: data.user.status || 'ACTIVE',
               departmentId: data.user.departmentId || data.user.department_id,
               departmentName: data.user.departmentName || data.user.department_name,
@@ -236,20 +234,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       window.history.replaceState({ tab: 'login' }, '', '#/login');
     }
   }, []);
-
-  /**
-   * Switch user with organization scoping
-   */
-  const handleSwitchUser = (user: User | null) => {
-    if (!user) {
-      setCurrentUser(null);
-      clearStoredSession();
-      return;
-    }
-    const found = systemUsers.find(u => u.id === user.id) || user;
-    setCurrentUser(found);
-    setStoredSession(found, currentOrg);
-  };
 
   /**
    * Narrow action to synchronize users from remote database/storage
@@ -414,8 +398,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const userOrg = data.organization || systemOrgs.find(o => o.id === activeUser.orgId) || systemOrgs[0]!;
 
         setSystemUsers(prev => {
-          const updated = prev.map(u => (u.inviteToken === cleanToken || u.id === activeUser.id)
-            ? { ...u, ...activeUser, status: 'ACTIVE', inviteToken: undefined }
+          const updated = prev.map(u => u.id === activeUser.id
+            ? { ...u, ...activeUser, status: 'ACTIVE' as const }
             : u
           );
           persistUser(activeUser, updated);
@@ -424,39 +408,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         setCurrentOrg(userOrg);
         setCurrentUser(activeUser);
-        setStoredSession(activeUser, userOrg);
         return { success: true, user: activeUser };
       } else {
         return { success: false, error: data?.error || 'Failed to activate invitation.' };
       }
-    } catch {
-      // Offline fallback: check local systemUsers
-      let activatedUser: User | null = null;
-      setSystemUsers(prevUsers => {
-        const userIndex = prevUsers.findIndex(u => u.inviteToken && u.inviteToken === cleanToken);
-        if (userIndex === -1) return prevUsers;
-        const target = prevUsers[userIndex]!;
-        const updated: User = {
-          ...target,
-          twoFactorEnabled,
-          status: 'ACTIVE',
-          inviteToken: undefined
-        };
-        activatedUser = updated;
-        const updatedList = [...prevUsers];
-        updatedList[userIndex] = updated;
-        persistUser(updated, updatedList);
-        return updatedList;
-      });
-
-      if (activatedUser) {
-        const userOrg = systemOrgs.find(o => o.id === (activatedUser as User).orgId) || systemOrgs[0]!;
-        setCurrentOrg(userOrg);
-        setCurrentUser(activatedUser);
-        setStoredSession(activatedUser, userOrg);
-        return { success: true, user: activatedUser };
-      }
-      return { success: false, error: 'Could not connect to server to verify invitation token.' };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Could not connect to server to verify invitation token.' };
     }
   };
 
@@ -506,7 +463,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         twoFactorEnabled: false,
         avatar: `https://images.unsplash.com/photo-${1534528741775 + (systemUsers.length % 10)}?w=100&auto=format&fit=crop&q=80`,
         status: 'INVITED',
-        inviteToken: resData.inviteToken,
         invitedAt: resData.invitedAt || new Date().toISOString()
       };
 
@@ -524,31 +480,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         inviteToken: resData.inviteToken,
         user: invitedUser
       };
-    } catch {
-      // Offline resilient fallback
-      const fallbackToken = 'inv-' + Math.random().toString(36).substring(2, 8) + Date.now().toString(36);
-      const fallbackUser: User = {
-        id: `usr-${Date.now()}`,
-        orgId: currentOrg.id,
-        email: data.email.trim().toLowerCase(),
-        fullName: data.fullName.trim(),
-        role: data.role,
-        departmentId: data.departmentId || undefined,
-        departmentName: data.departmentName || undefined,
-        branchId: data.branchId,
-        branchName: data.branchName,
-        twoFactorEnabled: false,
-        avatar: `https://images.unsplash.com/photo-${1534528741775 + (systemUsers.length % 10)}?w=100&auto=format&fit=crop&q=80`,
-        status: 'INVITED',
-        inviteToken: fallbackToken,
-        invitedAt: new Date().toISOString()
-      };
-      setSystemUsers(prev => {
-        const updated = [...prev, fallbackUser];
-        persistUser(fallbackUser, updated);
-        return updated;
-      });
-      return { success: true, inviteToken: fallbackToken, user: fallbackUser };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Could not connect to server to issue invitation.' };
     }
   };
 
@@ -726,7 +659,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         systemDepartments,
         currentOrgDepartments,
         isBranchRestricted,
-        handleSwitchUser,
         setCurrentOrg,
         handleSyncUsers,
         handleSyncBranches,

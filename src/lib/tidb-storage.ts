@@ -112,24 +112,12 @@ export const wipeUserAndOrgCaches = (orgId?: string, userId?: string): void => {
 };
 
 export const getStoredSession = (): { user: User | null; org: Organization | null } => {
-  const user = loadFromStorage<User | null>(getScopedKey(STORAGE_KEYS.CURRENT_USER), null);
-  const org = loadFromStorage<Organization | null>(getScopedKey(STORAGE_KEYS.CURRENT_ORG), null);
-  return { user, org };
+  // Client never caches user or role in localStorage; server session cookie is authoritative
+  return { user: null, org: null };
 };
 
-export const setStoredSession = (user: User | null, org: Organization | null): void => {
-  const userKey = getScopedKey(STORAGE_KEYS.CURRENT_USER);
-  const orgKey = getScopedKey(STORAGE_KEYS.CURRENT_ORG);
-  if (user) {
-    saveToStorage(userKey, user);
-  } else {
-    removeFromStorage(userKey);
-  }
-  if (org) {
-    saveToStorage(orgKey, org);
-  } else {
-    removeFromStorage(orgKey);
-  }
+export const setStoredSession = (_user: User | null, _org: Organization | null): void => {
+  // No-op: server cookie is single source of truth
 };
 
 export const clearStoredSession = (): void => {

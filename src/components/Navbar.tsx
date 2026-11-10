@@ -26,7 +26,6 @@ interface NavbarProps {
   currentOrg: Organization;
   users: User[];
   currentUser: User | null;
-  onSelectUser: (user: User | null) => void;
   notifications: SystemNotification[];
   onMarkNotificationsRead: () => void;
   searchQuery: string;
@@ -47,7 +46,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentOrg,
   users,
   currentUser,
-  onSelectUser,
   notifications,
   onMarkNotificationsRead,
   searchQuery,
@@ -69,7 +67,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [isManualSyncing, setIsManualSyncing] = useState(false);
   const [showMobileSearch, setShowMobileSearch] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [showRoleSimulator, setShowRoleSimulator] = useState(false);
+  const [isSwitchingOrg, setIsSwitchingOrg] = useState(false);
 
   // Network & TiDB offline sync status
   const [syncStatus, setSyncStatus] = useState<OfflineSyncStatus>({
@@ -114,20 +112,20 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {/* Dedicated Company Brand Badge with Multi-Tenant Switcher */}
+          {/* Dedicated Company Brand Badge with Multi-Tenant Switcher (Super Admin Only) */}
           <div className="relative">
             <button
               onClick={() => {
-                if (systemOrgs && systemOrgs.length > 1) {
+                if (currentUser?.isSuperAdmin && systemOrgs && systemOrgs.length > 1) {
                   setShowOrgDropdown(!showOrgDropdown);
                   setShowUserMenu(false);
                   setShowNotifMenu(false);
                 }
               }}
               className={`flex items-center space-x-2 sm:space-x-2.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-950/60 border border-slate-800 text-left transition ${
-                systemOrgs && systemOrgs.length > 1 ? 'hover:border-slate-700 hover:bg-slate-900 cursor-pointer' : ''
+                currentUser?.isSuperAdmin && systemOrgs && systemOrgs.length > 1 ? 'hover:border-slate-700 hover:bg-slate-900 cursor-pointer' : ''
               }`}
-              title={systemOrgs && systemOrgs.length > 1 ? 'Switch Organization Tenant' : 'Current Organization Context'}
+              title={currentUser?.isSuperAdmin ? 'Switch Organization Tenant (Super Admin)' : 'Current Organization Context'}
             >
               <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-sm sm:text-base shrink-0">
                 {currentOrg.logo || '🏢'}
@@ -138,7 +136,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {currentOrg.name}
                   </span>
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Active Multi-Tenant Context" />
-                  {systemOrgs && systemOrgs.length > 1 && (
+                  {currentUser?.isSuperAdmin && systemOrgs && systemOrgs.length > 1 && (
                     <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${showOrgDropdown ? 'rotate-180' : ''}`} />
                   )}
                 </div>
@@ -148,13 +146,13 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
             </button>
 
-            {/* Organization Switcher Dropdown */}
-            {showOrgDropdown && systemOrgs && systemOrgs.length > 1 && (
+            {/* Organization Switcher Dropdown (Super Admin Only with Audited /api/admin/switch-org) */}
+            {showOrgDropdown && currentUser?.isSuperAdmin && systemOrgs && systemOrgs.length > 1 && (
               <div className="absolute left-0 mt-2 w-72 bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-150">
                 <div className="p-3 bg-slate-900/90 border-b border-slate-700">
-                  <div className="text-xs font-bold text-white">Switch Organization Tenant</div>
+                  <div className="text-xs font-bold text-white">Super Admin Tenant Switcher</div>
                   <p className="text-[10px] text-slate-400 mt-0.5">
-                    Data isolation: Each organization maintains separate assets, staff, and audit trails.
+                    Audited tenant scope switch. Refetches tenant-isolated fleet assets & staff.
                   </p>
                 </div>
                 <div className="p-1.5 max-h-60 overflow-y-auto space-y-1">
@@ -163,9 +161,29 @@ export const Navbar: React.FC<NavbarProps> = ({
                     return (
                       <button
                         key={org.id}
-                        onClick={() => {
-                          if (onSelectOrg) onSelectOrg(org);
-                          setShowOrgDropdown(false);
+                        disabled={isSwitchingOrg}
+                        onClick={async () => {
+                          setIsSwitchingOrg(true);
+                          try {
+                            const res = await fetch('/api/admin/switch-org', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              credentials: 'include',
+                              body: JSON.stringify({ orgId: org.id })
+                            });
+                            if (res.ok) {
+                              if (onSelectOrg) onSelectOrg(org);
+                              if (onRefreshData) await onRefreshData();
+                            } else {
+                              const errData = await res.json().catch(() => null);
+                              alert(errData?.error || 'Failed to switch tenant context.');
+                            }
+                          } catch {
+                            alert('Network error switching tenant context.');
+                          } finally {
+                            setIsSwitchingOrg(false);
+                            setShowOrgDropdown(false);
+                          }
                         }}
                         className={`w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between transition cursor-pointer ${
                           isSelected
@@ -380,44 +398,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </div>
                     <ChevronRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300" />
                   </button>
-                </div>
-
-                {/* Collapsible Role Simulator for testing/preview */}
-                <div className="p-2 border-b border-slate-700">
-                  <button
-                    onClick={() => setShowRoleSimulator(!showRoleSimulator)}
-                    className="w-full flex items-center justify-between px-2.5 py-1.5 text-[10px] uppercase font-bold text-slate-400 hover:text-slate-200 transition-colors cursor-pointer rounded-lg hover:bg-slate-700/40"
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <span>Role Simulator</span>
-                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-750 border border-slate-700 text-slate-400 normal-case font-normal font-sans">
-                        Preview
-                      </span>
-                    </span>
-                    <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${showRoleSimulator ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  {showRoleSimulator && (
-                    <div className="mt-1 space-y-0.5 max-h-48 overflow-y-auto pr-1">
-                      {orgUsers.map(user => (
-                        <button
-                          key={user.id}
-                          onClick={() => { onSelectUser(user); setShowUserMenu(false); }}
-                          className={`w-full text-left p-2 rounded-lg text-xs flex items-center justify-between transition-colors cursor-pointer ${
-                            user.id === currentUser.id ? 'bg-emerald-500/10 text-emerald-300' : 'hover:bg-slate-700/50 text-slate-300'
-                          }`}
-                        >
-                          <div className="truncate">
-                            <div className="font-semibold text-white">{user.fullName}</div>
-                            <div className="text-[10px] text-slate-400">{user.email}</div>
-                          </div>
-                          <span className={`text-[9px] px-1.5 py-0.5 rounded border font-mono font-bold shrink-0 ml-2 ${getRoleBadgeColor(user.role)}`}>
-                            {user.role}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
 
                 {onLogout && (

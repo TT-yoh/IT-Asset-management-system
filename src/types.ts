@@ -52,10 +52,8 @@ export interface User {
   branchName: string;
   twoFactorEnabled: boolean;
   avatar: string;
-  twoFactorSecret?: string;
-  password?: string;
+  isSuperAdmin?: boolean;
   status?: 'ACTIVE' | 'INVITED' | 'SUSPENDED';
-  inviteToken?: string;
   invitedAt?: string;
   version?: number;
 }

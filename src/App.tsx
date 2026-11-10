@@ -59,7 +59,6 @@ function AppShell() {
     handleRegisterDepartment,
     handleUpdateDepartment,
     handleDeleteDepartment,
-    handleSwitchUser,
     handleSelectOrg,
     handleLogout
   } = useAuth();
@@ -101,6 +100,7 @@ function AppShell() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   const [isGlobalScannerOpen, setIsGlobalScannerOpen] = useState<boolean>(false);
   const [inspectingAsset, setInspectingAsset] = useState<Asset | null>(null);
+  const [facilitiesSubTab, setFacilitiesSubTab] = useState<'branches' | 'departments'>('branches');
   const mainViewportRef = React.useRef<HTMLElement>(null);
 
   // Deep-link & Scanned QR code inspector: resolves ?asset=, ?code=, or ?tag= from physical stickers
@@ -269,8 +269,6 @@ function AppShell() {
     );
   }
 
-  const [facilitiesSubTab, setFacilitiesSubTab] = useState<'branches' | 'departments'>('branches');
-
   // Enforce branch boundary for branch managers and restricted users
   const isBranchRestricted = currentUser?.role === 'BRANCH_MANAGER' || currentUser?.role === 'USER';
 
@@ -296,7 +294,6 @@ function AppShell() {
         currentOrg={currentOrg}
         users={filteredUsers}
         currentUser={currentUser}
-        onSelectUser={handleSwitchUser}
         notifications={notifications.filter(n => !n.orgId || n.orgId === currentOrg.id)}
         onMarkNotificationsRead={() => markAllAsRead(currentOrg.id)}
         searchQuery={searchQuery}

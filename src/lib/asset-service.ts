@@ -1,5 +1,6 @@
 import { Asset, User, UserRole, CheckoutRecord, MaintenanceRecord, AuditLogItem } from '../types';
 import { canAccessAsset } from './rbac';
+import Papa from 'papaparse';
 
 export interface AssetFilters {
   branchIds?: string[];
@@ -112,15 +113,51 @@ export class AssetService {
   }
 
   /**
-   * Parse CSV bulk upload with rigorous redundant data verification
+   * Parse CSV bulk upload with RFC 4180 parsing, 2MB & 500 rows validation, and redundant data verification
    */
   static processBulkCSV(csvText: string, orgId: string, branchName: string, existingAssets: Asset[] = []): BulkUploadResult {
-    const lines = csvText.trim().split(/\r?\n/);
-    if (lines.length <= 1) {
+    // 1. Enforce size limit: reject files > 2 MB
+    const byteLength = new TextEncoder().encode(csvText).length;
+    if (byteLength > 2 * 1024 * 1024) {
+      return {
+        successCount: 0,
+        errorCount: 1,
+        errors: [{ row: 1, message: 'CSV file exceeds maximum allowed size limit of 2 MB.' }],
+        createdAssets: []
+      };
+    }
+
+    // 2. RFC 4180 vetted parsing with papaparse
+    const parsed = Papa.parse<string[]>(csvText.trim(), {
+      skipEmptyLines: 'greedy'
+    });
+
+    if (parsed.errors.length > 0 && (!parsed.data || parsed.data.length === 0)) {
+      return {
+        successCount: 0,
+        errorCount: 1,
+        errors: [{ row: 1, message: `CSV parse error: ${parsed.errors[0]?.message || 'Invalid format'}` }],
+        createdAssets: []
+      };
+    }
+
+    const rows = parsed.data;
+    if (!rows || rows.length <= 1) {
       return { successCount: 0, errorCount: 1, errors: [{ row: 1, message: 'CSV file is empty or missing headers' }], createdAssets: [] };
     }
 
-    const headers = lines[0]!.toLowerCase().split(',').map(h => h.trim().replace(/['"]/g, ''));
+    // 3. Enforce rows limit: reject files > 500 rows
+    const dataRowsCount = rows.length - 1;
+    if (dataRowsCount > 500) {
+      return {
+        successCount: 0,
+        errorCount: 1,
+        errors: [{ row: 1, message: `CSV file exceeds maximum allowed limit of 500 rows (got ${dataRowsCount} rows).` }],
+        createdAssets: []
+      };
+    }
+
+    const headers = rows[0]!.map(h => String(h || '').toLowerCase().trim());
     
     // Flexible header matcher supporting snake_case, camelCase, and plain words
     const findHeaderIdx = (keys: string[]) => {
@@ -157,10 +194,9 @@ export class AssetService {
     const seenMacsInBatch = new Set<string>();
     const seenImeisInBatch = new Set<string>();
 
-    for (let i = 1; i < lines.length; i++) {
-      const rowStr = lines[i]!.trim();
-      if (!rowStr) continue;
-      const cols = rowStr.split(',').map(c => c.trim().replace(/^["']|["']$/g, ''));
+    for (let i = 1; i < rows.length; i++) {
+      const cols = rows[i]!;
+      if (!cols || cols.length === 0 || cols.every(c => !String(c || '').trim())) continue;
 
       const name = cols[nameIdx] || '';
       const model = modelIdx !== -1 ? cols[modelIdx] || 'Standard IT Model' : 'Standard IT Model';

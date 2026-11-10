@@ -3,6 +3,7 @@ import { CheckoutRecord, Asset, User, AssetCondition, Branch } from '../types';
 import { CheckoutForm } from './CheckoutForm';
 import { CheckinForm } from './CheckinForm';
 import { CheckoutService } from '../lib/checkout-service';
+import { escapeCsvRow } from '../lib/csv-sanitizer';
 import {
   ArrowLeftRight,
   CheckCircle2,
@@ -241,7 +242,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
       `"${c.reason || ''}"`,
       c.returnCondition || 'N/A'
     ]);
-    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const csvContent = [escapeCsvRow(headers), ...rows.map(r => escapeCsvRow(r))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
