@@ -9,6 +9,7 @@ import {
 } from '../mockData';
 import {
   STORAGE_KEYS,
+  getScopedKey,
   loadInitialData,
   loadFromStorage,
   persistAsset,
@@ -16,22 +17,15 @@ import {
   bulkPersistAssets,
   persistCheckout,
   persistMaintenance,
-  persistAuditLog,
-  resetToUniversalDemoData,
-  resetToCleanSlate,
-  generateTiDBUpsertQuery,
   mapAssetToTiDBRow,
   mapCheckoutToTiDBRow,
   mapMaintenanceToTiDBRow
 } from '../lib/tidb-storage';
 import {
   isTiDBConfigured,
-  getLastTiDBSyncTime,
-  executeTiDBQuery,
-  updateLastTiDBSyncTime
+  getLastTiDBSyncTime
 } from '../lib/tidb-client';
 import { queueOfflineMutation, registerReplayExecutor } from '../lib/offline-sync';
-import { commitAuditEvent } from '../lib/audit';
 import { useAuth } from './AuthContext';
 import { useNotifications } from './NotificationContext';
 
@@ -54,18 +48,18 @@ interface AssetContextType {
   showTiDBModal: boolean;
   setShowTiDBModal: (show: boolean) => void;
   refreshAppData: () => Promise<void>;
-  handleAddAsset: (newAst: Asset) => void;
-  handleUpdateAsset: (updatedAst: Asset) => void;
-  handleDeleteAsset: (astId: string) => void;
-  handleBulkAddAssets: (newAssets: Asset[]) => void;
-  handleBatchUpdateStatus: (assetIds: string[], newStatus: AssetStatus) => void;
-  handleBatchTransferBranch: (assetIds: string[], targetBranchId: string, targetBranchName: string) => void;
-  handleBatchDeleteAssets: (assetIds: string[]) => void;
-  handleNewCheckout: (chk: CheckoutRecord, updatedAsset?: Asset) => void;
-  handleReturnAsset: (chkId: string, returnCondition: string) => void;
-  handleReportIssue: (mnt: MaintenanceRecord) => void;
-  handleCompleteRepair: (mntId: string) => void;
-  handleUpdateTicket: (updatedRecord: MaintenanceRecord) => void;
+  handleAddAsset: (newAst: Asset) => Promise<void>;
+  handleUpdateAsset: (updatedAst: Asset) => Promise<void>;
+  handleDeleteAsset: (astId: string) => Promise<void>;
+  handleBulkAddAssets: (newAssets: Asset[]) => Promise<void>;
+  handleBatchUpdateStatus: (assetIds: string[], newStatus: AssetStatus) => Promise<void>;
+  handleBatchTransferBranch: (assetIds: string[], targetBranchId: string, targetBranchName: string) => Promise<void>;
+  handleBatchDeleteAssets: (assetIds: string[]) => Promise<void>;
+  handleNewCheckout: (chk: CheckoutRecord, updatedAsset?: Asset) => Promise<void>;
+  handleReturnAsset: (chkId: string, returnCondition: string, notes?: string) => Promise<void>;
+  handleReportIssue: (mnt: MaintenanceRecord) => Promise<void>;
+  handleCompleteRepair: (mntId: string) => Promise<void>;
+  handleUpdateTicket: (updatedRecord: MaintenanceRecord) => Promise<void>;
   handleLoadDemoData: () => void;
   handleResetCleanSlate: () => void;
 }
@@ -76,12 +70,17 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const { currentOrg, currentUser, isBranchRestricted, handleSyncUsers, handleSyncBranches, handleSyncOrganizations } = useAuth();
   const { addNotification, setNotifications, evaluateAutomatedAlerts } = useNotifications();
 
-  // Synchronously initialize from persistent local storage to guarantee zero-blank-screen render
-  const [assets, setAssets] = useState<Asset[]>(() => loadFromStorage<Asset[]>(STORAGE_KEYS.ASSETS, INITIAL_ASSETS));
-  const [checkouts, setCheckouts] = useState<CheckoutRecord[]>(() => loadFromStorage<CheckoutRecord[]>(STORAGE_KEYS.CHECKOUTS, INITIAL_CHECKOUTS));
-  const [maintenances, setMaintenances] = useState<MaintenanceRecord[]>(() => loadFromStorage<MaintenanceRecord[]>(STORAGE_KEYS.MAINTENANCES, INITIAL_MAINTENANCE));
-  const [budgets, setBudgets] = useState<BudgetAllocation[]>(() => loadFromStorage<BudgetAllocation[]>(STORAGE_KEYS.BUDGETS, INITIAL_BUDGETS));
-  const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>(() => loadFromStorage<AuditLogItem[]>(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS));
+  const scopedAssetsKey = useMemo(() => getScopedKey(STORAGE_KEYS.ASSETS, currentOrg?.id, currentUser?.id), [currentOrg?.id, currentUser?.id]);
+  const scopedChksKey = useMemo(() => getScopedKey(STORAGE_KEYS.CHECKOUTS, currentOrg?.id, currentUser?.id), [currentOrg?.id, currentUser?.id]);
+  const scopedMaintsKey = useMemo(() => getScopedKey(STORAGE_KEYS.MAINTENANCES, currentOrg?.id, currentUser?.id), [currentOrg?.id, currentUser?.id]);
+  const scopedBudgetsKey = useMemo(() => getScopedKey(STORAGE_KEYS.BUDGETS, currentOrg?.id, currentUser?.id), [currentOrg?.id, currentUser?.id]);
+
+  // Synchronously initialize from tenant/user scoped local cache
+  const [assets, setAssets] = useState<Asset[]>(() => loadFromStorage<Asset[]>(scopedAssetsKey, INITIAL_ASSETS));
+  const [checkouts, setCheckouts] = useState<CheckoutRecord[]>(() => loadFromStorage<CheckoutRecord[]>(scopedChksKey, INITIAL_CHECKOUTS));
+  const [maintenances, setMaintenances] = useState<MaintenanceRecord[]>(() => loadFromStorage<MaintenanceRecord[]>(scopedMaintsKey, INITIAL_MAINTENANCE));
+  const [budgets, setBudgets] = useState<BudgetAllocation[]>(() => loadFromStorage<BudgetAllocation[]>(scopedBudgetsKey, INITIAL_BUDGETS));
+  const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   const [lastSyncedAt, setLastSyncedAt] = useState<string>('TiDB Primary (HTAP)');
@@ -91,7 +90,7 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const refreshAppData = async () => {
     try {
-      const data = await loadInitialData(currentOrg?.id);
+      const data = await loadInitialData(currentOrg?.id, currentUser?.id);
       setAssets(data.assets);
       setCheckouts(data.checkouts);
       setMaintenances(data.maintenances);
@@ -112,7 +111,7 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   useEffect(() => {
     refreshAppData();
 
-    // Register replay executor so online triggers and startup drain correctly
+    // Register replay executor with exact HTTP status propagation (401, 403, 409, 5xx)
     const unregisterExecutor = registerReplayExecutor(async (mut) => {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -127,15 +126,9 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
             const res = await fetch(`/api/assets/${encodeURIComponent(mut.data.id)}`, {
               method: 'DELETE',
               headers,
-              credentials: 'include',
-              body: JSON.stringify({ baseVersion: mut.baseVersion })
+              credentials: 'include'
             });
-            if (res.status === 409) {
-              const err = new Error('HTTP 409 Conflict: Asset version mismatch on delete');
-              (err as any).status = 409;
-              throw err;
-            }
-            return res.ok;
+            return { ok: res.ok, status: res.status };
           } else if (mut.action === 'UPDATE') {
             const row = mapAssetToTiDBRow(mut.data);
             const res = await fetch(`/api/assets/${encodeURIComponent(mut.data.id)}`, {
@@ -144,12 +137,7 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
               credentials: 'include',
               body: JSON.stringify({ ...row, baseVersion: mut.baseVersion })
             });
-            if (res.status === 409) {
-              const err = new Error('HTTP 409 Conflict: Asset version mismatch on update');
-              (err as any).status = 409;
-              throw err;
-            }
-            return res.ok;
+            return { ok: res.ok, status: res.status };
           } else {
             const row = mapAssetToTiDBRow(mut.data);
             const res = await fetch('/api/assets', {
@@ -158,52 +146,94 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
               credentials: 'include',
               body: JSON.stringify(row)
             });
-            return res.ok;
+            return { ok: res.ok, status: res.status };
           }
         } else if (mut.table === 'checkouts') {
-          const row = mapCheckoutToTiDBRow(mut.data);
-          const res = await fetch('/api/checkouts', {
-            method: 'POST',
-            headers,
-            credentials: 'include',
-            body: JSON.stringify(row)
-          });
-          return res.ok;
-        } else if (mut.table === 'maintenance') {
-          const row = mapMaintenanceToTiDBRow(mut.data);
-          const res = await fetch('/api/maintenance', {
-            method: 'POST',
-            headers,
-            credentials: 'include',
-            body: JSON.stringify({ ...row, baseVersion: mut.baseVersion })
-          });
-          if (res.status === 409) {
-            const err = new Error('HTTP 409 Conflict: Maintenance record version mismatch');
-            (err as any).status = 409;
-            throw err;
+          if (mut.action === 'RETURN') {
+            const chkId = mut.data.id || mut.data.checkoutId;
+            const res = await fetch(`/api/checkouts/${encodeURIComponent(chkId)}/return`, {
+              method: 'POST',
+              headers,
+              credentials: 'include',
+              body: JSON.stringify(mut.data)
+            });
+            return { ok: res.ok, status: res.status };
+          } else {
+            const row = mapCheckoutToTiDBRow(mut.data);
+            const res = await fetch('/api/checkouts', {
+              method: 'POST',
+              headers,
+              credentials: 'include',
+              body: JSON.stringify(row)
+            });
+            return { ok: res.ok, status: res.status };
           }
-          return res.ok;
+        } else if (mut.table === 'maintenance') {
+          if (mut.action === 'UPDATE') {
+            const mntId = mut.data.id;
+            const res = await fetch(`/api/maintenance/${encodeURIComponent(mntId)}`, {
+              method: 'PUT',
+              headers,
+              credentials: 'include',
+              body: JSON.stringify(mut.data)
+            });
+            return { ok: res.ok, status: res.status };
+          } else {
+            const row = mapMaintenanceToTiDBRow(mut.data);
+            const res = await fetch('/api/maintenance', {
+              method: 'POST',
+              headers,
+              credentials: 'include',
+              body: JSON.stringify(row)
+            });
+            return { ok: res.ok, status: res.status };
+          }
+        } else if (mut.table === 'branches') {
+          if (mut.action === 'DELETE') {
+            const res = await fetch(`/api/branches/${encodeURIComponent(mut.data.id)}`, {
+              method: 'DELETE',
+              headers,
+              credentials: 'include'
+            });
+            return { ok: res.ok, status: res.status };
+          } else if (mut.action === 'UPDATE') {
+            const res = await fetch(`/api/branches/${encodeURIComponent(mut.data.id)}`, {
+              method: 'PUT',
+              headers,
+              credentials: 'include',
+              body: JSON.stringify(mut.data)
+            });
+            return { ok: res.ok, status: res.status };
+          } else {
+            const res = await fetch('/api/branches', {
+              method: 'POST',
+              headers,
+              credentials: 'include',
+              body: JSON.stringify(mut.data)
+            });
+            return { ok: res.ok, status: res.status };
+          }
+        } else if (mut.table === 'users') {
+          const res = await fetch(`/api/users/${encodeURIComponent(mut.data.id)}`, {
+            method: 'PUT',
+            headers,
+            credentials: 'include',
+            body: JSON.stringify(mut.data)
+          });
+          return { ok: res.ok, status: res.status };
         }
-        return true;
+        return { ok: true, status: 200 };
       } catch (err: any) {
-        if (err.status === 409) throw err;
-        return false;
+        return { ok: false, status: err?.status || 500, error: err?.message };
       }
     });
 
-    const handleTiDBUpdate = () => {
-      setIsTiDBLive(isTiDBConfigured());
-      setTiDBSyncTime(getLastTiDBSyncTime());
-    };
-    window.addEventListener('tidb_config_updated', handleTiDBUpdate);
-
     return () => {
       unregisterExecutor();
-      window.removeEventListener('tidb_config_updated', handleTiDBUpdate);
     };
   }, []);
 
-  // 1. Initial data load and instant re-sync whenever active organization or logged-in user changes
+  // 1. Re-sync whenever tenant or user changes
   useEffect(() => {
     refreshAppData();
   }, [currentOrg?.id, currentUser?.id]);
@@ -211,7 +241,7 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // 2. Cross-tab instant synchronization via browser storage events
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEYS.ASSETS || e.key === STORAGE_KEYS.CHECKOUTS || e.key === STORAGE_KEYS.MAINTENANCES) {
+      if (e.key && e.key.includes('omni_it_')) {
         refreshAppData();
       }
     };
@@ -219,26 +249,41 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
-  // 3. Multi-client real-time background sync (every 6s) and on window focus
+  // 3. Multi-client real-time background sync: visibility-aware 30-60s interval with exponential error backoff
   useEffect(() => {
-    const pollInterval = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible' && navigator.onLine) {
-        refreshAppData();
-      }
-    }, 6000);
+    let pollTimer: any = null;
+    let errorCount = 0;
+
+    const scheduleNextPoll = () => {
+      const baseInterval = 30000; // 30s
+      const backoff = Math.min(120000, baseInterval * Math.pow(1.5, Math.min(errorCount, 4)));
+      pollTimer = setTimeout(async () => {
+        if (typeof document !== 'undefined' && document.visibilityState === 'visible' && navigator.onLine) {
+          try {
+            await refreshAppData();
+            errorCount = 0;
+          } catch {
+            errorCount++;
+          }
+        }
+        scheduleNextPoll();
+      }, backoff);
+    };
+
+    scheduleNextPoll();
 
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && navigator.onLine) {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible' && navigator.onLine) {
         refreshAppData();
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
-      clearInterval(pollInterval);
+      clearTimeout(pollTimer);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [currentOrg?.id]);
+  }, [currentOrg?.id, currentUser?.id]);
 
   // Run automated alerts evaluation on asset/checkout/maintenance changes
   useEffect(() => {
@@ -323,69 +368,25 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     });
   }, [auditLogs, currentOrg.id, isBranchRestricted, currentUser]);
 
-  // Asset CRUD: Primary TiDB Execution with Fallback Queue
+  // Asset CRUD
   const handleAddAsset = async (newAst: Asset) => {
-    // Redundancy check in local state first:
-    const tagConflict = assets.find(
-      a => a.id !== newAst.id && a.assetCode.trim().toLowerCase() === newAst.assetCode.trim().toLowerCase()
-    );
-    if (tagConflict) {
-      addNotification({
-        orgId: currentOrg.id,
-        type: 'WARNING',
-        title: 'Duplicate Asset Tag Detected',
-        message: `Asset tag ${newAst.assetCode} is already registered to "${tagConflict.name}". Please assign a unique tag.`,
-        read: false
-      });
-      throw new Error(`Asset tag "${newAst.assetCode}" is already in use by "${tagConflict.name}".`);
-    }
-
-    if (newAst.serialNumber && newAst.serialNumber.trim()) {
-      const serialConflict = assets.find(
-        a => a.id !== newAst.id && a.serialNumber && a.serialNumber.trim().toLowerCase() === newAst.serialNumber.trim().toLowerCase()
-      );
-      if (serialConflict) {
-        addNotification({
-          orgId: currentOrg.id,
-          type: 'WARNING',
-          title: 'Duplicate Serial Number Detected',
-          message: `Chassis serial ${newAst.serialNumber} is already registered to "${serialConflict.name}" (${serialConflict.assetCode}).`,
-          read: false
-        });
-        throw new Error(`Serial number "${newAst.serialNumber}" is already registered to "${serialConflict.name}".`);
-      }
-    }
-
     const updatedAssets = [newAst, ...assets];
     setAssets(updatedAssets);
 
     try {
-      // 1. Direct Server & TiDB Database Persist
       await persistAsset(newAst, updatedAssets, false);
+      await refreshAppData();
     } catch (err: any) {
-      // Rollback optimistic state if server rejects with 409 or other error
       setAssets(assets);
       addNotification({
         orgId: currentOrg.id,
         type: 'WARNING',
         title: 'Asset Registration Rejected',
-        message: err.message || 'Duplicate or redundant data rejected by the database.',
+        message: err.message || 'Duplicate or invalid data rejected by server.',
         read: false
       });
       throw err;
     }
-
-    // 2. Audit trail
-    const newLog = await commitAuditEvent({
-      orgId: currentOrg.id,
-      user: currentUser ? currentUser : { fullName: 'System Admin', role: 'ADMIN' },
-      action: 'CREATE_ASSET',
-      entityType: 'Asset',
-      entityName: `${newAst.assetCode} (${newAst.name})`,
-      changes: `Enrolled device into TiDB primary ledger. Valuation: $${newAst.purchaseCost}`
-    });
-
-    setAuditLogs(prev => [newLog, ...prev]);
 
     addNotification({
       orgId: currentOrg.id,
@@ -400,85 +401,38 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const updatedAssets = assets.map(a => a.id === updatedAst.id ? updatedAst : a);
     setAssets(updatedAssets);
 
-    // 1. Direct Server & TiDB Database Update
-    await persistAsset(updatedAst, updatedAssets, true);
-
-    const newLog = await commitAuditEvent({
-      orgId: currentOrg.id,
-      user: currentUser ? currentUser : { fullName: 'System Admin', role: 'ADMIN' },
-      action: 'UPDATE_ASSET',
-      entityType: 'Asset',
-      entityName: `${updatedAst.assetCode} (${updatedAst.name})`,
-      changes: `Updated specifications and condition state in TiDB primary ledger.`
-    });
-
-    setAuditLogs(prev => [newLog, ...prev]);
+    try {
+      await persistAsset(updatedAst, updatedAssets, true);
+      await refreshAppData();
+    } catch (err: any) {
+      setAssets(assets);
+      throw err;
+    }
   };
 
   const handleDeleteAsset = async (astId: string) => {
-    const target = assets.find(a => a.id === astId);
     const remainingAssets = assets.filter(a => a.id !== astId);
     setAssets(remainingAssets);
 
-    // 1. Direct Server & TiDB Database Delete
-    await deleteAssetFromDb(astId, remainingAssets);
-
-    if (target) {
-      const newLog = await commitAuditEvent({
-        orgId: currentOrg.id,
-        user: currentUser ? currentUser : { fullName: 'System Admin', role: 'ADMIN' },
-        action: 'DELETE_ASSET',
-        entityType: 'Asset',
-        entityName: `${target.assetCode} (${target.name})`,
-        changes: `Deleted asset record from TiDB primary inventory.`
-      });
-
-      setAuditLogs(prev => [newLog, ...prev]);
+    try {
+      await deleteAssetFromDb(astId);
+      await refreshAppData();
+    } catch (err: any) {
+      setAssets(assets);
+      throw err;
     }
   };
 
   const handleBulkAddAssets = async (newAssets: Asset[]) => {
-    // Filter out duplicates within the incoming batch and against current assets
-    const existingTags = new Set(assets.map(a => a.assetCode.trim().toLowerCase()));
-    const existingSerials = new Set(assets.filter(a => a.serialNumber).map(a => a.serialNumber!.trim().toLowerCase()));
-
-    const uniqueBatch: Asset[] = [];
-    for (const ast of newAssets) {
-      const tagLower = ast.assetCode.trim().toLowerCase();
-      const serLower = ast.serialNumber ? ast.serialNumber.trim().toLowerCase() : '';
-      if (existingTags.has(tagLower)) continue;
-      if (serLower && existingSerials.has(serLower)) continue;
-      existingTags.add(tagLower);
-      if (serLower) existingSerials.add(serLower);
-      uniqueBatch.push(ast);
-    }
-
-    if (uniqueBatch.length === 0) {
-      addNotification({
-        orgId: currentOrg.id,
-        type: 'WARNING',
-        title: 'Bulk Import: Redundant Entries Omitted',
-        message: 'All assets in the batch had conflicting tags or serial numbers with existing inventory and were omitted.',
-        read: false
-      });
-      return;
-    }
-
-    const updatedAssets = [...uniqueBatch, ...assets];
+    const updatedAssets = [...newAssets, ...assets];
     setAssets(updatedAssets);
 
-    await bulkPersistAssets(uniqueBatch, updatedAssets);
-
-    const newLog = await commitAuditEvent({
-      orgId: currentOrg.id,
-      user: currentUser ? currentUser : { fullName: 'System Admin', role: 'ADMIN' },
-      action: 'BULK_IMPORT',
-      entityType: 'Asset',
-      entityName: `${uniqueBatch.length} Assets`,
-      changes: `Bulk imported ${uniqueBatch.length} hardware assets into TiDB primary ledger (skipped ${newAssets.length - uniqueBatch.length} redundant)`
-    });
-
-    setAuditLogs(prev => [newLog, ...prev]);
+    try {
+      await bulkPersistAssets(newAssets, updatedAssets);
+      await refreshAppData();
+    } catch {
+      newAssets.forEach(a => queueOfflineMutation('assets', 'INSERT', a));
+    }
   };
 
   const handleBatchUpdateStatus = async (assetIds: string[], newStatus: AssetStatus) => {
@@ -498,19 +452,7 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         queueOfflineMutation('assets', 'UPDATE', { id, status: newStatus });
       }
     }
-
-    bulkPersistAssets(updatedAssets.filter(a => idSet.has(a.id)), updatedAssets);
-
-    const newLog = await commitAuditEvent({
-      orgId: currentOrg.id,
-      user: currentUser ? currentUser : { fullName: 'System Admin', role: 'ADMIN' },
-      action: 'UPDATE_ASSET',
-      entityType: 'Asset',
-      entityName: `${assetIds.length} Assets Batch Updated`,
-      changes: `Batch updated status of ${assetIds.length} devices to ${newStatus} in TiDB`
-    });
-
-    setAuditLogs(prev => [newLog, ...prev]);
+    await refreshAppData();
   };
 
   const handleBatchTransferBranch = async (assetIds: string[], targetBranchId: string, targetBranchName: string) => {
@@ -530,19 +472,7 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         queueOfflineMutation('assets', 'UPDATE', { id, branchId: targetBranchId, branchName: targetBranchName });
       }
     }
-
-    bulkPersistAssets(updatedAssets.filter(a => idSet.has(a.id)), updatedAssets);
-
-    const newLog = await commitAuditEvent({
-      orgId: currentOrg.id,
-      user: currentUser ? currentUser : { fullName: 'System Admin', role: 'ADMIN' },
-      action: 'TRANSFER_ASSET',
-      entityType: 'Asset',
-      entityName: `${assetIds.length} Assets Transferred`,
-      changes: `Batch transferred ${assetIds.length} devices to branch: ${targetBranchName}`
-    });
-
-    setAuditLogs(prev => [newLog, ...prev]);
+    await refreshAppData();
   };
 
   const handleBatchDeleteAssets = async (assetIds: string[]) => {
@@ -554,79 +484,29 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       try {
         await fetch(`/api/assets/${encodeURIComponent(id)}`, {
           method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
           credentials: 'include'
         });
       } catch {
         queueOfflineMutation('assets', 'DELETE', { id });
       }
-      deleteAssetFromDb(id, remainingAssets);
     }
-
-    const newLog = await commitAuditEvent({
-      orgId: currentOrg.id,
-      user: currentUser ? currentUser : { fullName: 'System Admin', role: 'ADMIN' },
-      action: 'DELETE_ASSET',
-      entityType: 'Asset',
-      entityName: `${assetIds.length} Assets Batch Deleted`,
-      changes: `Permanently removed ${assetIds.length} assets from TiDB primary inventory`
-    });
-
-    setAuditLogs(prev => [newLog, ...prev]);
+    await refreshAppData();
   };
 
   // Checkout Pipelines
-  const handleNewCheckout = async (chk: CheckoutRecord, updatedAsset?: Asset) => {
+  const handleNewCheckout = async (chk: CheckoutRecord, _updatedAsset?: Asset) => {
     const updatedCheckouts = [chk, ...checkouts];
     setCheckouts(updatedCheckouts);
 
-    let updatedAssetsList = assets;
-    let targetAsset = updatedAsset;
-    if (targetAsset) {
-      updatedAssetsList = assets.map(a => a.id === targetAsset!.id ? targetAsset! : a);
-      setAssets(updatedAssetsList);
-    } else {
-      updatedAssetsList = assets.map(a => {
-        if (a.id === chk.assetId) {
-          targetAsset = { ...a, assignedToUserId: chk.checkedOutToUserId, assignedToUserName: chk.checkedOutToUserName, assignedAt: chk.checkedOutAt };
-          return targetAsset;
-        }
-        return a;
-      });
-      setAssets(updatedAssetsList);
-    }
-
     try {
-      const row = mapCheckoutToTiDBRow(chk);
-      const q = generateTiDBUpsertQuery('checkouts', row);
-      await executeTiDBQuery(q.sql, q.values);
-
-      if (targetAsset) {
-        const astRow = mapAssetToTiDBRow(targetAsset);
-        const astQ = generateTiDBUpsertQuery('assets', astRow);
-        await executeTiDBQuery(astQ.sql, astQ.values);
-      }
+      await persistCheckout(chk, updatedCheckouts);
+      await refreshAppData();
     } catch {
       queueOfflineMutation('checkouts', 'INSERT', chk);
-      if (targetAsset) queueOfflineMutation('assets', 'UPDATE', targetAsset);
     }
-
-    persistCheckout(chk, updatedCheckouts);
-    if (targetAsset) persistAsset(targetAsset, updatedAssetsList);
-    
-    const newLog = await commitAuditEvent({
-      orgId: currentOrg.id,
-      user: currentUser ? currentUser : { fullName: 'System Admin', role: 'ADMIN' },
-      action: 'CHECKOUT_ASSET',
-      entityType: 'Checkout',
-      entityName: chk.assetCode,
-      changes: `Assigned custody of ${chk.assetCode} to ${chk.checkedOutToUserName}`
-    });
-
-    setAuditLogs(prev => [newLog, ...prev]);
   };
 
-  const handleReturnAsset = async (chkId: string, returnCondition: string) => {
+  const handleReturnAsset = async (chkId: string, returnCondition: string, notes?: string) => {
     const chk = checkouts.find(c => c.id === chkId);
     if (!chk) return;
     const nowIso = new Date().toISOString().split('T')[0]!;
@@ -635,43 +515,37 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       status: 'RETURNED',
       checkedInAt: nowIso,
       returnCondition: returnCondition as any,
-      notes: `Returned in condition: ${returnCondition}`
+      notes: notes || `Returned in condition: ${returnCondition}`
     };
     const updatedCheckouts = checkouts.map(c => c.id === chkId ? updatedChk : c);
     setCheckouts(updatedCheckouts);
 
-    const assetToRelease = assets.find(a => a.id === chk.assetId);
-    let releasedAsset: Asset | undefined;
-    let updatedAssetsList = assets;
-    if (assetToRelease) {
-      releasedAsset = {
-        ...assetToRelease,
-        assignedToUserId: undefined,
-        assignedToUserName: undefined,
-        assignedAt: undefined,
-        condition: returnCondition as any
-      };
-      updatedAssetsList = assets.map(a => a.id === chk.assetId ? releasedAsset! : a);
-      setAssets(updatedAssetsList);
-    }
-
     try {
-      const row = mapCheckoutToTiDBRow(updatedChk);
-      const q = generateTiDBUpsertQuery('checkouts', row);
-      await executeTiDBQuery(q.sql, q.values);
-
-      if (releasedAsset) {
-        const astRow = mapAssetToTiDBRow(releasedAsset);
-        const astQ = generateTiDBUpsertQuery('assets', astRow);
-        await executeTiDBQuery(astQ.sql, astQ.values);
+      const res = await fetch(`/api/checkouts/${encodeURIComponent(chkId)}/return`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          returnCondition,
+          damageReported: returnCondition === 'DAMAGED' || returnCondition === 'POOR',
+          damageDescription: returnCondition === 'DAMAGED' || returnCondition === 'POOR' ? notes || 'Equipment returned in damaged condition' : undefined,
+          notes
+        })
+      });
+      if (res.ok) {
+        await refreshAppData();
+      } else {
+        throw new Error(`Return failed (HTTP ${res.status})`);
       }
     } catch {
-      queueOfflineMutation('checkouts', 'UPDATE', updatedChk);
-      if (releasedAsset) queueOfflineMutation('assets', 'UPDATE', releasedAsset);
+      queueOfflineMutation('checkouts', 'RETURN', {
+        id: chkId,
+        returnCondition,
+        damageReported: returnCondition === 'DAMAGED' || returnCondition === 'POOR',
+        damageDescription: notes,
+        notes
+      });
     }
-
-    persistCheckout(updatedChk, updatedCheckouts);
-    if (releasedAsset) persistAsset(releasedAsset, updatedAssetsList);
   };
 
   // Maintenance Pipelines
@@ -679,132 +553,85 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const updatedMaintenances = [mnt, ...maintenances];
     setMaintenances(updatedMaintenances);
 
-    const asset = assets.find(a => a.id === mnt.assetId);
-    let updatedAsset: Asset | undefined;
-    let updatedAssetsList = assets;
-    if (asset) {
-      updatedAsset = { ...asset, status: 'REPAIR' };
-      updatedAssetsList = assets.map(a => a.id === mnt.assetId ? updatedAsset! : a);
-      setAssets(updatedAssetsList);
-    }
-
     try {
-      const row = mapMaintenanceToTiDBRow(mnt);
-      const q = generateTiDBUpsertQuery('maintenances', row);
-      await executeTiDBQuery(q.sql, q.values);
-
-      if (updatedAsset) {
-        const astRow = mapAssetToTiDBRow(updatedAsset);
-        const astQ = generateTiDBUpsertQuery('assets', astRow);
-        await executeTiDBQuery(astQ.sql, astQ.values);
-      }
+      await persistMaintenance(mnt, updatedMaintenances);
+      await refreshAppData();
     } catch {
       queueOfflineMutation('maintenance', 'INSERT', mnt);
-      if (updatedAsset) queueOfflineMutation('assets', 'UPDATE', updatedAsset);
     }
-
-    persistMaintenance(mnt, updatedMaintenances);
-    if (updatedAsset) persistAsset(updatedAsset, updatedAssetsList);
   };
 
   const handleCompleteRepair = async (mntId: string) => {
     const mnt = maintenances.find(m => m.id === mntId);
     if (!mnt) return;
+    const nowIso = new Date().toISOString().split('T')[0]!;
     const updatedMnt: MaintenanceRecord = {
       ...mnt,
       status: 'COMPLETED',
-      actualCompletion: new Date().toISOString().split('T')[0]!
+      actualCompletion: nowIso
     };
-    const updatedMaintenances = maintenances.map(m => m.id === mntId ? updatedMnt : m);
-    setMaintenances(updatedMaintenances);
-
-    const asset = assets.find(a => a.id === mnt.assetId);
-    let updatedAsset: Asset | undefined;
-    let updatedAssetsList = assets;
-    if (asset) {
-      updatedAsset = { ...asset, status: 'ACTIVE' };
-      updatedAssetsList = assets.map(a => a.id === mnt.assetId ? updatedAsset! : a);
-      setAssets(updatedAssetsList);
-    }
+    setMaintenances(maintenances.map(m => m.id === mntId ? updatedMnt : m));
 
     try {
-      const row = mapMaintenanceToTiDBRow(updatedMnt);
-      const q = generateTiDBUpsertQuery('maintenances', row);
-      await executeTiDBQuery(q.sql, q.values);
-
-      if (updatedAsset) {
-        const astRow = mapAssetToTiDBRow(updatedAsset);
-        const astQ = generateTiDBUpsertQuery('assets', astRow);
-        await executeTiDBQuery(astQ.sql, astQ.values);
+      const res = await fetch(`/api/maintenance/${encodeURIComponent(mntId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          status: 'COMPLETED',
+          actualCompletion: nowIso,
+          baseVersion: mnt.version
+        })
+      });
+      if (res.ok) {
+        await refreshAppData();
+      } else {
+        throw new Error(`Maintenance update failed (HTTP ${res.status})`);
       }
     } catch {
-      queueOfflineMutation('maintenance', 'UPDATE', updatedMnt);
-      if (updatedAsset) queueOfflineMutation('assets', 'UPDATE', updatedAsset);
+      queueOfflineMutation('maintenance', 'UPDATE', {
+        id: mntId,
+        status: 'COMPLETED',
+        actualCompletion: nowIso,
+        baseVersion: mnt.version
+      });
     }
-
-    persistMaintenance(updatedMnt, updatedMaintenances);
-    if (updatedAsset) persistAsset(updatedAsset, updatedAssetsList);
   };
 
   const handleUpdateTicket = async (updatedRecord: MaintenanceRecord) => {
-    const updatedMaintenances = maintenances.map(m => m.id === updatedRecord.id ? updatedRecord : m);
-    setMaintenances(updatedMaintenances);
-
-    let updatedAsset: Asset | undefined;
-    let updatedAssetsList = assets;
-    if (updatedRecord.status === 'COMPLETED') {
-      const asset = assets.find(a => a.id === updatedRecord.assetId);
-      if (asset) {
-        updatedAsset = { ...asset, status: 'ACTIVE' };
-        updatedAssetsList = assets.map(a => a.id === updatedRecord.assetId ? updatedAsset! : a);
-        setAssets(updatedAssetsList);
-      }
-    }
+    setMaintenances(maintenances.map(m => m.id === updatedRecord.id ? updatedRecord : m));
 
     try {
-      const row = mapMaintenanceToTiDBRow(updatedRecord);
-      const q = generateTiDBUpsertQuery('maintenances', row);
-      await executeTiDBQuery(q.sql, q.values);
-
-      if (updatedAsset) {
-        const astRow = mapAssetToTiDBRow(updatedAsset);
-        const astQ = generateTiDBUpsertQuery('assets', astRow);
-        await executeTiDBQuery(astQ.sql, astQ.values);
+      const res = await fetch(`/api/maintenance/${encodeURIComponent(updatedRecord.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          status: updatedRecord.status,
+          cost: updatedRecord.cost,
+          partsReplaced: updatedRecord.partsReplaced,
+          notes: updatedRecord.notes,
+          actualCompletion: updatedRecord.actualCompletion,
+          baseVersion: updatedRecord.version
+        })
+      });
+      if (res.ok) {
+        await refreshAppData();
+      } else {
+        throw new Error(`Ticket update failed (HTTP ${res.status})`);
       }
     } catch {
       queueOfflineMutation('maintenance', 'UPDATE', updatedRecord);
     }
-
-    persistMaintenance(updatedRecord, updatedMaintenances);
-    if (updatedAsset) persistAsset(updatedAsset, updatedAssetsList);
   };
 
   // Demo / Reset
   const handleLoadDemoData = () => {
-    const payload = resetToUniversalDemoData();
-    setAssets(payload.assets);
-    setCheckouts(payload.checkouts);
-    setMaintenances(payload.maintenances);
-    setBudgets(payload.budgets);
-    setAuditLogs(payload.auditLogs);
-    setNotifications(payload.notifications);
-    handleSyncUsers(payload.users);
-    handleSyncBranches(payload.branches);
-    setLastSyncedAt(payload.lastSyncedAt);
+    refreshAppData();
   };
 
   const handleResetCleanSlate = () => {
-    if (!currentUser) return;
-    const payload = resetToCleanSlate(currentUser);
-    setAssets(payload.assets);
-    setCheckouts(payload.checkouts);
-    setMaintenances(payload.maintenances);
-    setBudgets(payload.budgets);
-    setAuditLogs(payload.auditLogs);
-    setNotifications(payload.notifications);
-    handleSyncUsers(payload.users);
-    handleSyncBranches(payload.branches);
-    setLastSyncedAt(payload.lastSyncedAt);
+    refreshAppData();
   };
 
   return (

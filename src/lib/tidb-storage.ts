@@ -1,8 +1,7 @@
 /**
- * PingCAP TiDB Cloud Storage & HTAP Persistence Service
- * Handles relational entity mapping, MySQL 8.0/TiDB UPSERT generation,
- * resilient offline-first caching via LocalStorage/IndexedDB,
- * and TiFlash columnar analytical aggregations.
+ * OmniAsset Storage & Relational Persistence Service
+ * Handles relational entity mapping, scoped local caching (${orgId}:${userId}),
+ * conditional ETag caching, bulk ingestion, and TiFlash columnar analytical rollups.
  */
 
 import {
@@ -32,25 +31,114 @@ import {
 import {
   isTiDBConfigured,
   getLastTiDBSyncTime,
-  updateLastTiDBSyncTime,
-  executeTiDBQuery
+  updateLastTiDBSyncTime
 } from './tidb-client';
 
-// Local storage keys for resilient offline-first caching
+// Local storage base keys
 export const STORAGE_KEYS = {
-  ASSETS: 'omni_it_assets_tidb',
-  CHECKOUTS: 'omni_it_checkouts_tidb',
-  MAINTENANCES: 'omni_it_maintenances_tidb',
-  BUDGETS: 'omni_it_budgets_tidb',
-  AUDIT_LOGS: 'omni_it_audit_logs_tidb',
-  NOTIFICATIONS: 'omni_it_notifications_tidb',
-  USERS: 'omni_it_users_tidb',
-  BRANCHES: 'omni_it_branches_tidb',
-  DEPARTMENTS: 'omni_it_departments_tidb',
-  LAST_SYNC: 'omni_it_last_sync_tidb',
-  CURRENT_USER: 'omni_it_current_user_session',
-  CURRENT_ORG: 'omni_it_current_org_session',
-  ORGANIZATIONS: 'omni_it_organizations_tidb'
+  ASSETS: 'assets',
+  CHECKOUTS: 'checkouts',
+  MAINTENANCES: 'maintenances',
+  BUDGETS: 'budgets',
+  NOTIFICATIONS: 'notifications',
+  BRANCHES: 'branches',
+  DEPARTMENTS: 'departments',
+  LAST_SYNC: 'last_sync',
+  CURRENT_USER: 'current_user_session',
+  CURRENT_ORG: 'current_org_session',
+  ORGANIZATIONS: 'organizations_cache'
+};
+
+/**
+ * Builds tenant- and user-scoped storage key
+ */
+export const getScopedKey = (baseKey: string, orgId?: string, userId?: string): string => {
+  if (baseKey === STORAGE_KEYS.CURRENT_USER || baseKey === STORAGE_KEYS.CURRENT_ORG) {
+    return `omni_it_${baseKey}`;
+  }
+  if (!orgId || !userId) {
+    return `omni_it_${baseKey}`;
+  }
+  return `omni_it_${orgId}_${userId}_${baseKey}`;
+};
+
+// Safe JSON local cache helpers
+export const loadFromStorage = <T>(key: string, fallback: T): T => {
+  try {
+    if (typeof localStorage === 'undefined') return fallback;
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw);
+  } catch (err) {
+    console.warn(`Failed reading storage key "${key}":`, err);
+    return fallback;
+  }
+};
+
+export const saveToStorage = <T>(key: string, value: T): void => {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (err) {
+    console.warn(`Failed writing storage key "${key}":`, err);
+  }
+};
+
+export const removeFromStorage = (key: string): void => {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.removeItem(key);
+  } catch {}
+};
+
+/**
+ * Wipes cached collections on logout, user switch, or organization switch
+ */
+export const wipeUserAndOrgCaches = (orgId?: string, userId?: string): void => {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const prefix = orgId && userId ? `omni_it_${orgId}_${userId}_` : 'omni_it_';
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(prefix) && !k.includes('session')) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+  } catch (err) {
+    console.warn('Cache wiping notice:', err);
+  }
+};
+
+export const getStoredSession = (): { user: User | null; org: Organization | null } => {
+  const user = loadFromStorage<User | null>(getScopedKey(STORAGE_KEYS.CURRENT_USER), null);
+  const org = loadFromStorage<Organization | null>(getScopedKey(STORAGE_KEYS.CURRENT_ORG), null);
+  return { user, org };
+};
+
+export const setStoredSession = (user: User | null, org: Organization | null): void => {
+  const userKey = getScopedKey(STORAGE_KEYS.CURRENT_USER);
+  const orgKey = getScopedKey(STORAGE_KEYS.CURRENT_ORG);
+  if (user) {
+    saveToStorage(userKey, user);
+  } else {
+    removeFromStorage(userKey);
+  }
+  if (org) {
+    saveToStorage(orgKey, org);
+  } else {
+    removeFromStorage(orgKey);
+  }
+};
+
+export const clearStoredSession = (): void => {
+  try {
+    removeFromStorage(getScopedKey(STORAGE_KEYS.CURRENT_USER));
+    removeFromStorage(getScopedKey(STORAGE_KEYS.CURRENT_ORG));
+  } catch (err) {
+    console.warn('Failed clearing stored session:', err);
+  }
 };
 
 // --- Mappers between Frontend Model (camelCase) and TiDB / MySQL (snake_case) ---
@@ -134,7 +222,8 @@ export const mapTiDBRowToAsset = (row: any): Asset => ({
   assignedToUserAvatar: row.assigned_to_user_avatar || undefined,
   assignedAt: row.assigned_at ? String(row.assigned_at) : undefined,
   imageUrl: row.image_url || '',
-  notes: row.notes || undefined
+  notes: row.notes || undefined,
+  version: row.version || 1
 });
 
 export const mapCheckoutToTiDBRow = (chk: CheckoutRecord) => ({
@@ -172,71 +261,9 @@ export const mapMaintenanceToTiDBRow = (mnt: MaintenanceRecord) => ({
   actual_completion: mnt.actualCompletion || null,
   cost: mnt.cost || 0,
   parts_replaced: mnt.partsReplaced || null,
-  notes: mnt.notes || null
+  notes: mnt.notes || null,
+  baseVersion: mnt.version
 });
-
-// Helper for generating parameterized MySQL ON DUPLICATE KEY UPDATE queries
-export const generateTiDBUpsertQuery = (tableName: string, data: Record<string, any>) => {
-  const keys = Object.keys(data);
-  const values = Object.values(data);
-  const columns = keys.map(k => `\`${k}\``).join(', ');
-  const placeholders = keys.map(() => '?').join(', ');
-  const updateClause = keys
-    .filter(k => k !== 'id' && k !== 'created_at')
-    .map(k => `\`${k}\` = VALUES(\`${k}\`)`)
-    .join(', ');
-
-  const sql = `INSERT INTO \`${tableName}\` (${columns}) VALUES (${placeholders}) ON DUPLICATE KEY UPDATE ${updateClause};`;
-  return { sql, values };
-};
-
-// Safe JSON local cache helpers
-export const loadFromStorage = <T>(key: string, fallback: T): T => {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw);
-  } catch (err) {
-    console.warn(`Failed reading storage key "${key}":`, err);
-    return fallback;
-  }
-};
-
-export const saveToStorage = <T>(key: string, value: T): void => {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch (err) {
-    console.warn(`Failed writing storage key "${key}":`, err);
-  }
-};
-
-export const getStoredSession = (): { user: User | null; org: Organization | null } => {
-  const user = loadFromStorage<User | null>(STORAGE_KEYS.CURRENT_USER, null);
-  const org = loadFromStorage<Organization | null>(STORAGE_KEYS.CURRENT_ORG, null);
-  return { user, org };
-};
-
-export const setStoredSession = (user: User | null, org: Organization | null): void => {
-  if (user) {
-    saveToStorage(STORAGE_KEYS.CURRENT_USER, user);
-  } else {
-    try { localStorage.removeItem(STORAGE_KEYS.CURRENT_USER); } catch {}
-  }
-  if (org) {
-    saveToStorage(STORAGE_KEYS.CURRENT_ORG, org);
-  } else {
-    try { localStorage.removeItem(STORAGE_KEYS.CURRENT_ORG); } catch {}
-  }
-};
-
-export const clearStoredSession = (): void => {
-  try {
-    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-    localStorage.removeItem(STORAGE_KEYS.CURRENT_ORG);
-  } catch (err) {
-    console.warn('Failed clearing stored session:', err);
-  }
-};
 
 export interface SystemDataPayload {
   assets: Asset[];
@@ -253,54 +280,57 @@ export interface SystemDataPayload {
   lastSyncedAt: string;
 }
 
+let lastEtag: string | null = null;
+let lastCachedPayload: SystemDataPayload | null = null;
+
 /**
- * Loads baseline dataset from TiDB cache and remote server tier.
+ * Loads baseline dataset from TiDB backend with ETag / If-None-Match support.
+ * Replaces cached collections with fresh server data (never merges stale deleted assets).
+ * Sensitive user lists and audit logs are never persisted to localStorage.
  */
-export const loadInitialData = async (orgId?: string): Promise<SystemDataPayload> => {
+export const loadInitialData = async (orgId?: string, userId?: string): Promise<SystemDataPayload> => {
+  const assetsKey = getScopedKey(STORAGE_KEYS.ASSETS, orgId, userId);
+  const chksKey = getScopedKey(STORAGE_KEYS.CHECKOUTS, orgId, userId);
+  const maintsKey = getScopedKey(STORAGE_KEYS.MAINTENANCES, orgId, userId);
+  const budgetsKey = getScopedKey(STORAGE_KEYS.BUDGETS, orgId, userId);
+  const branchesKey = getScopedKey(STORAGE_KEYS.BRANCHES, orgId, userId);
+  const deptsKey = getScopedKey(STORAGE_KEYS.DEPARTMENTS, orgId, userId);
+
   try {
     const url = orgId ? `/api/init?orgId=${encodeURIComponent(orgId)}` : '/api/init';
     const headers: Record<string, string> = {};
-    if (orgId) {
-      headers['x-org-id'] = orgId;
+    if (lastEtag) {
+      headers['If-None-Match'] = lastEtag;
     }
+
     const res = await fetch(url, { credentials: 'include', headers });
+
+    // 304 Not Modified: Return existing in-memory/scoped cache
+    if (res.status === 304 && lastCachedPayload) {
+      return {
+        ...lastCachedPayload,
+        lastSyncedAt: updateLastTiDBSyncTime()
+      };
+    }
+
     if (res.ok) {
+      const etagHeader = res.headers.get('ETag');
+      if (etagHeader) lastEtag = etagHeader;
+
       const data = await res.json();
       if (data && data.assets) {
+        // REPLACE cache with authoritative server dataset:
         const mappedAssets: Asset[] = data.assets.map(mapTiDBRowToAsset);
+        saveToStorage(assetsKey, mappedAssets);
 
-        // Safeguard: Merge with any existing cached assets so that locally created
-        // assets aren't blown away if the server returns empty or a partial list
-        const cachedAssets = loadFromStorage<Asset[]>(STORAGE_KEYS.ASSETS, []);
-        const mergedAssetsMap = new Map<string, Asset>();
-        cachedAssets.forEach(a => mergedAssetsMap.set(a.id, a));
-        mappedAssets.forEach(a => mergedAssetsMap.set(a.id, a));
-        const finalAssets = Array.from(mergedAssetsMap.values());
+        const checkoutsList: CheckoutRecord[] = data.checkouts || [];
+        saveToStorage(chksKey, checkoutsList);
 
-        saveToStorage(STORAGE_KEYS.ASSETS, finalAssets);
-        if (data.checkouts) {
-          const cachedCheckouts = loadFromStorage<CheckoutRecord[]>(STORAGE_KEYS.CHECKOUTS, []);
-          const mergedChks = new Map<string, CheckoutRecord>();
-          cachedCheckouts.forEach(c => mergedChks.set(c.id, c));
-          data.checkouts.forEach((c: CheckoutRecord) => mergedChks.set(c.id, c));
-          saveToStorage(STORAGE_KEYS.CHECKOUTS, Array.from(mergedChks.values()));
-        }
-        if (data.maintenances) {
-          const cachedMaints = loadFromStorage<MaintenanceRecord[]>(STORAGE_KEYS.MAINTENANCES, []);
-          const mergedMaints = new Map<string, MaintenanceRecord>();
-          cachedMaints.forEach(m => mergedMaints.set(m.id, m));
-          data.maintenances.forEach((m: MaintenanceRecord) => mergedMaints.set(m.id, m));
-          saveToStorage(STORAGE_KEYS.MAINTENANCES, Array.from(mergedMaints.values()));
-        }
-        if (data.budgets) saveToStorage(STORAGE_KEYS.BUDGETS, data.budgets);
-        if (data.auditLogs) saveToStorage(STORAGE_KEYS.AUDIT_LOGS, data.auditLogs);
-        if (data.users) {
-          const cachedUsers = loadFromStorage<User[]>(STORAGE_KEYS.USERS, []);
-          const mergedUsers = new Map<string, User>();
-          cachedUsers.forEach(u => mergedUsers.set(u.id, u));
-          data.users.forEach((u: User) => mergedUsers.set(u.id, u));
-          saveToStorage(STORAGE_KEYS.USERS, Array.from(mergedUsers.values()));
-        }
+        const maintenancesList: MaintenanceRecord[] = data.maintenances || [];
+        saveToStorage(maintsKey, maintenancesList);
+
+        const budgetsList: BudgetAllocation[] = data.budgets || [];
+        saveToStorage(budgetsKey, budgetsList);
 
         const mappedBranches: Branch[] = (data.branches || []).map((b: any) => ({
           id: b.id,
@@ -312,469 +342,265 @@ export const loadInitialData = async (orgId?: string): Promise<SystemDataPayload
           country: b.country,
           managerName: b.managerName || b.manager_name
         }));
-        const cachedBranches = loadFromStorage<Branch[]>(STORAGE_KEYS.BRANCHES, INITIAL_BRANCHES);
-        const mergedBranches = new Map<string, Branch>();
-        cachedBranches.forEach(b => mergedBranches.set(b.id, b));
-        mappedBranches.forEach(b => mergedBranches.set(b.id, b));
-        const finalBranches = Array.from(mergedBranches.values());
-        saveToStorage(STORAGE_KEYS.BRANCHES, finalBranches);
+        saveToStorage(branchesKey, mappedBranches);
 
-        let finalDepartments: Department[] = [];
-        if (data.departments) {
-          const mappedDepts: Department[] = data.departments.map((d: any) => ({
-            id: d.id,
-            orgId: d.orgId || d.org_id,
-            name: d.name,
-            headCount: d.headCount ?? d.head_count ?? 0,
-            budgetAllocated: d.budgetAllocated ?? d.budget_allocated ?? 0
-          }));
-          const cachedDepts = loadFromStorage<Department[]>(STORAGE_KEYS.DEPARTMENTS, DEPARTMENTS);
-          const mergedDepts = new Map<string, Department>();
-          cachedDepts.forEach(d => mergedDepts.set(d.id, d));
-          mappedDepts.forEach(d => mergedDepts.set(d.id, d));
-          finalDepartments = Array.from(mergedDepts.values());
-          saveToStorage(STORAGE_KEYS.DEPARTMENTS, finalDepartments);
-        }
+        const mappedDepts: Department[] = (data.departments || []).map((d: any) => ({
+          id: d.id,
+          orgId: d.orgId || d.org_id,
+          name: d.name,
+          headCount: d.headCount ?? d.head_count ?? 0,
+          budgetAllocated: d.budgetAllocated ?? d.budget_allocated ?? 0
+        }));
+        saveToStorage(deptsKey, mappedDepts);
 
-        if (data.organizations) saveToStorage(STORAGE_KEYS.ORGANIZATIONS, data.organizations);
-
-        return {
-          assets: finalAssets,
-          checkouts: data.checkouts || [],
-          maintenances: data.maintenances || [],
-          budgets: data.budgets || [],
+        // Sensitive user accounts and cryptographic audit logs are kept in memory only;
+        // NEVER written to client localStorage
+        const payload: SystemDataPayload = {
+          assets: mappedAssets,
+          checkouts: checkoutsList,
+          maintenances: maintenancesList,
+          budgets: budgetsList,
           auditLogs: data.auditLogs || [],
-          notifications: loadFromStorage<SystemNotification[]>(STORAGE_KEYS.NOTIFICATIONS, INITIAL_NOTIFICATIONS),
+          notifications: loadFromStorage<SystemNotification[]>(getScopedKey(STORAGE_KEYS.NOTIFICATIONS, orgId, userId), INITIAL_NOTIFICATIONS),
           users: data.users || [],
-          branches: finalBranches,
-          departments: finalDepartments.length > 0 ? finalDepartments : undefined,
-          organizations: data.organizations || loadFromStorage<Organization[]>(STORAGE_KEYS.ORGANIZATIONS, ORGANIZATIONS),
+          branches: mappedBranches,
+          departments: mappedDepts,
+          organizations: data.organizations || ORGANIZATIONS,
           isTiDBLive: true,
           lastSyncedAt: updateLastTiDBSyncTime()
         };
+
+        lastCachedPayload = payload;
+        return payload;
       }
     }
   } catch {
-    // Offline or unauthenticated; fallback to resilient offline cache
+    // Offline or network error: load from scoped storage
   }
 
-  const cachedAssets = loadFromStorage<Asset[]>(STORAGE_KEYS.ASSETS, INITIAL_ASSETS);
-  const cachedCheckouts = loadFromStorage<CheckoutRecord[]>(STORAGE_KEYS.CHECKOUTS, INITIAL_CHECKOUTS);
-  const cachedMaintenances = loadFromStorage<MaintenanceRecord[]>(STORAGE_KEYS.MAINTENANCES, INITIAL_MAINTENANCE);
-  const cachedBudgets = loadFromStorage<BudgetAllocation[]>(STORAGE_KEYS.BUDGETS, INITIAL_BUDGETS);
-  const cachedAuditLogs = loadFromStorage<AuditLogItem[]>(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
-  const cachedNotifications = loadFromStorage<SystemNotification[]>(STORAGE_KEYS.NOTIFICATIONS, INITIAL_NOTIFICATIONS);
-  const cachedUsers = loadFromStorage<User[]>(STORAGE_KEYS.USERS, USERS);
-  const cachedBranches = loadFromStorage<Branch[]>(STORAGE_KEYS.BRANCHES, INITIAL_BRANCHES);
-  const cachedOrgs = loadFromStorage<Organization[]>(STORAGE_KEYS.ORGANIZATIONS, ORGANIZATIONS);
-
-  const isLive = isTiDBConfigured();
-  const lastSync = getLastTiDBSyncTime();
+  const cachedAssets = loadFromStorage<Asset[]>(assetsKey, INITIAL_ASSETS);
+  const cachedCheckouts = loadFromStorage<CheckoutRecord[]>(chksKey, INITIAL_CHECKOUTS);
+  const cachedMaintenances = loadFromStorage<MaintenanceRecord[]>(maintsKey, INITIAL_MAINTENANCE);
+  const cachedBudgets = loadFromStorage<BudgetAllocation[]>(budgetsKey, INITIAL_BUDGETS);
+  const cachedBranches = loadFromStorage<Branch[]>(branchesKey, INITIAL_BRANCHES);
+  const cachedDepts = loadFromStorage<Department[]>(deptsKey, DEPARTMENTS);
 
   return {
     assets: cachedAssets,
     checkouts: cachedCheckouts,
     maintenances: cachedMaintenances,
     budgets: cachedBudgets,
-    auditLogs: cachedAuditLogs,
-    notifications: cachedNotifications,
-    users: cachedUsers,
+    auditLogs: [], // No sensitive logs loaded from local storage
+    notifications: INITIAL_NOTIFICATIONS,
+    users: [], // No sensitive users loaded from local storage
     branches: cachedBranches,
-    organizations: cachedOrgs,
-    isTiDBLive: isLive,
-    lastSyncedAt: lastSync
+    departments: cachedDepts,
+    organizations: ORGANIZATIONS,
+    isTiDBLive: isTiDBConfigured(),
+    lastSyncedAt: getLastTiDBSyncTime()
   };
 };
 
 /**
- * Reset local persistent storage to the rich universal enterprise demo baseline
- */
-export function resetToUniversalDemoData(): SystemDataPayload {
-  saveToStorage(STORAGE_KEYS.ASSETS, INITIAL_ASSETS);
-  saveToStorage(STORAGE_KEYS.CHECKOUTS, INITIAL_CHECKOUTS);
-  saveToStorage(STORAGE_KEYS.MAINTENANCES, INITIAL_MAINTENANCE);
-  saveToStorage(STORAGE_KEYS.BUDGETS, INITIAL_BUDGETS);
-  saveToStorage(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
-  saveToStorage(STORAGE_KEYS.NOTIFICATIONS, INITIAL_NOTIFICATIONS);
-  saveToStorage(STORAGE_KEYS.USERS, USERS);
-  saveToStorage(STORAGE_KEYS.BRANCHES, INITIAL_BRANCHES);
-  saveToStorage(STORAGE_KEYS.LAST_SYNC, 'Universal Demo Active');
-
-  return {
-    assets: INITIAL_ASSETS,
-    checkouts: INITIAL_CHECKOUTS,
-    maintenances: INITIAL_MAINTENANCE,
-    budgets: INITIAL_BUDGETS,
-    auditLogs: INITIAL_AUDIT_LOGS,
-    notifications: INITIAL_NOTIFICATIONS,
-    users: USERS,
-    branches: INITIAL_BRANCHES,
-    isTiDBLive: isTiDBConfigured(),
-    lastSyncedAt: 'Universal Demo Active'
-  };
-}
-
-/**
- * Reset local persistent storage to a clean slate for production enterprise use
- */
-export function resetToCleanSlate(adminUser: User): SystemDataPayload {
-  const cleanUsers = [adminUser];
-  
-  // Requirement 5: Audit logs MUST NOT be wiped on reset.
-  // A tenant reset writes an AUDIT_RESET event into the log, preserving history.
-  const existingLogs = loadFromStorage<AuditLogItem[]>(STORAGE_KEYS.AUDIT_LOGS, []);
-  const resetLog: AuditLogItem = {
-    id: `aud-${Date.now()}`,
-    orgId: adminUser.orgId,
-    userName: adminUser.fullName,
-    userRole: adminUser.role,
-    action: 'AUDIT_RESET',
-    entityType: 'Organization',
-    entityName: adminUser.orgId,
-    changes: 'Tenant reset to clean production state; historical audit trail preserved.',
-    timestamp: new Date().toISOString(),
-    ipAddress: 'Server'
-  };
-
-  const preservedLogs = [resetLog, ...existingLogs];
-
-  saveToStorage(STORAGE_KEYS.ASSETS, []);
-  saveToStorage(STORAGE_KEYS.CHECKOUTS, []);
-  saveToStorage(STORAGE_KEYS.MAINTENANCES, []);
-  saveToStorage(STORAGE_KEYS.BUDGETS, []);
-  saveToStorage(STORAGE_KEYS.AUDIT_LOGS, preservedLogs);
-  saveToStorage(STORAGE_KEYS.NOTIFICATIONS, []);
-  saveToStorage(STORAGE_KEYS.USERS, cleanUsers);
-  saveToStorage(STORAGE_KEYS.BRANCHES, []);
-  saveToStorage(STORAGE_KEYS.LAST_SYNC, 'Clean Production Slate');
-
-  // Asynchronously record reset event to server audit stream
-  fetch('/api/audit-logs', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify(resetLog)
-  }).catch(() => {});
-
-  return {
-    assets: [],
-    checkouts: [],
-    maintenances: [],
-    budgets: [],
-    auditLogs: preservedLogs,
-    notifications: [],
-    users: cleanUsers,
-    branches: [],
-    isTiDBLive: isTiDBConfigured(),
-    lastSyncedAt: 'Clean Production Slate'
-  };
-}
-
-/**
- * Persist an Asset to TiDB and cache.
+ * Persist an Asset to TiDB via typed REST API.
  */
 export async function persistAsset(asset: Asset, allAssets?: Asset[], isUpdate = false): Promise<boolean> {
-  const current = allAssets || loadFromStorage<Asset[]>(STORAGE_KEYS.ASSETS, INITIAL_ASSETS);
-  const exists = isUpdate || current.some(a => a.id === asset.id);
-  const updated = exists ? current.map(a => (a.id === asset.id ? asset : a)) : [asset, ...current];
+  const row = mapAssetToTiDBRow(asset);
+  const method = isUpdate ? 'PUT' : 'POST';
+  const url = isUpdate ? `/api/assets/${encodeURIComponent(asset.id)}` : '/api/assets';
 
-  // Guaranteed immediate local persistence so the asset is NEVER lost if server is unreachable or errors
-  saveToStorage(STORAGE_KEYS.ASSETS, updated);
+  const res = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(row)
+  });
 
-  try {
-    const row = mapAssetToTiDBRow(asset);
-    const method = exists ? 'PUT' : 'POST';
-    const url = exists ? `/api/assets/${encodeURIComponent(asset.id)}` : '/api/assets';
-    const res = await fetch(url, {
-      method,
+  if (res.ok) {
+    updateLastTiDBSyncTime();
+    return true;
+  }
+
+  if (res.status === 409) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || 'Duplicate or conflicting asset data rejected.');
+  }
+
+  const errData = await res.json().catch(() => ({}));
+  throw new Error(errData.error || `Failed to persist asset (HTTP ${res.status})`);
+}
+
+/**
+ * Delete an Asset from TiDB via typed REST API.
+ */
+export async function deleteAssetFromDb(assetId: string): Promise<boolean> {
+  const res = await fetch(`/api/assets/${encodeURIComponent(assetId)}`, {
+    method: 'DELETE',
+    credentials: 'include'
+  });
+
+  if (res.ok) {
+    updateLastTiDBSyncTime();
+    return true;
+  }
+
+  if (res.status === 409) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || 'Asset has checkout or maintenance history and cannot be deleted.');
+  }
+
+  return false;
+}
+
+/**
+ * Bulk ingest assets using POST /api/assets/bulk in 500-item chunks.
+ */
+export async function bulkPersistAssets(newAssets: Asset[], _allAssets?: Asset[]): Promise<boolean> {
+  const CHUNK_SIZE = 500;
+  for (let i = 0; i < newAssets.length; i += CHUNK_SIZE) {
+    const chunk = newAssets.slice(i, i + CHUNK_SIZE);
+    const rows = chunk.map(mapAssetToTiDBRow);
+
+    const res = await fetch('/api/assets/bulk', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify(row)
+      body: JSON.stringify({ assets: rows })
     });
-    if (res.ok) {
-      updateLastTiDBSyncTime();
-      return true;
-    } else if (res.status === 409) {
+
+    if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
-      // Revert local optimistic storage on conflict error
-      saveToStorage(STORAGE_KEYS.ASSETS, current);
-      throw new Error(errData.error || 'Duplicate or redundant asset data detected.');
-    }
-  } catch (err: any) {
-    if (err?.message?.includes('Redundant') || err?.message?.includes('Duplicate') || err?.message?.includes('Conflict')) {
-      throw err;
-    }
-    // Network or proxy error: local persistence is already established above
-  }
-  return true;
-}
-
-/**
- * Delete an Asset from TiDB and cache.
- */
-export async function deleteAssetFromDb(assetId: string, allAssets?: Asset[]): Promise<boolean> {
-  const current = allAssets || loadFromStorage<Asset[]>(STORAGE_KEYS.ASSETS, INITIAL_ASSETS);
-  const updated = current.filter(a => a.id !== assetId);
-  saveToStorage(STORAGE_KEYS.ASSETS, updated);
-
-  try {
-    const res = await fetch(`/api/assets/${encodeURIComponent(assetId)}`, {
-      method: 'DELETE',
-      credentials: 'include'
-    });
-    if (res.ok) {
-      updateLastTiDBSyncTime();
-    }
-  } catch {
-    // Offline queued
-  }
-  return true;
-}
-
-/**
- * Bulk insert or update assets.
- */
-export async function bulkPersistAssets(newAssets: Asset[], allAssets?: Asset[]): Promise<boolean> {
-  const current = allAssets || loadFromStorage<Asset[]>(STORAGE_KEYS.ASSETS, INITIAL_ASSETS);
-  const currentMap = new Map(current.map(a => [a.id, a]));
-  newAssets.forEach(a => currentMap.set(a.id, a));
-  saveToStorage(STORAGE_KEYS.ASSETS, Array.from(currentMap.values()));
-
-  for (const asset of newAssets) {
-    try {
-      const row = mapAssetToTiDBRow(asset);
-      await fetch('/api/assets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(row)
-      });
-    } catch {
-      // Offline
+      console.warn(`Bulk chunk persist notice (HTTP ${res.status}):`, errData);
     }
   }
+
   updateLastTiDBSyncTime();
   return true;
 }
 
 /**
- * Persist Checkout Record.
+ * Persist Checkout Record via typed API.
  */
-export async function persistCheckout(chk: CheckoutRecord, allCheckouts?: CheckoutRecord[]): Promise<boolean> {
-  const current = allCheckouts || loadFromStorage<CheckoutRecord[]>(STORAGE_KEYS.CHECKOUTS, INITIAL_CHECKOUTS);
-  const exists = current.some(c => c.id === chk.id);
-  const updated = exists ? current.map(c => (c.id === chk.id ? chk : c)) : [chk, ...current];
-  saveToStorage(STORAGE_KEYS.CHECKOUTS, updated);
+export async function persistCheckout(chk: CheckoutRecord, _allCheckouts?: CheckoutRecord[]): Promise<boolean> {
+  const row = mapCheckoutToTiDBRow(chk);
+  const res = await fetch('/api/checkouts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(row)
+  });
 
-  try {
-    const row = mapCheckoutToTiDBRow(chk);
-    const res = await fetch('/api/checkouts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(row)
-    });
-    if (res.ok) {
-      updateLastTiDBSyncTime();
-    }
-  } catch {
-    // Staged in offline queue
+  if (res.ok) {
+    updateLastTiDBSyncTime();
+    return true;
   }
-  return true;
+  return false;
 }
 
 /**
- * Persist Maintenance Record.
+ * Persist Maintenance Record via typed API.
  */
-export async function persistMaintenance(mnt: MaintenanceRecord, allMaintenances?: MaintenanceRecord[]): Promise<boolean> {
-  const current = allMaintenances || loadFromStorage<MaintenanceRecord[]>(STORAGE_KEYS.MAINTENANCES, INITIAL_MAINTENANCE);
-  const exists = current.some(m => m.id === mnt.id);
-  const updated = exists ? current.map(m => (m.id === mnt.id ? mnt : m)) : [mnt, ...current];
-  saveToStorage(STORAGE_KEYS.MAINTENANCES, updated);
+export async function persistMaintenance(mnt: MaintenanceRecord, _allMaintenances?: MaintenanceRecord[]): Promise<boolean> {
+  const row = mapMaintenanceToTiDBRow(mnt);
+  const res = await fetch('/api/maintenance', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(row)
+  });
 
-  try {
-    const row = mapMaintenanceToTiDBRow(mnt);
-    const res = await fetch('/api/maintenance', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(row)
-    });
-    if (res.ok) {
-      updateLastTiDBSyncTime();
-    }
-  } catch {
-    // Offline
+  if (res.ok) {
+    updateLastTiDBSyncTime();
+    return true;
   }
-  return true;
+  return false;
 }
 
 /**
- * Persist Audit Log.
+ * Persist User via typed API.
  */
-export async function persistAuditLog(log: AuditLogItem, allLogs?: AuditLogItem[]): Promise<boolean> {
-  const current = allLogs || loadFromStorage<AuditLogItem[]>(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
-  saveToStorage(STORAGE_KEYS.AUDIT_LOGS, [log, ...current]);
-  return true;
+export async function persistUser(user: User, _allUsers?: User[]): Promise<boolean> {
+  const res = await fetch(`/api/users/${encodeURIComponent(user.id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({
+      fullName: user.fullName,
+      role: user.role,
+      status: user.status,
+      departmentId: user.departmentId,
+      departmentName: user.departmentName,
+      branchId: user.branchId,
+      branchName: user.branchName,
+      avatar: user.avatar
+    })
+  });
+  return res.ok;
 }
 
 /**
- * Persist User. Never persist plaintext passwords.
+ * Delete User via typed API.
  */
-export async function persistUser(user: User, allUsers?: User[]): Promise<boolean> {
-  // Ensure user object stored has no plaintext password
-  const sanitizedUser = { ...user };
-  delete (sanitizedUser as any).password;
-
-  const current = allUsers || loadFromStorage<User[]>(STORAGE_KEYS.USERS, USERS);
-  const exists = current.some(u => u.id === user.id);
-  const updated = exists ? current.map(u => (u.id === user.id ? sanitizedUser : u)) : [...current, sanitizedUser];
-  saveToStorage(STORAGE_KEYS.USERS, updated);
-
-  try {
-    const res = await fetch(`/api/users/${user.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        fullName: user.fullName,
-        role: user.role,
-        status: user.status,
-        departmentId: user.departmentId,
-        departmentName: user.departmentName,
-        branchId: user.branchId,
-        branchName: user.branchName,
-        avatar: user.avatar
-      })
-    });
-    if (!res.ok) {
-      await fetch('/api/auth/profile', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          fullName: user.fullName,
-          avatar: user.avatar,
-          departmentId: user.departmentId,
-          departmentName: user.departmentName
-        })
-      });
-    }
-  } catch {
-    // Offline resilient
-  }
-
-  return true;
+export async function deleteUserFromStorage(userId: string, _allUsers?: User[]): Promise<boolean> {
+  const res = await fetch(`/api/users/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+    credentials: 'include'
+  });
+  return res.ok;
 }
 
 /**
- * Delete User from storage and backend
+ * Persist Branch via typed API.
  */
-export async function deleteUserFromStorage(userId: string, allUsers?: User[]): Promise<boolean> {
-  const current = allUsers || loadFromStorage<User[]>(STORAGE_KEYS.USERS, USERS);
-  const updated = current.filter(u => u.id !== userId);
-  saveToStorage(STORAGE_KEYS.USERS, updated);
-
-  try {
-    await fetch(`/api/users/${userId}`, {
-      method: 'DELETE',
-      credentials: 'include'
-    });
-  } catch {
-    // Offline resilient
-  }
-  return true;
+export async function persistBranch(branch: Branch, _allBranches?: Branch[]): Promise<boolean> {
+  const res = await fetch('/api/branches', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({
+      id: branch.id,
+      name: branch.name,
+      code: branch.code,
+      location: branch.location,
+      city: branch.city,
+      country: branch.country,
+      manager_name: branch.managerName
+    })
+  });
+  return res.ok;
 }
 
-/**
- * Persist Branch.
- */
-export async function persistBranch(branch: Branch, allBranches?: Branch[]): Promise<boolean> {
-  const current = allBranches || loadFromStorage<Branch[]>(STORAGE_KEYS.BRANCHES, INITIAL_BRANCHES);
-  const exists = current.some(b => b.id === branch.id);
-  const updated = exists ? current.map(b => (b.id === branch.id ? branch : b)) : [...current, branch];
-  saveToStorage(STORAGE_KEYS.BRANCHES, updated);
-
-  try {
-    await fetch('/api/branches', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        id: branch.id,
-        name: branch.name,
-        code: branch.code,
-        location: branch.location,
-        city: branch.city,
-        country: branch.country,
-        manager_name: branch.managerName
-      })
-    });
-  } catch {
-    // Offline
-  }
-  return true;
+export async function deleteBranchFromStorage(branchId: string, _allBranches?: Branch[]): Promise<boolean> {
+  const res = await fetch(`/api/branches/${encodeURIComponent(branchId)}`, {
+    method: 'DELETE',
+    credentials: 'include'
+  });
+  return res.ok;
 }
 
-export async function deleteBranchFromStorage(branchId: string, allBranches?: Branch[]): Promise<boolean> {
-  const current = allBranches || loadFromStorage<Branch[]>(STORAGE_KEYS.BRANCHES, INITIAL_BRANCHES);
-  const updated = current.filter(b => b.id !== branchId);
-  saveToStorage(STORAGE_KEYS.BRANCHES, updated);
-
-  try {
-    await fetch(`/api/branches/${branchId}`, {
-      method: 'DELETE',
-      credentials: 'include'
-    });
-  } catch {
-    // Offline
-  }
-  return true;
+export async function persistDepartment(dept: Department, _allDepts?: Department[]): Promise<boolean> {
+  const res = await fetch('/api/departments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({
+      id: dept.id,
+      name: dept.name,
+      headCount: dept.headCount,
+      budgetAllocated: dept.budgetAllocated
+    })
+  });
+  return res.ok;
 }
 
-export async function persistDepartment(dept: Department, allDepts?: Department[]): Promise<boolean> {
-  const current = allDepts || loadFromStorage<Department[]>(STORAGE_KEYS.DEPARTMENTS, DEPARTMENTS);
-  const exists = current.some(d => d.id === dept.id);
-  const updated = exists ? current.map(d => (d.id === dept.id ? dept : d)) : [...current, dept];
-  saveToStorage(STORAGE_KEYS.DEPARTMENTS, updated);
-
-  try {
-    await fetch('/api/departments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        id: dept.id,
-        name: dept.name,
-        headCount: dept.headCount,
-        budgetAllocated: dept.budgetAllocated
-      })
-    });
-  } catch {
-    // Offline
-  }
-  return true;
+export async function deleteDepartmentFromStorage(deptId: string, _allDepts?: Department[]): Promise<boolean> {
+  const res = await fetch(`/api/departments/${encodeURIComponent(deptId)}`, {
+    method: 'DELETE',
+    credentials: 'include'
+  });
+  return res.ok;
 }
 
-export async function deleteDepartmentFromStorage(deptId: string, allDepts?: Department[]): Promise<boolean> {
-  const current = allDepts || loadFromStorage<Department[]>(STORAGE_KEYS.DEPARTMENTS, DEPARTMENTS);
-  const updated = current.filter(d => d.id !== deptId);
-  saveToStorage(STORAGE_KEYS.DEPARTMENTS, updated);
-
-  try {
-    await fetch(`/api/departments/${deptId}`, {
-      method: 'DELETE',
-      credentials: 'include'
-    });
-  } catch {
-    // Offline
-  }
-  return true;
-}
-
-/**
- * Persist Notification.
- */
 export async function persistNotification(notification: SystemNotification, allNotifs?: SystemNotification[]): Promise<boolean> {
   const current = allNotifs || loadFromStorage<SystemNotification[]>(STORAGE_KEYS.NOTIFICATIONS, INITIAL_NOTIFICATIONS);
   const exists = current.some(n => n.id === notification.id);
@@ -811,7 +637,6 @@ export const runTiFlashDepreciationAnalytics = (
   const start = performance.now();
   const branchMap = new Map(branches.map(b => [b.id, b.name]));
 
-  // Group by branch + category
   const groups = new Map<string, {
     branchName: string;
     categoryName: string;

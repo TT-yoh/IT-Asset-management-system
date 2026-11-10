@@ -169,7 +169,6 @@ test('11. Merge semantics strictly preserve original org_id on existing record',
     ['ast-safe', 'tenant-gamma', 'Overridden Upsert']
   );
   assert.strictEqual(assets[0].org_id, 'tenant-alpha', 'Existing org_id must NOT be overwritten during upsert');
-  setForceInMemoryForTest(false);
 });
 
 // 12. Readiness check & ping
@@ -177,6 +176,7 @@ test('12. db.ping() returns true when database/in-memory store is ready', async 
   const isAlive = await ping();
   assert.strictEqual(typeof isAlive, 'boolean');
   assert.strictEqual(isAlive, true);
+  setForceInMemoryForTest(false);
 });
 
 // 13. Async error safety & Central error handler

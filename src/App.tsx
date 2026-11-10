@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ShieldCheck, Loader2 } from 'lucide-react';
 import { Navbar } from './components/Navbar';
 import { Sidebar, NavTab } from './components/Sidebar';
 import { Dashboard3D } from './components/Dashboard3D';
@@ -223,6 +224,22 @@ function AppShell() {
       }
     }
   }, [currentUser?.id]);
+
+  // Display clean security verification splash while validating session cookie
+  if (isSessionLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4">
+        <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mb-4 animate-pulse">
+          <ShieldCheck className="w-6 h-6" />
+        </div>
+        <div className="text-sm font-bold text-white tracking-wide">OmniAsset Enterprise Security</div>
+        <div className="text-xs text-slate-400 mt-2 flex items-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+          <span>Verifying security session...</span>
+        </div>
+      </div>
+    );
+  }
 
   // If not authenticated, save intended tab/asset and render LoginPortal immediately
   if (!currentUser) {

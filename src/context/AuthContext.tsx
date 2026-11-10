@@ -11,10 +11,11 @@ import {
   getStoredSession,
   setStoredSession,
   clearStoredSession,
+  wipeUserAndOrgCaches,
   saveToStorage,
   STORAGE_KEYS
 } from '../lib/tidb-storage';
-import { clearOfflineStoreOnLogout } from '../lib/offline-sync';
+import { clearOfflineStoreOnLogout, setActiveSessionContext } from '../lib/offline-sync';
 import { RegisterCompanyData } from '../components/RegisterCompanyModal';
 
 /**
@@ -99,14 +100,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => initialSession.user);
-  // Do not block initial UI rendering with a blank splash; load immediately
-  const [isSessionLoading, setIsSessionLoading] = useState<boolean>(false);
+  const [isSessionLoading, setIsSessionLoading] = useState<boolean>(true);
 
-  // Background non-blocking session verification against backend /api/auth/me cookie
+  // Non-blocking server session verification against backend /api/auth/me cookie
   useEffect(() => {
     let isCancelled = false;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
 
     const verifyServerSession = async () => {
       try {
@@ -135,22 +135,35 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             };
 
             setCurrentUser(serverUser);
+            setActiveSessionContext({
+              userId: serverUser.id,
+              orgId: serverUser.orgId,
+              sessionEpoch: Date.now()
+            });
+
             setCurrentOrg(prevOrg => {
-              const matchedOrg = systemOrgs.find(o => o.id === serverUser.orgId) || prevOrg;
+              const matchedOrg = systemOrgs.find(o => o.id === serverUser.orgId) || {
+                id: serverUser.orgId,
+                name: 'Enterprise Organization',
+                type: 'Enterprise',
+                brandingColor: '#0ea5e9',
+                branchesCount: 1
+              };
               setStoredSession(serverUser, matchedOrg);
               return matchedOrg;
             });
           }
         } else if (res.status === 401 || res.status === 403) {
-          // If server explicitly rejects session cookie and user had no offline session
-          if (!isCancelled && !initialSession.user) {
+          // Explicit rejection: clear stale stored session and offline queue session
+          if (!isCancelled) {
             clearStoredSession();
+            wipeUserAndOrgCaches();
+            setActiveSessionContext(null);
             setCurrentUser(null);
           }
         }
       } catch (err) {
-        // Network unavailable, timeout, or offline: preserve existing local storage session
-        console.warn('Session verification fallback to local cached session:', err);
+        console.warn('Session verification fallback notice:', err);
       } finally {
         if (!isCancelled) {
           setIsSessionLoading(false);
@@ -178,6 +191,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setCurrentOrg(org);
     setCurrentUser(user);
     setStoredSession(user, org);
+    setActiveSessionContext({
+      userId: user.id,
+      orgId: user.orgId,
+      sessionEpoch: Date.now()
+    });
     setIsSessionLoading(false);
     if (typeof window !== 'undefined') {
       const pendingRedirect = sessionStorage.getItem('omni_redirect_tab');
@@ -211,6 +229,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } catch {}
 
     clearStoredSession();
+    wipeUserAndOrgCaches();
+    setActiveSessionContext(null);
     setCurrentUser(null);
     if (typeof window !== 'undefined') {
       window.history.replaceState({ tab: 'login' }, '', '#/login');
@@ -681,7 +701,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const handleClearDummyUsers = () => {
     setSystemUsers(prev => {
       const remaining = prev.filter(u => u.id === currentUser?.id || u.role === 'ADMIN');
-      saveToStorage(STORAGE_KEYS.USERS, remaining);
       return remaining;
     });
   };

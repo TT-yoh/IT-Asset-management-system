@@ -38,7 +38,7 @@ export const INITIAL_BRANCHES: Branch[] = [
     location: 'Corporate HQ Tower, Floor 45',
     city: 'New York',
     country: 'United States',
-    managerName: 'Ismael (Super Admin)'
+    managerName: 'HQ Operations Lead'
   }
 ];
 

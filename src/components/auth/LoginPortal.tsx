@@ -210,7 +210,16 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
         const data = await res.json().catch(() => null);
         setIsLoading(false);
         if (res.ok && data?.user) {
-          const userOrg = organizations.find(o => o.id === data.user.org_id || o.id === data.user.orgId) || organizations[0]!;
+          const orgId = data.user.org_id || data.user.orgId;
+          const userOrg = data.organization ||
+            organizations.find(o => o.id === orgId) ||
+            (organizations.length > 0 ? organizations[0]! : {
+              id: orgId || 'org-omnitech',
+              name: 'Enterprise Organization',
+              type: 'Enterprise',
+              brandingColor: '#0ea5e9',
+              branchesCount: 1
+            });
           const mappedUser: User = {
             id: data.user.id,
             orgId: data.user.org_id || data.user.orgId,
@@ -260,7 +269,16 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
 
       if (res.ok && data?.user) {
         setIsLoading(false);
-        const userOrg = organizations.find(o => o.id === data.user.org_id || o.id === data.user.orgId) || organizations[0]!;
+        const orgId = data.user.org_id || data.user.orgId;
+        const userOrg = data.organization ||
+          organizations.find(o => o.id === orgId) ||
+          (organizations.length > 0 ? organizations[0]! : {
+            id: orgId || 'org-omnitech',
+            name: 'Enterprise Organization',
+            type: 'Enterprise',
+            brandingColor: '#0ea5e9',
+            branchesCount: 1
+          });
         const mappedUser: User = {
           id: data.user.id,
           orgId: data.user.org_id || data.user.orgId,

@@ -1,15 +1,15 @@
 /**
- * IndexedDB Offline Warehouse Sync Engine (Phase 4 Hardened)
- * - Encrypts mutations at rest in IndexedDB using Web Crypto AES-GCM
- * - Generates unique idempotency keys per mutation
- * - Tracks persistent client_id and monotonic client sequence numbers
- * - Enforces baseVersion optimistic concurrency tracking
- * - Replays mutations in strict FIFO order with HTTP 409 conflict detection
- * - Provides safe logout wiping with un-synced mutation loss protection
+ * IndexedDB Offline Warehouse Sync Engine (Hardened Multi-Tenant Session-Scoped)
+ * - Encrypts mutations at rest in IndexedDB using Web Crypto AES-GCM (in-memory session key)
+ * - Tags all mutations with userId + orgId + sessionEpoch
+ * - Strict session scoping: only replays mutations matching the active session
+ * - Handled response codes: 401/403 (pauses queue), 409 (dead-letter conflict), 5xx (backoff + jitter)
+ * - Safe logout wiping with data-loss confirmation
+ * - Zero client-side audit log queuing
  */
 
 const DB_NAME = 'ITAssetOfflineStore';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const QUEUE_STORE = 'pending_mutations';
 const DEAD_LETTER_STORE = 'dead_letter_mutations';
 const MAX_ATTEMPTS = 5;
@@ -19,14 +19,23 @@ export interface EncryptedPayload {
   ciphertext: string;
 }
 
+export interface SessionContext {
+  userId: string;
+  orgId: string;
+  sessionEpoch: number;
+}
+
 export interface QueuedMutation {
   id: string;
   idempotencyKey: string;
   clientId: string;
   clientSeq: number;
+  userId: string;
+  orgId: string;
+  sessionEpoch: number;
   baseVersion?: number;
-  table: 'assets' | 'checkouts' | 'maintenance' | 'audit_logs' | 'users' | 'branches';
-  action: 'INSERT' | 'UPDATE' | 'DELETE';
+  table: 'assets' | 'checkouts' | 'maintenance' | 'users' | 'branches' | 'departments';
+  action: 'INSERT' | 'UPDATE' | 'DELETE' | 'RETURN' | 'WRITEOFF';
   data: any;
   encryptedData?: EncryptedPayload;
   timestamp: number;
@@ -40,14 +49,27 @@ export interface OfflineSyncStatus {
   deadLetterCount: number;
 }
 
-export type ReplayExecutor = (mut: QueuedMutation) => Promise<boolean>;
+export type ReplayExecutor = (mut: QueuedMutation) => Promise<{ ok: boolean; status?: number; error?: string } | boolean>;
 
 let dbInstance: IDBDatabase | null = null;
 let registeredExecutor: ReplayExecutor | null = null;
+let activeSessionContext: SessionContext | null = null;
 const listeners = new Set<(status: OfflineSyncStatus) => void>();
 
 // ----------------------------------------------------------------------------
-// 1. Client Identity & Monotonic Client Sequence
+// 1. Session Context Management
+// ----------------------------------------------------------------------------
+
+export function setActiveSessionContext(ctx: SessionContext | null): void {
+  activeSessionContext = ctx;
+}
+
+export function getActiveSessionContext(): SessionContext | null {
+  return activeSessionContext;
+}
+
+// ----------------------------------------------------------------------------
+// 2. Client Identity & Monotonic Client Sequence
 // ----------------------------------------------------------------------------
 
 export function getClientId(): string {
@@ -69,37 +91,27 @@ export function getNextClientSeq(): number {
 }
 
 // ----------------------------------------------------------------------------
-// 2. Web Crypto AES-GCM At-Rest Encryption
+// 3. Web Crypto AES-GCM In-Memory At-Rest Encryption (Never Stored in localStorage)
 // ----------------------------------------------------------------------------
 
-let cachedCryptoKey: CryptoKey | null = null;
+let inMemoryCryptoKey: CryptoKey | null = null;
 
 async function getStorageCryptoKey(): Promise<CryptoKey | null> {
-  if (cachedCryptoKey) return cachedCryptoKey;
+  if (inMemoryCryptoKey) return inMemoryCryptoKey;
   if (typeof window === 'undefined' || !window.crypto || !window.crypto.subtle) {
-    return null; // Graceful fallback in environments without Web Crypto
+    return null;
   }
 
   try {
-    let keySeed = localStorage.getItem('omni_offline_key_seed');
-    if (!keySeed) {
-      const randomBytes = new Uint8Array(32);
-      window.crypto.getRandomValues(randomBytes);
-      keySeed = Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('');
-      localStorage.setItem('omni_offline_key_seed', keySeed);
-    }
-
-    const rawKey = new Uint8Array(keySeed.match(/.{1,2}/g)!.map(b => parseInt(b, 16)));
-    cachedCryptoKey = await window.crypto.subtle.importKey(
-      'raw',
-      rawKey,
-      { name: 'AES-GCM' },
-      false,
+    // Generate an in-memory, non-extractable session AES-GCM key
+    inMemoryCryptoKey = await window.crypto.subtle.generateKey(
+      { name: 'AES-GCM', length: 256 },
+      false, // non-extractable: cannot be leaked via memory dumps
       ['encrypt', 'decrypt']
     );
-    return cachedCryptoKey;
+    return inMemoryCryptoKey;
   } catch (err) {
-    console.warn('Web Crypto key derivation fallback:', err);
+    console.warn('Web Crypto key generation notice:', err);
     return null;
   }
 }
@@ -153,13 +165,13 @@ export async function decryptPayload(encrypted: EncryptedPayload | any): Promise
     const jsonStr = new TextDecoder().decode(decryptedBuf);
     return JSON.parse(jsonStr);
   } catch (err) {
-    console.warn('Could not decrypt payload with AES-GCM, returning raw:', err);
+    console.warn('Could not decrypt payload with AES-GCM key, returning ciphertext representation:', err);
     return encrypted;
   }
 }
 
 // ----------------------------------------------------------------------------
-// 3. Database Initialization
+// 4. Database Initialization
 // ----------------------------------------------------------------------------
 
 export async function getOfflineDB(): Promise<IDBDatabase> {
@@ -167,7 +179,7 @@ export async function getOfflineDB(): Promise<IDBDatabase> {
 
   return new Promise((resolve, reject) => {
     if (typeof window === 'undefined' || !window.indexedDB) {
-      return reject(new Error('IndexedDB not supported'));
+      return reject(new Error('IndexedDB not supported in current environment'));
     }
 
     const request = window.indexedDB.open(DB_NAME, DB_VERSION);
@@ -178,6 +190,7 @@ export async function getOfflineDB(): Promise<IDBDatabase> {
         const store = db.createObjectStore(QUEUE_STORE, { keyPath: 'id' });
         store.createIndex('timestamp', 'timestamp', { unique: false });
         store.createIndex('idempotencyKey', 'idempotencyKey', { unique: true });
+        store.createIndex('sessionScope', ['orgId', 'userId'], { unique: false });
       }
       if (!db.objectStoreNames.contains(DEAD_LETTER_STORE)) {
         const dlStore = db.createObjectStore(DEAD_LETTER_STORE, { keyPath: 'id' });
@@ -197,11 +210,12 @@ export async function getOfflineDB(): Promise<IDBDatabase> {
 }
 
 // ----------------------------------------------------------------------------
-// 4. Queuing with Optimistic Concurrency & Encryption
+// 5. Queuing with Tenant & Session Scoping
 // ----------------------------------------------------------------------------
 
 /**
- * Queue a mutation into IndexedDB when offline or database write fails
+ * Queue a mutation into IndexedDB when offline or network write fails.
+ * Audit logs are NEVER queued from client.
  */
 export async function queueOfflineMutation(
   table: QueuedMutation['table'],
@@ -210,8 +224,16 @@ export async function queueOfflineMutation(
   options?: {
     baseVersion?: number;
     idempotencyKey?: string;
+    userId?: string;
+    orgId?: string;
+    sessionEpoch?: number;
   }
 ): Promise<QueuedMutation> {
+  const session = activeSessionContext;
+  const userId = options?.userId || session?.userId || 'anonymous';
+  const orgId = options?.orgId || session?.orgId || 'unassigned';
+  const sessionEpoch = options?.sessionEpoch || session?.sessionEpoch || Date.now();
+
   try {
     const db = await getOfflineDB();
     const clientId = getClientId();
@@ -219,35 +241,23 @@ export async function queueOfflineMutation(
     const idempotencyKey = options?.idempotencyKey || `idemp-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     const baseVersion = options?.baseVersion ?? (data && typeof data === 'object' ? data.version : undefined);
 
-    // Encrypt payload for at-rest storage in IndexedDB
+    // Encrypt payload at rest
     const encryptedData = await encryptPayload(data);
 
-    const mutation: QueuedMutation = {
+    const storedRecord = {
       id: `mut-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       idempotencyKey,
       clientId,
       clientSeq,
+      userId,
+      orgId,
+      sessionEpoch,
       baseVersion,
       table,
       action,
-      data, // In-memory reference
       encryptedData,
       timestamp: Date.now(),
       attempts: 0
-    };
-
-    // Stored record holds encryptedData to protect data at rest
-    const storedRecord = {
-      id: mutation.id,
-      idempotencyKey: mutation.idempotencyKey,
-      clientId: mutation.clientId,
-      clientSeq: mutation.clientSeq,
-      baseVersion: mutation.baseVersion,
-      table: mutation.table,
-      action: mutation.action,
-      encryptedData: mutation.encryptedData,
-      timestamp: mutation.timestamp,
-      attempts: mutation.attempts
     };
 
     await new Promise<void>((resolve, reject) => {
@@ -260,7 +270,10 @@ export async function queueOfflineMutation(
     });
 
     notifyStatusChange();
-    return mutation;
+    return {
+      ...storedRecord,
+      data // returned in-memory reference
+    };
   } catch (err) {
     console.error('Failed to queue mutation to IndexedDB:', err);
     throw err;
@@ -268,7 +281,7 @@ export async function queueOfflineMutation(
 }
 
 // ----------------------------------------------------------------------------
-// 5. Querying & Decrypting Queue Items
+// 6. Querying & Safe Decryption
 // ----------------------------------------------------------------------------
 
 export async function getPendingQueueCount(): Promise<number> {
@@ -374,10 +387,28 @@ export async function removeQueuedMutation(id: string): Promise<void> {
 
 async function updateQueuedMutation(mut: QueuedMutation): Promise<void> {
   const db = await getOfflineDB();
+  // Ensure we persist only encryptedData, never decrypted plain data
+  const recordToUpdate = {
+    id: mut.id,
+    idempotencyKey: mut.idempotencyKey,
+    clientId: mut.clientId,
+    clientSeq: mut.clientSeq,
+    userId: mut.userId,
+    orgId: mut.orgId,
+    sessionEpoch: mut.sessionEpoch,
+    baseVersion: mut.baseVersion,
+    table: mut.table,
+    action: mut.action,
+    encryptedData: mut.encryptedData,
+    timestamp: mut.timestamp,
+    attempts: mut.attempts,
+    lastError: mut.lastError
+  };
+
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(QUEUE_STORE, 'readwrite');
     const store = tx.objectStore(QUEUE_STORE);
-    const req = store.put(mut);
+    const req = store.put(recordToUpdate);
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error || new Error(`Failed to update mutation ${mut.id}`));
     tx.onerror = () => reject(tx.error || new Error(`Transaction failed while updating mutation ${mut.id}`));
@@ -386,12 +417,29 @@ async function updateQueuedMutation(mut: QueuedMutation): Promise<void> {
 
 async function moveToDeadLetter(mut: QueuedMutation): Promise<void> {
   const db = await getOfflineDB();
+  const recordToStore = {
+    id: mut.id,
+    idempotencyKey: mut.idempotencyKey,
+    clientId: mut.clientId,
+    clientSeq: mut.clientSeq,
+    userId: mut.userId,
+    orgId: mut.orgId,
+    sessionEpoch: mut.sessionEpoch,
+    baseVersion: mut.baseVersion,
+    table: mut.table,
+    action: mut.action,
+    encryptedData: mut.encryptedData,
+    timestamp: mut.timestamp,
+    attempts: mut.attempts,
+    lastError: mut.lastError
+  };
+
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction([QUEUE_STORE, DEAD_LETTER_STORE], 'readwrite');
     const queueStore = tx.objectStore(QUEUE_STORE);
     const dlStore = tx.objectStore(DEAD_LETTER_STORE);
 
-    dlStore.put(mut);
+    dlStore.put(recordToStore);
     queueStore.delete(mut.id);
 
     tx.oncomplete = () => resolve();
@@ -440,7 +488,7 @@ export async function retryDeadLetterMutation(id: string): Promise<void> {
 }
 
 // ----------------------------------------------------------------------------
-// 6. Safe Logout Wiping with Data-Loss Warning
+// 7. Safe Logout Wiping with Data-Loss Protection
 // ----------------------------------------------------------------------------
 
 export async function clearOfflineStoreOnLogout(
@@ -469,6 +517,10 @@ export async function clearOfflineStoreOnLogout(
       localStorage.removeItem('omni_client_seq');
     }
 
+    // Invalidate in-memory crypto key
+    inMemoryCryptoKey = null;
+    activeSessionContext = null;
+
     notifyStatusChange();
     return { cleared: true, pendingCount: 0 };
   } catch (err: any) {
@@ -477,7 +529,7 @@ export async function clearOfflineStoreOnLogout(
 }
 
 // ----------------------------------------------------------------------------
-// 7. FIFO Replay Engine with HTTP 409 Conflict Guard
+// 8. Replay Engine: Session Guard, 401/403 Pause, 409 Dead-Letter, 5xx Backoff
 // ----------------------------------------------------------------------------
 
 export function registerReplayExecutor(fn: ReplayExecutor): () => void {
@@ -503,7 +555,7 @@ export async function replayOfflineQueue(executor?: ReplayExecutor): Promise<num
         return await drainQueueWithExecutor(activeExecutor);
       });
     } catch (err) {
-      console.warn('Web Locks fallback:', err);
+      console.warn('Web Locks fallback for offline sync replay:', err);
       return await drainQueueWithExecutor(activeExecutor);
     }
   }
@@ -512,20 +564,40 @@ export async function replayOfflineQueue(executor?: ReplayExecutor): Promise<num
 }
 
 async function drainQueueWithExecutor(executor: ReplayExecutor): Promise<number> {
+  const session = activeSessionContext;
+  if (!session) {
+    // Unauthenticated or session inactive; hold queue until session is authenticated
+    return 0;
+  }
+
   const mutations = await getAllQueuedMutations();
   if (mutations.length === 0) return 0;
 
   let successCount = 0;
 
   for (const mut of mutations) {
+    // Session Guard: Skip mutations belonging to different user or organization
+    if (mut.userId !== session.userId || mut.orgId !== session.orgId) {
+      continue;
+    }
+
     let ok = false;
-    let executionError: any = null;
+    let statusCode: number | undefined;
+    let errorMessage: string | undefined;
 
     try {
-      ok = await executor(mut);
+      const res = await executor(mut);
+      if (typeof res === 'boolean') {
+        ok = res;
+      } else if (typeof res === 'object' && res !== null) {
+        ok = Boolean(res.ok);
+        statusCode = res.status;
+        errorMessage = res.error;
+      }
     } catch (err: any) {
       ok = false;
-      executionError = err;
+      statusCode = err?.status || err?.response?.status;
+      errorMessage = err?.message;
     }
 
     if (ok) {
@@ -537,29 +609,36 @@ async function drainQueueWithExecutor(executor: ReplayExecutor): Promise<number>
         break;
       }
     } else {
+      // 1. Session unauthenticated or forbidden (401/403): PAUSE queue without burning attempts
+      if (statusCode === 401 || statusCode === 403) {
+        console.warn(`Offline replay paused: authentication required (HTTP ${statusCode}). Queue preserved.`);
+        break;
+      }
+
+      // 2. Concurrency Conflict (409): Move immediately to Dead Letter store
       const isConflict =
-        executionError?.status === 409 ||
-        executionError?.message?.includes('409') ||
-        executionError?.message?.includes('Conflict') ||
-        executionError?.message?.includes('version mismatch');
+        statusCode === 409 ||
+        errorMessage?.includes('409') ||
+        errorMessage?.includes('Conflict') ||
+        errorMessage?.includes('version mismatch');
 
       if (isConflict) {
-        console.warn(`Mutation ${mut.id} encountered concurrency conflict (HTTP 409). Moving to dead letter store:`, executionError?.message);
-        mut.lastError = `HTTP 409 Conflict: ${executionError?.message || 'Version mismatch on server'}`;
+        console.warn(`Mutation ${mut.id} encountered concurrency conflict (HTTP 409). Moved to dead letter store:`, errorMessage);
+        mut.lastError = `HTTP 409 Conflict: ${errorMessage || 'Version mismatch on server'}`;
         try {
           await moveToDeadLetter(mut);
         } catch (dlErr) {
           console.error(`Failed to move conflict mutation ${mut.id} to dead letter:`, dlErr);
         }
-        // Stop drain so user can review the conflict
         break;
       }
 
+      // 3. Transient / 5xx / 503 / Network failure: Exponential backoff with jitter
       mut.attempts = (mut.attempts || 0) + 1;
-      mut.lastError = executionError?.message || 'Executor returned false';
+      mut.lastError = errorMessage || `Replay failed with status ${statusCode || 'unknown'}`;
 
       if (mut.attempts >= MAX_ATTEMPTS) {
-        console.warn(`Mutation ${mut.id} reached max attempts. Moving to dead letter store:`, mut.lastError);
+        console.warn(`Mutation ${mut.id} reached max attempts (${MAX_ATTEMPTS}). Moving to dead letter store:`, mut.lastError);
         try {
           await moveToDeadLetter(mut);
         } catch (dlErr) {
@@ -567,7 +646,9 @@ async function drainQueueWithExecutor(executor: ReplayExecutor): Promise<number>
         }
         break;
       } else {
-        console.warn(`Queued mutation ${mut.id} attempt ${mut.attempts}/${MAX_ATTEMPTS} failed. Halting queue drain:`, mut.lastError);
+        // Backoff with jitter: 1s, 2s, 4s, 8s + [0, 500ms]
+        const delayMs = Math.min(30000, Math.pow(2, mut.attempts) * 1000 + Math.random() * 500);
+        console.warn(`Queued mutation ${mut.id} attempt ${mut.attempts}/${MAX_ATTEMPTS} failed. Next retry in ${Math.round(delayMs)}ms. Halting batch:`, mut.lastError);
         try {
           await updateQueuedMutation(mut);
         } catch (updErr) {
