@@ -8,33 +8,16 @@ let aiInstance: GoogleGenAI | null = null;
 let currentKey = '';
 
 export const getGeminiApiKey = (): string => {
-  const envMeta = (import.meta as any).env || {};
-  const processEnv = typeof process !== 'undefined' && process.env ? process.env : {};
-
-  const candidates = [
-    envMeta.VITE_GEMINI_API_KEY,
-    envMeta.GEMINI_API_KEY,
-    processEnv.GEMINI_API_KEY,
-    processEnv.VITE_GEMINI_API_KEY
-  ];
-
-  for (const candidate of candidates) {
-    if (
-      candidate &&
-      typeof candidate === 'string' &&
-      candidate.trim().length > 10 &&
-      !candidate.includes('MY_GEMINI_API_KEY') &&
-      !candidate.includes('placeholder') &&
-      !candidate.includes('YOUR_KEY')
-    ) {
-      return candidate.trim();
-    }
-  }
-
-  // Check localStorage for runtime user override
+  // Check runtime user-configured key
   try {
-    const saved = localStorage.getItem('gemini_api_key');
-    if (saved && saved.trim().length > 10) return saved.trim();
+    if (typeof sessionStorage !== 'undefined') {
+      const sessionKey = sessionStorage.getItem('gemini_api_key');
+      if (sessionKey && sessionKey.trim().length > 10) return sessionKey.trim();
+    }
+    if (typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem('gemini_api_key');
+      if (saved && saved.trim().length > 10) return saved.trim();
+    }
   } catch {}
 
   return '';

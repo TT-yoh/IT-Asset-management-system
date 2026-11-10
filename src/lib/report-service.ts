@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { Asset, MaintenanceRecord, BudgetAllocation } from '../types';
 import { 
   INITIAL_ASSETS, 
@@ -295,14 +295,29 @@ export function sanitizeForFormulaInjection(val: any): any {
 }
 
 /**
- * Export data to Microsoft Excel with Formula Injection Protection
+ * Export data to Microsoft Excel with Formula Injection Protection (ExcelJS)
  */
-export function exportToExcel(data: any[], filename: string) {
+export async function exportToExcel(data: any[], filename: string) {
   const sanitized = Array.isArray(data) ? data.map(item => sanitizeForFormulaInjection(item)) : [];
-  const worksheet = XLSX.utils.json_to_sheet(sanitized);
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Report Data');
-  XLSX.writeFile(workbook, `${filename}.xlsx`);
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('Report Data');
+
+  if (sanitized.length > 0) {
+    const keys = Object.keys(sanitized[0]);
+    worksheet.columns = keys.map(k => ({ header: k, key: k }));
+    sanitized.forEach(item => worksheet.addRow(item));
+  }
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 /**

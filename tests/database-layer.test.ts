@@ -184,7 +184,9 @@ test('13. Forced DB failure in route returns JSON 500 with requestId, process st
   let serverInstance: any = null;
   let testUrl = '';
   try {
-    serverInstance = app.listen(0);
+    serverInstance = await new Promise((resolve) => {
+      const s = app.listen(0, '127.0.0.1', () => resolve(s));
+    });
     const addr = serverInstance.address() as any;
     testUrl = `http://127.0.0.1:${addr.port}`;
 
@@ -200,6 +202,9 @@ test('13. Forced DB failure in route returns JSON 500 with requestId, process st
     assert.strictEqual(body.error.includes('SELECT'), false, 'Response must not leak SELECT SQL statement');
     assert.strictEqual(body.error.includes('INSERT'), false, 'Response must not leak INSERT SQL statement');
     assert.strictEqual(body.error.includes('mysql'), false, 'Response must not leak mysql driver details');
+  } catch (err: any) {
+    if (err.cause) console.error('fetch error cause:', err.cause);
+    throw err;
   } finally {
     if (serverInstance) {
       await new Promise<void>((resolve) => serverInstance.close(() => resolve()));

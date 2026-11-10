@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Asset, Branch, AssetCategory, Organization, AssetStatus } from '../../types';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { 
   Upload, 
   X, 
@@ -147,21 +147,42 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
 
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-      const sheets = workbook.SheetNames;
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(arrayBuffer);
+      const sheets = workbook.worksheets.map(w => w.name);
       setSheetNames(sheets);
 
-      const firstSheet = sheets[0] || '';
-      setSelectedSheet(firstSheet);
+      const firstSheetName = sheets[0] || '';
+      setSelectedSheet(firstSheetName);
 
-      const worksheet = workbook.Sheets[firstSheet];
+      const worksheet = workbook.getWorksheet(firstSheetName) || workbook.worksheets[0];
       if (worksheet) {
-        const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '' });
-        if (jsonData.length > 0) {
-          const headers = Object.keys(jsonData[0] || {});
-          setRawHeaders(headers);
-          setRawRows(jsonData);
-          setMapping(autoDetectMapping(headers));
+        const headers: string[] = [];
+        const headerRow = worksheet.getRow(1);
+        headerRow.eachCell((cell, colNumber) => {
+          headers[colNumber] = String(cell.value || '').trim();
+        });
+
+        const rows: Record<string, any>[] = [];
+        worksheet.eachRow((row, rowNumber) => {
+          if (rowNumber === 1) return;
+          const rowObj: Record<string, any> = {};
+          headers.forEach((h, colNumber) => {
+            if (h) {
+              const val = row.getCell(colNumber).value;
+              rowObj[h] = val !== null && val !== undefined ? (typeof val === 'object' && 'text' in val ? (val as any).text : String(val)) : '';
+            }
+          });
+          if (Object.keys(rowObj).length > 0) {
+            rows.push(rowObj);
+          }
+        });
+
+        if (rows.length > 0) {
+          const validHeaders = headers.filter(Boolean);
+          setRawHeaders(validHeaders);
+          setRawRows(rows);
+          setMapping(autoDetectMapping(validHeaders));
           setStep('MAP');
         }
       }
@@ -175,7 +196,7 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
   };
 
   // Download official sample Excel template
-  const handleDownloadTemplate = () => {
+  const handleDownloadTemplate = async () => {
     const sampleData = [
       {
         'Asset Name': 'MacBook Pro 16" M3 Max',
@@ -259,10 +280,22 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
       }
     ];
 
-    const ws = XLSX.utils.json_to_sheet(sampleData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Asset_Inventory');
-    XLSX.writeFile(wb, 'OmniAsset_Import_Template.xlsx');
+    const workbook = new ExcelJS.Workbook();
+    const ws = workbook.addWorksheet('Asset_Inventory');
+    const headers = Object.keys(sampleData[0]);
+    ws.columns = headers.map(h => ({ header: h, key: h }));
+    sampleData.forEach(d => ws.addRow(d));
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'OmniAsset_Import_Template.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   // Validate and parse mapped rows
