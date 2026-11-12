@@ -57,7 +57,7 @@ export class CheckoutService {
       ...input.asset,
       assignedToUserId: input.user.id,
       assignedToUserName: input.user.fullName,
-      assignedToUserAvatar: input.user.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(input.user.fullName)}`,
+      assignedToUserAvatar: input.user.avatar || undefined,
       assignedAt: now,
       status: 'ACTIVE',
       ...(input.targetBranchId && input.targetBranchName ? {

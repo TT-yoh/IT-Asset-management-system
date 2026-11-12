@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Asset, User, Branch } from '../types';
+import { useFeedback } from '../context/FeedbackContext';
 import { Calendar, Laptop, AlertCircle, CheckCircle2, ArrowRight, ShieldAlert, FileText, UserCheck, MapPin, ToggleLeft, UserX, UserPlus, Phone, Mail } from 'lucide-react';
 
 interface CheckoutFormProps {
@@ -26,6 +27,7 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
   onSubmitCheckout,
   onCancel
 }) => {
+  const { confirm } = useFeedback();
   const defaultReturn = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]!;
   
   const catName = asset?.categoryName?.toLowerCase() || '';
@@ -39,12 +41,8 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
     asset?.categoryId === 'cat-phone'
   );
 
-  // Assignee Type
-  const [assigneeType, setAssigneeType] = useState<'REGISTERED' | 'CUSTOM'>(
-    isLaptopOrPhone ? 'CUSTOM' : 'REGISTERED'
-  );
-  const [selectedUserId, setSelectedUserId] = useState<string>(users[0]?.id || '');
-  const [customName, setCustomName] = useState<string>('');
+  // Selected Assignee
+  const [selectedUserId, setSelectedUserId] = useState<string>('');
   
   // Location / Branch Allocation
   const [selectedBranchId, setSelectedBranchId] = useState<string>(asset?.branchId || branches[0]?.id || '');
@@ -68,7 +66,7 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
       }, 70);
       return () => clearTimeout(timer);
     }
-  }, [asset?.id, assigneeType]);
+  }, [asset?.id]);
 
   if (!asset) {
     return (
@@ -104,31 +102,19 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
     'Other'
   ];
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
     // Validate user assignment
-    let targetUser: User | { id: string; fullName: string; email?: string; avatar?: string; role?: string };
-    if (assigneeType === 'REGISTERED') {
-      const found = users.find(u => u.id === selectedUserId);
-      if (!found) {
-        setError('Please select a valid registered employee account.');
-        return;
-      }
-      targetUser = found;
-    } else {
-      if (!customName.trim()) {
-        setError('Please enter the name of the person being assigned custody.');
-        return;
-      }
-      targetUser = {
-        id: `custom-${encodeURIComponent(customName.trim())}`,
-        fullName: customName.trim(),
-        email: 'Offline / External Person',
-        role: 'USER',
-        avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(customName.trim())}`
-      };
+    if (!selectedUserId) {
+      setError('Please select an active staff member to assign custody.');
+      return;
+    }
+    const targetUser = users.find(u => u.id === selectedUserId);
+    if (!targetUser) {
+      setError('Selected staff member was not found in directory.');
+      return;
     }
 
     // Validate Branch
@@ -150,7 +136,12 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
       return;
     }
 
-    if (confirm(`Confirm checkout of ${asset.name} (${asset.assetCode}) to ${targetUser.fullName} at location ${targetBranch.name}?`)) {
+    const ok = await confirm({
+      title: 'Confirm checkout?',
+      message: `${asset.name} (${asset.assetCode}) will be checked out to ${targetUser.fullName} at ${targetBranch.name}.`,
+      confirmLabel: 'Check out'
+    });
+    if (ok) {
       onSubmitCheckout(targetUser, finalReason, returnDate, notes.trim(), targetBranch.id, targetBranch.name);
     }
   };
@@ -197,87 +188,24 @@ export const CheckoutForm: React.FC<CheckoutFormProps> = ({
       )}
 
       <form onSubmit={handleSubmit} className="space-y-4 mt-4">
-        {isLaptopOrPhone && (
-          <div className="p-3.5 bg-sky-500/10 border border-sky-500/30 rounded-2xl mb-4 text-sky-300">
-            <p className="font-semibold text-slate-100 flex items-center gap-1.5">
-              <UserPlus className="w-4 h-4 text-sky-400 animate-pulse" />
-              <span>Laptop / Cellphone Assignment</span>
-            </p>
-            <p className="text-[11px] mt-1 text-slate-400">
-              Please make sure to write the exact name of the person this portable unit is being given to below.
-            </p>
-          </div>
-        )}
-
-        {/* Assignee Selection Type */}
-        <div>
-          <label className="block text-slate-300 font-semibold mb-2">
-            Custody Assignment Option
-          </label>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => setAssigneeType('REGISTERED')}
-              className={`p-3 rounded-xl border text-center transition flex flex-col items-center gap-1.5 ${
-                assigneeType === 'REGISTERED'
-                  ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400 font-bold shadow'
-                  : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
-              }`}
-            >
-              <UserCheck className="w-4 h-4" />
-              <span>Registered Account</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setAssigneeType('CUSTOM')}
-              className={`p-3 rounded-xl border text-center transition flex flex-col items-center gap-1.5 ${
-                assigneeType === 'CUSTOM'
-                  ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400 font-bold shadow'
-                  : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
-              }`}
-            >
-              <UserPlus className="w-4 h-4" />
-              <span>No Account Needed</span>
-            </button>
-          </div>
-        </div>
-
         {/* Selected Assignee Field */}
-        <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800">
-          {assigneeType === 'REGISTERED' ? (
-            <div className="space-y-2">
-              <label className="block text-slate-400 font-semibold">Select Staff Account</label>
-              <select
-                value={selectedUserId}
-                onChange={e => setSelectedUserId(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl p-2.5 focus:outline-none focus:border-emerald-500"
-              >
-                {users.map(u => (
-                  <option key={u.id} value={u.id}>
-                    {u.fullName} ({u.role} - {u.branchName})
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <label className="block text-slate-400 font-semibold">
-                {isLaptopOrPhone ? "Name of Person Given To *" : "Enter Assignee Full Name"}
-              </label>
-              <input
-                type="text"
-                value={customName}
-                onChange={e => setCustomName(e.target.value)}
-                placeholder={isLaptopOrPhone ? "Write the name of the person given to..." : "Type assignee full name..."}
-                className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl p-2.5 focus:outline-none focus:border-emerald-500 font-semibold"
-              />
-              <p className="text-[10px] text-slate-500 font-mono">
-                {isLaptopOrPhone 
-                  ? "Assigns immediate laptop/phone custody with no login required." 
-                  : "Assign custody instantly with no user credentials required."}
-              </p>
-            </div>
-          )}
+        <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
+          <label className="block text-slate-300 font-semibold flex items-center gap-1.5">
+            <UserCheck className="w-4 h-4 text-emerald-400" />
+            <span>Select Staff Custodian *</span>
+          </label>
+          <select
+            value={selectedUserId}
+            onChange={e => setSelectedUserId(e.target.value)}
+            className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl p-2.5 focus:outline-none focus:border-emerald-500"
+          >
+            <option value="" disabled>Select an active staff custodian...</option>
+            {users.filter(u => u.status === 'ACTIVE' || !u.status).map(u => (
+              <option key={u.id} value={u.id}>
+                {u.fullName} ({u.role} - {u.branchName || 'HQ'})
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Branch / Location Allocation */}

@@ -112,3 +112,4 @@ runAnchor().catch(err => {
   console.error('Anchoring failed:', err);
   process.exit(1);
 });
+

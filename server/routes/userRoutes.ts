@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../db';
-import { authenticate, requirePermission, invalidateUserCache } from '../middleware';
+import { authenticate, requirePermission, invalidateUserCache, asyncHandler } from '../middleware';
 import { generateSecureToken, hashToken } from '../auth';
 import { canAssignRole, UserRole } from '../permissions';
 import { recordAuditEvent } from '../audit';
@@ -14,7 +14,7 @@ userRouter.use(authenticate);
  * GET /api/users
  * Returns sanitized users ONLY for the authenticated org. Never leaks other tenants, passwords, or credential tokens!
  */
-userRouter.get('/', requirePermission('users:read'), async (req: Request, res: Response) => {
+userRouter.get('/', requirePermission('users:read'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, role, branchId, userId } = req.auth!;
 
   let sql = `
@@ -58,13 +58,13 @@ userRouter.get('/', requirePermission('users:read'), async (req: Request, res: R
   }));
 
   res.json({ users: sanitized });
-});
+}));
 
 /**
  * GET /api/users/:id
  * Fetches a single user record within tenant boundary with explicit column projection
  */
-userRouter.get('/:id', requirePermission('users:read'), async (req: Request, res: Response) => {
+userRouter.get('/:id', requirePermission('users:read'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, role, branchId, userId: callerId } = req.auth!;
   const targetId = req.params.id;
 
@@ -111,14 +111,14 @@ userRouter.get('/:id', requirePermission('users:read'), async (req: Request, res
       version: Number(u.version || 1)
     }
   });
-});
+}));
 
 /**
  * POST /api/users/invite
  * Administrator invites a new corporate user, recorded in audit transaction!
  * Generates server-side UUID, strictly prevents cross-tenant overwrites, and delivers token via email only.
  */
-userRouter.post('/invite', requirePermission('users:invite'), async (req: Request, res: Response) => {
+userRouter.post('/invite', requirePermission('users:invite'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role: actorRole } = req.auth!;
   const data = req.body;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -213,10 +213,11 @@ userRouter.post('/invite', requirePermission('users:invite'), async (req: Reques
         ]
       );
 
-      await sendInviteEmail(cleanEmail, freshToken);
+      const reinviteDelivery = await sendInviteEmail(cleanEmail, freshToken);
 
       res.status(200).json({
         success: true,
+        emailDelivered: reinviteDelivery.delivered,
         userId: existingUser.id,
         invitedAt: freshInvitedAt,
         message: 'A fresh onboarding token has been issued for this pending invitation.'
@@ -279,10 +280,11 @@ userRouter.post('/invite', requirePermission('users:invite'), async (req: Reques
       });
     });
 
-    await sendInviteEmail(cleanEmail, inviteToken);
+    const inviteDelivery = await sendInviteEmail(cleanEmail, inviteToken);
 
     res.status(201).json({
       success: true,
+      emailDelivered: inviteDelivery.delivered,
       userId,
       invitedAt,
       message: 'User successfully invited with onboarding token.'
@@ -290,14 +292,14 @@ userRouter.post('/invite', requirePermission('users:invite'), async (req: Reques
   } catch (_err) {
     res.status(500).json({ error: 'User invitation transaction failed.' });
   }
-});
+}));
 
 /**
  * POST /api/users/:id/reinvite
  * Re-issue a fresh invitation token for an invited user.
  * Tokens delivered strictly out-of-band via mailer.
  */
-userRouter.post('/:id/reinvite', requirePermission('users:invite'), async (req: Request, res: Response) => {
+userRouter.post('/:id/reinvite', requirePermission('users:invite'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role: actorRole } = req.auth!;
   const targetId = req.params.id;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -345,21 +347,22 @@ userRouter.post('/:id/reinvite', requirePermission('users:invite'), async (req: 
     });
   });
 
-  await sendInviteEmail(user.email, newInviteToken);
+  const resendDelivery = await sendInviteEmail(user.email, newInviteToken);
 
   res.json({
     success: true,
+    emailDelivered: resendDelivery.delivered,
     userId: targetId,
     invitedAt,
     message: `New invitation token issued for ${user.full_name}.`
   });
-});
+}));
 
 /**
  * PUT /api/users/:id
  * Update user details with strict role escalation guard, optimistic concurrency control, and session invalidation!
  */
-userRouter.put('/:id', requirePermission('users:update'), async (req: Request, res: Response) => {
+userRouter.put('/:id', requirePermission('users:update'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, role: actorRole, userId: actorId, fullName: actorName } = req.auth!;
   const targetUserId = req.params.id;
   const data = req.body;
@@ -558,7 +561,7 @@ userRouter.put('/:id', requirePermission('users:update'), async (req: Request, r
     const statusCode = err.statusCode || 500;
     res.status(statusCode).json({ error: statusCode === 409 ? err.message : 'User update transaction failed.' });
   }
-});
+}));
 
 /**
  * DELETE /api/users/:id
@@ -566,7 +569,7 @@ userRouter.put('/:id', requirePermission('users:update'), async (req: Request, r
  * Refuses deletion if user holds active asset custody.
  * Bumps token_version to immediately revoke existing sessions.
  */
-userRouter.delete('/:id', requirePermission('users:delete'), async (req: Request, res: Response) => {
+userRouter.delete('/:id', requirePermission('users:delete'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role: actorRole } = req.auth!;
   const targetUserId = req.params.id;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -643,4 +646,4 @@ userRouter.delete('/:id', requirePermission('users:delete'), async (req: Request
   } catch (_err) {
     res.status(500).json({ error: 'User deletion transaction failed.' });
   }
-});
+}));

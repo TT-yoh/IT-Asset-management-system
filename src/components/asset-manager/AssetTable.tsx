@@ -10,8 +10,19 @@ import {
   AlertCircle, 
   Clock, 
   User as UserIcon,
-  ArrowUpDown
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
+
+export type AssetSortKey =
+  | 'assetCode'
+  | 'name'
+  | 'branchName'
+  | 'assignedToUserName'
+  | 'status'
+  | 'condition'
+  | 'currentValue';
 
 interface AssetTableProps {
   assets: Asset[];
@@ -22,6 +33,13 @@ interface AssetTableProps {
   onEditAsset?: (asset: Asset) => void;
   onDeleteAsset?: (id: string) => void;
   onShowQR: (asset: Asset) => void;
+  /** True when every asset matching the current filters (all pages) is selected. */
+  allSelected?: boolean;
+  /** Number of assets matching the current filters across all pages. */
+  totalCount?: number;
+  sortKey?: AssetSortKey | null;
+  sortDir?: 'asc' | 'desc';
+  onSort?: (key: AssetSortKey) => void;
 }
 
 export const AssetTable: React.FC<AssetTableProps> = ({
@@ -32,7 +50,12 @@ export const AssetTable: React.FC<AssetTableProps> = ({
   onViewDetails,
   onEditAsset,
   onDeleteAsset,
-  onShowQR
+  onShowQR,
+  allSelected,
+  totalCount,
+  sortKey = null,
+  sortDir = 'asc',
+  onSort
 }) => {
   const getStatusBadge = (status: Asset['status']) => {
     switch (status) {
@@ -69,29 +92,58 @@ export const AssetTable: React.FC<AssetTableProps> = ({
     }
   };
 
-  const isAllSelected = assets.length > 0 && assets.every(a => selectedIds.has(a.id));
+  const isAllSelected = allSelected ?? (assets.length > 0 && assets.every(a => selectedIds.has(a.id)));
+  const selectAllCount = totalCount ?? assets.length;
+
+  const renderHeader = (label: string, key: AssetSortKey, align: 'left' | 'right' = 'left') => {
+    const active = sortKey === key;
+    const SortIcon = !active ? ArrowUpDown : sortDir === 'asc' ? ArrowUp : ArrowDown;
+    return (
+      <th
+        scope="col"
+        aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+        className={`p-3 ${align === 'right' ? 'text-right' : ''}`}
+      >
+        {onSort ? (
+          <button
+            type="button"
+            onClick={() => onSort(key)}
+            className={`inline-flex items-center gap-1 font-medium cursor-pointer hover:text-white transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
+              active ? 'text-emerald-400' : ''
+            }`}
+          >
+            {label}
+            <SortIcon className={`w-3 h-3 ${active ? '' : 'opacity-50'}`} aria-hidden="true" />
+          </button>
+        ) : (
+          label
+        )}
+      </th>
+    );
+  };
 
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/60 shadow-xl">
       <table className="w-full text-left border-collapse text-xs">
         <thead>
           <tr className="border-b border-slate-800 bg-slate-950/80 text-slate-400 font-medium">
-            <th className="p-3 w-10 text-center">
+            <th scope="col" className="p-3 w-10 text-center">
               <input
                 type="checkbox"
                 checked={isAllSelected}
                 onChange={onSelectAll}
+                aria-label={`Select all ${selectAllCount} matching assets`}
                 className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-emerald-500 focus:ring-emerald-500/20 cursor-pointer accent-emerald-500"
               />
             </th>
-            <th className="p-3">Asset Code</th>
-            <th className="p-3">Device & Specs</th>
-            <th className="p-3">Branch Facility</th>
-            <th className="p-3">Assigned Custodian</th>
-            <th className="p-3">Status</th>
-            <th className="p-3">Condition</th>
-            <th className="p-3 text-right">Valuation</th>
-            <th className="p-3 text-center">Actions</th>
+            {renderHeader('Asset Code', 'assetCode')}
+            {renderHeader('Device & Specs', 'name')}
+            {renderHeader('Branch Facility', 'branchName')}
+            {renderHeader('Assigned Custodian', 'assignedToUserName')}
+            {renderHeader('Status', 'status')}
+            {renderHeader('Condition', 'condition')}
+            {renderHeader('Valuation', 'currentValue', 'right')}
+            <th scope="col" className="p-3 text-center">Actions</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-800/60">
@@ -117,6 +169,7 @@ export const AssetTable: React.FC<AssetTableProps> = ({
                       type="checkbox"
                       checked={isSelected}
                       onChange={() => onToggleSelect(asset.id)}
+                      aria-label={`Select ${asset.assetCode}`}
                       className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-emerald-500 focus:ring-emerald-500/20 cursor-pointer accent-emerald-500"
                     />
                   </td>
@@ -184,6 +237,7 @@ export const AssetTable: React.FC<AssetTableProps> = ({
                       <button
                         onClick={() => onViewDetails(asset)}
                         title="View Asset Details"
+                        aria-label={`View details for ${asset.assetCode}`}
                         className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-emerald-400 transition-colors"
                       >
                         <Eye className="w-3.5 h-3.5" />
@@ -191,6 +245,7 @@ export const AssetTable: React.FC<AssetTableProps> = ({
                       <button
                         onClick={() => onShowQR(asset)}
                         title="View QR Code"
+                        aria-label={`View QR code for ${asset.assetCode}`}
                         className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-emerald-400 transition-colors"
                       >
                         <QrCode className="w-3.5 h-3.5" />
@@ -199,6 +254,7 @@ export const AssetTable: React.FC<AssetTableProps> = ({
                         <button
                           onClick={() => onEditAsset(asset)}
                           title="Edit Asset"
+                          aria-label={`Edit ${asset.assetCode}`}
                           className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-sky-400 transition-colors"
                         >
                           <Edit3 className="w-3.5 h-3.5" />
@@ -208,6 +264,7 @@ export const AssetTable: React.FC<AssetTableProps> = ({
                         <button
                           onClick={() => onDeleteAsset(asset.id)}
                           title="Delete Asset"
+                          aria-label={`Delete ${asset.assetCode}`}
                           className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition-colors"
                         >
                           <Trash2 className="w-3.5 h-3.5" />

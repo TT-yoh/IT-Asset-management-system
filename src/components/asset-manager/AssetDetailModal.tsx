@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Asset } from '../../types';
+import { AssetExtendedDetails } from './AssetExtendedFields';
 import { 
   X, 
   QrCode, 
@@ -22,6 +23,7 @@ import {
 } from 'lucide-react';
 import { generateSketchGraph } from '../AssetManager';
 import { generateQrDataUrl } from '../../lib/qr-generator';
+import { calculateStraightLineDepreciation } from '../../../shared/finance';
 
 interface AssetDetailModalProps {
   asset: Asset | null;
@@ -57,16 +59,14 @@ export const AssetDetailModal: React.FC<AssetDetailModalProps> = ({
 
   if (!asset) return null;
 
-  // Calculate straight-line depreciation
+  // Calculate straight-line depreciation via shared finance module
   const purchaseCost = asset.purchaseCost ?? 0;
-  const pDate = new Date(asset.purchaseDate || '2024-01-01');
-  const now = new Date();
-  const ageMonths = Math.max(0, Math.floor((now.getTime() - pDate.getTime()) / (1000 * 3600 * 24 * 30.4375)));
-  const totalUsefulMonths = 36;
-  const depreciatedPct = Math.min(100, Math.round((ageMonths / totalUsefulMonths) * 100));
-  const estimatedBookValue = Math.max(0, Math.round(purchaseCost * (1 - depreciatedPct / 100)));
+  const dep = calculateStraightLineDepreciation(purchaseCost, asset.purchaseDate);
+  const depreciatedPct = dep.depreciatedPercentage;
+  const estimatedBookValue = dep.bookValue;
 
   // Warranty status
+  const now = new Date();
   const wDate = asset.warrantyExpiry ? new Date(asset.warrantyExpiry) : null;
   const warrantyDaysLeft = wDate ? Math.ceil((wDate.getTime() - now.getTime()) / (1000 * 3600 * 24)) : null;
 
@@ -88,7 +88,7 @@ export const AssetDetailModal: React.FC<AssetDetailModalProps> = ({
   const statusDisplay = getFriendlyStatus(asset.status);
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-sm flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4">
+    <div data-modal-overlay className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-sm flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4">
       <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-950/70 flex items-start justify-between">
@@ -187,6 +187,8 @@ export const AssetDetailModal: React.FC<AssetDetailModalProps> = ({
               {asset.assignedToUserName ? 'In Staff Custody' : 'Ready for Reassignment'}
             </span>
           </div>
+
+          <AssetExtendedDetails asset={asset} />
 
           {/* Depreciation Progress */}
           <div className="p-4 bg-slate-950/40 border border-slate-800 rounded-2xl space-y-2">

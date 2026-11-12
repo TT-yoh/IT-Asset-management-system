@@ -1,4 +1,3 @@
-import 'express-async-errors';
 import express, { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import helmet from 'helmet';
@@ -8,6 +7,7 @@ import fs from 'fs';
 import config from './config';
 import { query, ping } from './db';
 import { hasPermission } from './permissions';
+import { asyncHandler, HttpError } from './errors';
 import {
   cookieParserMiddleware,
   csrfProtection,
@@ -25,6 +25,8 @@ import { branchRouter } from './routes/branchRoutes';
 import { departmentRouter } from './routes/departmentRoutes';
 import { userRouter } from './routes/userRoutes';
 import { auditRouter } from './routes/auditRoutes';
+import { reportRouter } from './routes/reportRoutes';
+import { catalogRouter } from './routes/catalogRoutes';
 
 export const app = express();
 
@@ -44,8 +46,8 @@ app.use(
         defaultSrc: ["'self'"],
         scriptSrc: config.isProduction ? ["'self'"] : ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-        connectSrc: ["'self'", ...config.CORS_ORIGINS, 'ws:', 'wss:'],
+        imgSrc: ["'self'", 'data:', 'blob:', 'https://images.unsplash.com'],
+        connectSrc: ["'self'", ...config.CORS_ORIGINS],
         fontSrc: ["'self'", 'data:', 'https:'],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
@@ -139,13 +141,13 @@ app.get(config.ALLOW_ROOT_ROUTES ? ['/api/health', '/health'] : ['/api/health'],
 
 app.get(
   config.ALLOW_ROOT_ROUTES ? ['/api/health/ready', '/api/ready', '/ready'] : ['/api/health/ready', '/api/ready'],
-  async (_req: Request, res: Response) => {
+  asyncHandler(async (_req: Request, res: Response) => {
     const isDbConnected = await ping();
     if (isDbConnected) {
       return res.json({ status: 'ready', database: 'connected' });
     }
     return res.status(503).json({ status: 'unready', database: 'disconnected' });
-  }
+  })
 );
 
 // 11. Mount sub-routers under /api
@@ -159,6 +161,8 @@ app.use('/api/branches', branchRouter);
 app.use('/api/departments', departmentRouter);
 app.use('/api/users', userRouter);
 app.use('/api/audit-logs', auditRouter);
+app.use('/api/reports', reportRouter);
+app.use('/api/catalog', catalogRouter);
 
 // Optional root-level route aliases (only when ALLOW_ROOT_ROUTES is explicitly enabled)
 if (config.ALLOW_ROOT_ROUTES) {
@@ -172,6 +176,8 @@ if (config.ALLOW_ROOT_ROUTES) {
   app.use('/departments', departmentRouter);
   app.use('/users', userRouter);
   app.use('/audit-logs', auditRouter);
+  app.use('/reports', reportRouter);
+  app.use('/catalog', catalogRouter);
 }
 
 /**
@@ -185,7 +191,7 @@ app.get(
   config.ALLOW_ROOT_ROUTES ? ['/api/init', '/init'] : ['/api/init'],
   initRateLimiter,
   authenticate,
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const { orgId, role, branchId, userId } = req.auth!;
 
     // Super admin can inspect specific org if requested
@@ -377,7 +383,7 @@ app.get(
     }
 
     res.json(responsePayload);
-  }
+  })
 );
 
 // 12. Serve frontend static assets in production if dist directory exists
@@ -416,9 +422,10 @@ app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
 
   const isServerFault = statusCode >= 500;
   const errorCode = err.code || (isServerFault ? 'INTERNAL_SERVER_ERROR' : 'BAD_REQUEST');
-  const clientMessage = isServerFault
-    ? 'An internal server error occurred. Please contact system support.'
-    : err.message || 'Request could not be processed.';
+  const isExposed = err instanceof HttpError ? err.expose : (!isServerFault && Boolean(err.message));
+  const clientMessage = isExposed
+    ? err.message
+    : 'An internal server error occurred. Please contact system support.';
 
   res.status(statusCode).json({
     error: clientMessage,

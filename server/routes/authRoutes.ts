@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import config from '../config';
-import { query } from '../db';
+import { query, withTransaction } from '../db';
+import { recordAuditEvent } from '../audit';
 import {
   hashPassword,
   verifyPassword,
@@ -23,7 +25,7 @@ import {
   DUMMY_BCRYPT_HASH,
   SESSION_TTL_SECONDS
 } from '../auth';
-import { authenticate, invalidateUserCache } from '../middleware';
+import { authenticate, invalidateUserCache, asyncHandler } from '../middleware';
 import { sendPasswordResetEmail } from '../mailer';
 
 export const authRouter = Router();
@@ -38,7 +40,7 @@ export const authRouter = Router();
  * 5. Handle 2FA challenge if enabled
  * 6. Issue session token (exactly two dot-separated parts) & set httpOnly secure cookie
  */
-authRouter.post('/login', async (req: Request, res: Response) => {
+authRouter.post('/login', asyncHandler(async (req: Request, res: Response) => {
   const { email, password, totpCode, challengeToken, recoveryCode } = req.body;
   const clientIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
@@ -245,12 +247,246 @@ authRouter.post('/login', async (req: Request, res: Response) => {
       status: user.status
     }
   });
-});
+}));
+
+/**
+ * Addendum 4 Section C: Transactional Organization Registration
+ * POST /api/auth/register-organization
+ * Creates organization, branches, departments, and first admin user atomically.
+ * Enforces shared password policy, checks duplicate emails/orgs, logs audit event,
+ * and issues authenticated session cookie.
+ */
+authRouter.post('/register-organization', asyncHandler(async (req: Request, res: Response) => {
+  const { name, type, logo, adminEmail, adminName, adminPassword, branches } = req.body;
+  const clientIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
+
+  // 1. Validation
+  const cleanOrgName = typeof name === 'string' ? name.trim() : '';
+  if (!cleanOrgName || cleanOrgName.length < 2 || cleanOrgName.length > 100) {
+    res.status(400).json({ error: 'Organization name must be between 2 and 100 characters.' });
+    return;
+  }
+
+  const cleanAdminEmail = typeof adminEmail === 'string' ? adminEmail.trim().toLowerCase() : '';
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!cleanAdminEmail || !emailRegex.test(cleanAdminEmail)) {
+    res.status(400).json({ error: 'A valid administrator email address is required.' });
+    return;
+  }
+
+  const cleanAdminName = typeof adminName === 'string' ? adminName.trim() : '';
+  if (!cleanAdminName || cleanAdminName.length < 2 || cleanAdminName.length > 100) {
+    res.status(400).json({ error: 'Administrator full name must be between 2 and 100 characters.' });
+    return;
+  }
+
+  const rawPassword = typeof adminPassword === 'string' ? adminPassword : '';
+  const policyCheck = validatePasswordPolicy(rawPassword, {
+    email: cleanAdminEmail,
+    fullName: cleanAdminName
+  });
+  if (!policyCheck.valid) {
+    res.status(400).json({ error: policyCheck.error || policyCheck.message || 'Password does not meet security requirements.' });
+    return;
+  }
+
+  // 2. Uniqueness Checks
+  const existingUser = await query<any>(
+    'SELECT `id` FROM `users` WHERE `email` = ? LIMIT 1;',
+    [cleanAdminEmail]
+  );
+  if (existingUser.length > 0) {
+    res.status(409).json({ error: 'An account with this email address already exists.' });
+    return;
+  }
+
+  const existingOrg = await query<any>(
+    'SELECT `id` FROM `organizations` WHERE LOWER(`name`) = ? LIMIT 1;',
+    [cleanOrgName.toLowerCase()]
+  );
+  if (existingOrg.length > 0) {
+    res.status(409).json({ error: 'An organization with this name already exists.' });
+    return;
+  }
+
+  // 3. Prepare IDs & Branches
+  const orgId = `org-${crypto.randomUUID()}`;
+  const userId = `usr-${crypto.randomUUID()}`;
+  const deptItId = `dept-${crypto.randomUUID()}`;
+  const deptOpsId = `dept-${crypto.randomUUID()}`;
+
+  const branchList: Array<{
+    id: string;
+    name: string;
+    code: string;
+    city: string;
+    country: string;
+    location: string;
+    managerName: string;
+  }> = [];
+
+  const rawBranches = Array.isArray(branches) && branches.length > 0 ? branches : [];
+  if (rawBranches.length > 0) {
+    for (let i = 0; i < rawBranches.length; i++) {
+      const b = rawBranches[i] || {};
+      const bName = typeof b.name === 'string' && b.name.trim() ? b.name.trim() : (i === 0 ? `${cleanOrgName} Main Campus` : `Branch ${i + 1}`);
+      const bCode = typeof b.code === 'string' && b.code.trim() ? b.code.trim() : (i === 0 ? `HQ-${cleanOrgName.slice(0, 3).toUpperCase()}` : `BR-${i + 1}`);
+      const bCity = typeof b.city === 'string' && b.city.trim() ? b.city.trim() : 'Headquarters';
+      const bCountry = typeof b.country === 'string' && b.country.trim() ? b.country.trim() : 'Global';
+      const bLoc = typeof b.location === 'string' && b.location.trim() ? b.location.trim() : 'Central Campus';
+      const bMgr = typeof b.managerName === 'string' && b.managerName.trim() ? b.managerName.trim() : cleanAdminName;
+
+      branchList.push({
+        id: `branch-${crypto.randomUUID()}`,
+        name: bName,
+        code: bCode,
+        city: bCity,
+        country: bCountry,
+        location: bLoc,
+        managerName: bMgr
+      });
+    }
+  } else {
+    branchList.push({
+      id: `branch-${crypto.randomUUID()}`,
+      name: `${cleanOrgName} Main Campus`,
+      code: `HQ-${cleanOrgName.slice(0, 3).toUpperCase()}`,
+      city: 'Headquarters',
+      country: 'Global',
+      location: 'Central Campus',
+      managerName: cleanAdminName
+    });
+  }
+
+  const primaryBranch = branchList[0]!;
+  const cleanOrgType = typeof type === 'string' && type.trim() ? type.trim() : 'Enterprise';
+  const cleanLogo = typeof logo === 'string' && logo.trim() ? logo.trim() : '🏢';
+  const brandingColor = '#10b981';
+
+  // 4. Hash Password
+  const pwdHash = await hashPassword(rawPassword);
+
+  // 5. Execute Transaction
+  await withTransaction(async (tx) => {
+    // Insert organization
+    await tx(
+      'INSERT INTO `organizations` (`id`, `name`, `type`, `logo`, `branding_color`, `branches_count`) VALUES (?, ?, ?, ?, ?, ?);',
+      [orgId, cleanOrgName, cleanOrgType, cleanLogo, brandingColor, branchList.length]
+    );
+
+    // Insert departments
+    await tx(
+      'INSERT INTO `departments` (`id`, `org_id`, `name`, `head_count`, `budget_allocated`) VALUES (?, ?, ?, ?, ?);',
+      [deptItId, orgId, 'IT Infrastructure & SecOps', 1, 0]
+    );
+    await tx(
+      'INSERT INTO `departments` (`id`, `org_id`, `name`, `head_count`, `budget_allocated`) VALUES (?, ?, ?, ?, ?);',
+      [deptOpsId, orgId, 'Operations', 0, 0]
+    );
+
+    // Insert branches
+    for (const br of branchList) {
+      await tx(
+        'INSERT INTO `branches` (`id`, `org_id`, `name`, `code`, `city`, `country`, `location`, `manager_name`) VALUES (?, ?, ?, ?, ?, ?, ?, ?);',
+        [br.id, orgId, br.name, br.code, br.city, br.country, br.location, br.managerName]
+      );
+    }
+
+    // Insert initial Admin user
+    await tx(
+      'INSERT INTO `users` (`id`, `org_id`, `email`, `full_name`, `password_hash`, `role`, `department_id`, `department_name`, `branch_id`, `branch_name`, `status`, `two_factor_enabled`, `token_version`, `version`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+      [
+        userId,
+        orgId,
+        cleanAdminEmail,
+        cleanAdminName,
+        pwdHash,
+        'ADMIN',
+        deptItId,
+        'IT Infrastructure & SecOps',
+        primaryBranch.id,
+        primaryBranch.name,
+        'ACTIVE',
+        0,
+        1,
+        1
+      ]
+    );
+
+    // Audit Log
+    await recordAuditEvent(tx, {
+      orgId,
+      action: 'ORGANIZATION_REGISTER',
+      entityType: 'ORGANIZATION',
+      entityId: orgId,
+      entityName: cleanOrgName,
+      actorUserId: userId,
+      userName: cleanAdminName,
+      role: 'ADMIN',
+      ipAddress: clientIp,
+      changes: {
+        organizationName: cleanOrgName,
+        adminEmail: cleanAdminEmail,
+        branchesCount: branchList.length,
+        primaryBranchCode: primaryBranch.code
+      }
+    });
+  });
+
+  // 6. Issue Session Cookie
+  const sessionToken = createSessionToken({
+    userId,
+    orgId,
+    email: cleanAdminEmail,
+    role: 'ADMIN',
+    tokenVersion: 1
+  });
+
+  res.cookie('session_token', sessionToken, {
+    httpOnly: true,
+    secure: config.COOKIE_SECURE,
+    sameSite: 'lax',
+    maxAge: SESSION_TTL_SECONDS * 1000,
+    path: '/'
+  });
+
+  const createdUser = {
+    id: userId,
+    orgId,
+    email: cleanAdminEmail,
+    fullName: cleanAdminName,
+    role: 'ADMIN',
+    departmentId: deptItId,
+    departmentName: 'IT Infrastructure & SecOps',
+    branchId: primaryBranch.id,
+    branchName: primaryBranch.name,
+    twoFactorEnabled: false,
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+    status: 'ACTIVE'
+  };
+
+  const createdOrg = {
+    id: orgId,
+    name: cleanOrgName,
+    type: cleanOrgType,
+    logo: cleanLogo,
+    brandingColor,
+    branchesCount: branchList.length
+  };
+
+  res.status(201).json({
+    success: true,
+    message: 'Organization registered successfully.',
+    user: createdUser,
+    organization: createdOrg,
+    branches: branchList
+  });
+}));
 
 /**
  * 4.2 & 4.3: Logout - Clears session cookie AND bumps token_version
  */
-authRouter.post('/logout', async (req: Request, res: Response) => {
+authRouter.post('/logout', asyncHandler(async (req: Request, res: Response) => {
   const cookieToken = (req as any).cookies?.session_token;
   if (cookieToken) {
     try {
@@ -275,13 +511,13 @@ authRouter.post('/logout', async (req: Request, res: Response) => {
   });
 
   res.json({ success: true, message: 'Logged out successfully.' });
-});
+}));
 
 /**
  * 4.1 & 4.2: Get current user profile from authenticated session
  * Super admin special case removed. Authenticates solely via loaded DB user.
  */
-authRouter.get('/me', authenticate, async (req: Request, res: Response) => {
+authRouter.get('/me', authenticate, asyncHandler(async (req: Request, res: Response) => {
   const users = await query<any>(
     'SELECT `id`, `org_id`, `email`, `full_name`, `role`, `department_id`, `department_name`, `branch_id`, `branch_name`, `two_factor_enabled`, `avatar`, `status`, `is_super_admin` FROM `users` WHERE `id` = ? LIMIT 1;',
     [req.auth!.userId]
@@ -310,13 +546,13 @@ authRouter.get('/me', authenticate, async (req: Request, res: Response) => {
       isSuperAdmin: Boolean(u.is_super_admin)
     }
   });
-});
+}));
 
 /**
  * 4.8: Setup 2FA TOTP:
  * Generates 160-bit secret, encrypts with AES-256-GCM, stores SERVER-SIDE.
  */
-authRouter.post('/2fa/setup', authenticate, async (req: Request, res: Response) => {
+authRouter.post('/2fa/setup', authenticate, asyncHandler(async (req: Request, res: Response) => {
   const secret = generateBase32Secret(20); // 20 bytes = 160 bits (32 base32 chars)
   const encryptedSecret = encryptTotpSecret(secret);
 
@@ -334,14 +570,14 @@ authRouter.post('/2fa/setup', authenticate, async (req: Request, res: Response) 
     otpAuthUri,
     instructions: 'Scan this secret in your authenticator app (Google Authenticator, Authy, 1Password) and verify with a 6-digit code.'
   });
-});
+}));
 
 /**
  * 4.8: Verify & Activate 2FA TOTP
  * Verifies against stored server-side secret (never accepts client-supplied secret!).
  * Bumps token_version, generates 8 one-time hashed recovery codes.
  */
-authRouter.post('/2fa/verify', authenticate, async (req: Request, res: Response) => {
+authRouter.post('/2fa/verify', authenticate, asyncHandler(async (req: Request, res: Response) => {
   const { code } = req.body;
 
   if (!code) {
@@ -395,14 +631,14 @@ authRouter.post('/2fa/verify', authenticate, async (req: Request, res: Response)
     recoveryCodes: plainCodes,
     message: 'Two-factor authentication verified and enabled. Please store your backup recovery codes safely.'
   });
-});
+}));
 
 /**
  * 4.8: Disable 2FA TOTP:
  * Requires password AND valid TOTP or recovery code.
  * Bumps token_version, clears secrets and recovery codes.
  */
-authRouter.post('/2fa/disable', authenticate, async (req: Request, res: Response) => {
+authRouter.post('/2fa/disable', authenticate, asyncHandler(async (req: Request, res: Response) => {
   const { password, code, recoveryCode } = req.body;
   const userId = req.auth!.userId;
 
@@ -461,13 +697,13 @@ authRouter.post('/2fa/disable', authenticate, async (req: Request, res: Response
   invalidateUserCache(userId);
 
   res.json({ success: true, message: 'Two-factor authentication disabled.' });
-});
+}));
 
 /**
  * 4.9: GET /api/auth/invite/:token
  * Validates invitation token by SHA-256 hash. Returns preview info.
  */
-authRouter.get('/invite/:token', async (req: Request, res: Response) => {
+authRouter.get('/invite/:token', asyncHandler(async (req: Request, res: Response) => {
   const token = String(req.params.token || '').trim();
   if (!token) {
     res.status(400).json({ valid: false, error: 'Invitation token is required.' });
@@ -529,14 +765,14 @@ authRouter.get('/invite/:token', async (req: Request, res: Response) => {
       brandingColor: organization.branding_color || organization.brandingColor || '#0ea5e9'
     }
   });
-});
+}));
 
 /**
  * 4.8 & 4.9 & 4.11: Activate Invited Account
  * Single-use token hash lookup. Does NOT accept twoFactorEnabled from client!
  * Validates password policy. Issues session cookie.
  */
-authRouter.post('/activate', async (req: Request, res: Response) => {
+authRouter.post('/activate', asyncHandler(async (req: Request, res: Response) => {
   const inviteToken = req.body.inviteToken || req.body.invite_token;
   const newPassword = req.body.newPassword || req.body.password;
 
@@ -625,7 +861,7 @@ authRouter.post('/activate', async (req: Request, res: Response) => {
       brandingColor: organization.branding_color || organization.brandingColor || '#0ea5e9'
     }
   });
-});
+}));
 
 /**
  * 4.10: Forgot Password Flow
@@ -633,7 +869,7 @@ authRouter.post('/activate', async (req: Request, res: Response) => {
  * Generates token hash, sets 30-min expiry, dispatches via mailer.
  * Returns identical generic response for existing and non-existing accounts.
  */
-authRouter.post('/forgot-password', async (req: Request, res: Response) => {
+authRouter.post('/forgot-password', asyncHandler(async (req: Request, res: Response) => {
   const { email } = req.body;
   if (!email) {
     res.status(400).json({ error: 'Email is required.' });
@@ -656,8 +892,13 @@ authRouter.post('/forgot-password', async (req: Request, res: Response) => {
       [tokenHash, expiresAt, users[0]!.id]
     );
 
-    // Deliver via mailer
-    await sendPasswordResetEmail(cleanEmail, rawToken);
+    // Deliver via mailer. The mailer never throws, so a delivery failure cannot
+    // turn into a 500 that would reveal the account exists. Outside serverless,
+    // delivery is not awaited so SMTP latency does not reveal it either.
+    const delivery = sendPasswordResetEmail(cleanEmail, rawToken);
+    if (config.isVercel || config.isTest) {
+      await delivery;
+    }
   } else {
     // Timing equalization for non-existent users
     await verifyPassword('dummy_timing_probe', DUMMY_BCRYPT_HASH);
@@ -668,13 +909,13 @@ authRouter.post('/forgot-password', async (req: Request, res: Response) => {
     success: true,
     message: 'If the email matches an active account, password reset instructions have been recorded.'
   });
-});
+}));
 
 /**
  * 4.10 & 4.11: Reset Password with Token
  * Token hash lookup, single-use consumption, enforces password policy, bumps token_version.
  */
-authRouter.post('/reset-password', async (req: Request, res: Response) => {
+authRouter.post('/reset-password', asyncHandler(async (req: Request, res: Response) => {
   const { resetToken, newPassword } = req.body;
 
   if (!resetToken || !newPassword) {
@@ -721,13 +962,13 @@ authRouter.post('/reset-password', async (req: Request, res: Response) => {
   invalidateUserCache(user.id);
 
   res.json({ success: true, message: 'Password has been successfully updated. You may now sign in.' });
-});
+}));
 
 /**
  * 4.11: Self-service Password Change
  * Requires current password verification, enforces password policy, bumps token_version.
  */
-authRouter.post('/change-password', authenticate, async (req: Request, res: Response) => {
+authRouter.post('/change-password', authenticate, asyncHandler(async (req: Request, res: Response) => {
   const { currentPassword, newPassword } = req.body;
   const userId = req.auth!.userId;
 
@@ -765,7 +1006,7 @@ authRouter.post('/change-password', authenticate, async (req: Request, res: Resp
   invalidateUserCache(userId);
 
   res.json({ success: true, message: 'Password has been successfully updated.' });
-});
+}));
 
 /**
  * 4.12: Self-service Profile Update
@@ -773,7 +1014,7 @@ authRouter.post('/change-password', authenticate, async (req: Request, res: Resp
  * Caps avatar size, allows only https: or data:image/* URLs.
  * Validates department belongs to the user's organization.
  */
-authRouter.put('/profile', authenticate, async (req: Request, res: Response) => {
+authRouter.put('/profile', authenticate, asyncHandler(async (req: Request, res: Response) => {
   const { fullName, avatar, departmentId } = req.body;
   const userId = req.auth!.userId;
   const orgId = req.auth!.orgId;
@@ -835,4 +1076,4 @@ authRouter.put('/profile', authenticate, async (req: Request, res: Response) => 
     success: true,
     message: 'Profile updated successfully.'
   });
-});
+}));

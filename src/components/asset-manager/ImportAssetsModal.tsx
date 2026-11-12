@@ -1,6 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { Asset, Branch, AssetCategory, Organization, AssetStatus } from '../../types';
 import ExcelJS from 'exceljs';
+import Papa from 'papaparse';
+import { calculateStraightLineDepreciation } from '../../../shared/finance';
 import { 
   Upload, 
   X, 
@@ -14,8 +16,39 @@ import {
   AlertCircle,
   HelpCircle,
   Layers,
-  Database
+  Database,
+  Loader2
 } from 'lucide-react';
+
+/**
+ * Addendum 4 Section D2: Robust cell extraction
+ * Decodes formulas, richText, hyperlinks, dates, numbers, booleans.
+ * Never outputs "[object Object]".
+ */
+function extractCellValue(raw: any): string {
+  if (raw === null || raw === undefined) return '';
+  if (typeof raw === 'string') return raw.trim();
+  if (typeof raw === 'number' || typeof raw === 'boolean') return String(raw);
+  if (raw instanceof Date) {
+    return raw.toISOString().split('T')[0]!;
+  }
+  if (typeof raw === 'object') {
+    if ('result' in raw && raw.result !== undefined && raw.result !== null) {
+      return extractCellValue(raw.result);
+    }
+    if (Array.isArray(raw.richText)) {
+      return raw.richText.map((item: any) => item?.text || '').join('').trim();
+    }
+    if ('text' in raw && typeof raw.text === 'string') {
+      return raw.text.trim();
+    }
+    if ('hyperlink' in raw && typeof raw.hyperlink === 'string') {
+      return raw.hyperlink.trim();
+    }
+  }
+  return String(raw).trim();
+}
+
 
 interface ImportAssetsModalProps {
   organization: Organization;
@@ -107,6 +140,9 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
 
   const [duplicateStrategy, setDuplicateStrategy] = useState<DuplicateStrategy>('SKIP');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [uploadError, setUploadError] = useState<string>('');
+  const [isCommitting, setIsCommitting] = useState<boolean>(false);
+  const [serverReport, setServerReport] = useState<{ imported: number; skipped: number; errors: string[]; warnings: string[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-detect matching headers using fuzzy keyword matching
@@ -137,58 +173,112 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
     };
   };
 
-  // Process uploaded Excel / CSV File
+  /**
+   * Addendum 4 Section D1 & D2:
+   * Unified loader pipeline (.xlsx via exceljs, .csv via papaparse).
+   * Enforces 2 MB, 500 rows, 30 columns, 500 chars/cell limits.
+   */
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setFileName(file.name);
+    setUploadError('');
+    setServerReport(null);
     setIsProcessing(true);
 
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(arrayBuffer);
-      const sheets = workbook.worksheets.map(w => w.name);
-      setSheetNames(sheets);
+      if (file.size > 2 * 1024 * 1024) {
+        throw new Error('File exceeds the 2 MB maximum size limit.');
+      }
 
-      const firstSheetName = sheets[0] || '';
-      setSelectedSheet(firstSheetName);
+      const lowerName = file.name.toLowerCase();
+      const isCsv = lowerName.endsWith('.csv') || file.type === 'text/csv';
 
-      const worksheet = workbook.getWorksheet(firstSheetName) || workbook.worksheets[0];
-      if (worksheet) {
-        const headers: string[] = [];
-        const headerRow = worksheet.getRow(1);
-        headerRow.eachCell((cell, colNumber) => {
-          headers[colNumber] = String(cell.value || '').trim();
+      let headers: string[] = [];
+      let rows: Record<string, any>[] = [];
+
+      if (isCsv) {
+        const text = await file.text();
+        const parsed = Papa.parse<Record<string, any>>(text, {
+          header: true,
+          skipEmptyLines: 'greedy'
         });
 
-        const rows: Record<string, any>[] = [];
+        if (parsed.errors && parsed.errors.length > 0 && parsed.data.length === 0) {
+          throw new Error('CSV parsing error: ' + parsed.errors[0]?.message);
+        }
+
+        headers = (parsed.meta.fields || []).map(h => extractCellValue(h));
+        rows = parsed.data.map((r, rowIdx) => {
+          const rowObj: Record<string, any> = {};
+          headers.forEach(h => {
+            const val = extractCellValue(r[h]);
+            if (val.length > 500) {
+              throw new Error(`Row ${rowIdx + 1}, column "${h}" exceeds the 500 characters per cell limit.`);
+            }
+            rowObj[h] = val;
+          });
+          return rowObj;
+        });
+      } else {
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(arrayBuffer);
+        const sheets = workbook.worksheets.map(w => w.name);
+        setSheetNames(sheets);
+
+        const firstSheetName = sheets[0] || '';
+        setSelectedSheet(firstSheetName);
+
+        const worksheet = workbook.getWorksheet(firstSheetName) || workbook.worksheets[0];
+        if (!worksheet) {
+          throw new Error('No worksheets found in uploaded Excel file.');
+        }
+
+        const rawH: string[] = [];
+        const headerRow = worksheet.getRow(1);
+        headerRow.eachCell((cell, colNumber) => {
+          rawH[colNumber] = extractCellValue(cell.value);
+        });
+
+        headers = rawH.filter(Boolean);
+
         worksheet.eachRow((row, rowNumber) => {
           if (rowNumber === 1) return;
           const rowObj: Record<string, any> = {};
-          headers.forEach((h, colNumber) => {
-            if (h) {
-              const val = row.getCell(colNumber).value;
-              rowObj[h] = val !== null && val !== undefined ? (typeof val === 'object' && 'text' in val ? (val as any).text : String(val)) : '';
+          headers.forEach((h, idx) => {
+            const cellVal = extractCellValue(row.getCell(idx + 1).value);
+            if (cellVal.length > 500) {
+              throw new Error(`Row ${rowNumber}, column "${h}" exceeds the 500 characters per cell limit.`);
             }
+            rowObj[h] = cellVal;
           });
-          if (Object.keys(rowObj).length > 0) {
+          if (Object.values(rowObj).some(v => v !== '')) {
             rows.push(rowObj);
           }
         });
-
-        if (rows.length > 0) {
-          const validHeaders = headers.filter(Boolean);
-          setRawHeaders(validHeaders);
-          setRawRows(rows);
-          setMapping(autoDetectMapping(validHeaders));
-          setStep('MAP');
-        }
       }
-    } catch (err) {
+
+      if (headers.length > 30) {
+        throw new Error(`File contains ${headers.length} columns, exceeding the maximum allowed limit of 30 columns.`);
+      }
+
+      if (rows.length > 500) {
+        throw new Error(`File contains ${rows.length} rows, exceeding the maximum allowed limit of 500 rows.`);
+      }
+
+      if (rows.length === 0) {
+        throw new Error('Spreadsheet contains zero data rows.');
+      }
+
+      setRawHeaders(headers);
+      setRawRows(rows);
+      setMapping(autoDetectMapping(headers));
+      setStep('MAP');
+    } catch (err: any) {
       console.error('Failed to parse spreadsheet file:', err);
-      alert('Could not parse spreadsheet file. Please verify it is a valid .xlsx or .csv.');
+      setUploadError(err.message || 'Could not parse spreadsheet file. Please verify it is a valid .xlsx or .csv.');
     } finally {
       setIsProcessing(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -304,14 +394,27 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
     const name = String(row[mapping.name] || '').trim();
     if (!name) errors.push('Device Name is required');
 
-    let category = String(row[mapping.category] || '').trim();
-    if (!category) {
-      category = categories[0]?.name || 'Hardware';
+    const rawCategory = String(row[mapping.category] || '').trim();
+    const matchedCategory = categories.find(c => c.name.toLowerCase() === rawCategory.toLowerCase() || c.id === rawCategory);
+    if (!rawCategory) {
+      errors.push('Category is required');
+    } else if (!matchedCategory) {
+      errors.push(`Unknown category "${rawCategory}". Must match an existing category.`);
     }
+    const category = matchedCategory ? matchedCategory.name : rawCategory;
+
+    const rawBranch = String(row[mapping.branchName] || '').trim();
+    const matchedBranch = branches.find(b => b.name.toLowerCase() === rawBranch.toLowerCase() || b.id === rawBranch);
+    if (!rawBranch) {
+      errors.push('Branch / Location is required');
+    } else if (!matchedBranch) {
+      errors.push(`Unknown branch "${rawBranch}". Must match an existing branch in your organization.`);
+    }
+    const branchName = matchedBranch ? matchedBranch.name : rawBranch;
 
     let assetCode = String(row[mapping.assetCode] || '').trim();
     if (!assetCode) {
-      const catPrefix = category.slice(0, 3).toUpperCase();
+      const catPrefix = (category || 'AST').slice(0, 3).toUpperCase();
       assetCode = `OMNI-${catPrefix}-${String(100 + idx).padStart(3, '0')}`;
     }
 
@@ -344,7 +447,7 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
     const rawCost = String(row[mapping.purchaseCost] || '').replace(/[^0-9.-]+/g, '');
     if (rawCost) {
       const num = parseFloat(rawCost);
-      if (!isNaN(num)) purchaseCost = num;
+      if (!isNaN(num)) purchaseCost = Math.max(0, num);
     }
 
     let purchaseDate = String(row[mapping.purchaseDate] || '').trim();
@@ -352,7 +455,6 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
       purchaseDate = new Date().toISOString().split('T')[0]!;
     }
 
-    const branchName = String(row[mapping.branchName] || branches[0]?.name || 'Main HQ').trim();
     const departmentName = String(row[mapping.departmentName] || 'General IT').trim();
     const assignedTo = String(row[mapping.assignedTo] || '').trim();
 
@@ -399,9 +501,15 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
   const duplicateCount = parsedRows.filter(r => r.isDuplicateSerial || r.isDuplicateTag || r.isDuplicateImei || r.isDuplicateMac).length;
   const invalidCount = parsedRows.filter(r => !r.isValid).length;
 
-  // Final batch commit
-  const handleCommitImport = () => {
-    const finalAssetsToImport: Asset[] = [];
+  /**
+   * Addendum 4 Section D3: Authoritative Server-side Bulk Import
+   * Dispatches rows to POST /api/assets/bulk, renders per-row failure report.
+   */
+  const handleCommitImport = async () => {
+    setIsCommitting(true);
+    setServerReport(null);
+
+    const payloadAssets: any[] = [];
     let skipped = 0;
 
     parsedRows.forEach((row, i) => {
@@ -411,22 +519,25 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
       }
 
       const hasDuplicateConflict = row.isDuplicateSerial || row.isDuplicateTag || row.isDuplicateImei || row.isDuplicateMac;
-      if (hasDuplicateConflict) {
-        if (duplicateStrategy === 'SKIP') {
-          skipped++;
-          return;
-        }
+      if (hasDuplicateConflict && duplicateStrategy === 'SKIP') {
+        skipped++;
+        return;
       }
 
       let finalCode = row.mapped.assetCode;
       if (hasDuplicateConflict && duplicateStrategy === 'RENAME_TAG') {
-        finalCode = `${finalCode}-${Date.now().toString().slice(-4)}`;
+        finalCode = `${finalCode}-DUP${i + 1}`;
       }
 
-      const matchedCat = categories.find(c => c.name.toLowerCase() === row.mapped.category.toLowerCase()) || categories[0] || { id: 'cat-laptops', name: 'Laptops' };
-      const matchedBranch = branches.find(b => b.name.toLowerCase() === row.mapped.branchName.toLowerCase()) || branches[0] || { id: 'b1', name: 'Main HQ' };
+      const matchedCat = categories.find(c => c.name.toLowerCase() === row.mapped.category.toLowerCase() || c.id === row.mapped.category);
+      const matchedBranch = branches.find(b => b.name.toLowerCase() === row.mapped.branchName.toLowerCase() || b.id === row.mapped.branchName);
 
-      // Category-aware fallback serial number
+      if (!matchedCat || !matchedBranch) {
+        skipped++;
+        return;
+      }
+
+      // Serial number handling
       let fallbackSerial = row.mapped.serialNumber;
       if (!fallbackSerial) {
         if (row.mapped.imeiNumber) {
@@ -438,14 +549,19 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
         }
       }
 
-      const newAsset: Asset = {
-        id: `ast-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 5)}`,
-        orgId: organization.id,
+      // Calculate straight-line depreciation using shared/finance.ts
+      const usefulMonths = Math.max(12, (matchedCat.depreciationYears || 3) * 12);
+      const depResult = calculateStraightLineDepreciation(row.mapped.purchaseCost, row.mapped.purchaseDate, {
+        usefulLifeMonths: usefulMonths
+      });
+
+      payloadAssets.push({
         name: row.mapped.name,
         model: row.mapped.name,
         categoryId: matchedCat.id,
         categoryName: matchedCat.name,
-        category: matchedCat.name,
+        branchId: matchedBranch.id,
+        branchName: matchedBranch.name,
         assetCode: finalCode,
         serialNumber: fallbackSerial,
         imeiNumber: row.mapped.imeiNumber || undefined,
@@ -454,28 +570,72 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
         status: row.mapped.status,
         condition: row.mapped.condition,
         purchaseCost: row.mapped.purchaseCost,
-        purchasePrice: row.mapped.purchaseCost,
-        currentValue: row.mapped.purchaseCost,
+        currentValue: depResult.bookValue,
+        costSource: 'MANUAL',
         purchaseDate: row.mapped.purchaseDate,
         warrantyExpiry: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]!,
-        branchId: matchedBranch.id,
-        branchName: matchedBranch.name,
-        assignedToUserName: row.mapped.assignedTo || undefined,
-        imageUrl: '',
         notes: `Imported via spreadsheet on ${new Date().toLocaleDateString()}`
-      };
-
-      finalAssetsToImport.push(newAsset);
+      });
     });
 
-    if (finalAssetsToImport.length > 0) {
-      onBulkAddAssets(finalAssetsToImport);
+    if (payloadAssets.length === 0) {
+      setServerReport({
+        imported: 0,
+        skipped: parsedRows.length,
+        errors: ['No valid asset rows to import. Please review row validation errors.'],
+        warnings: []
+      });
+      setIsCommitting(false);
+      return;
     }
-    onClose();
+
+    try {
+      const res = await fetch('/api/assets/bulk', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        credentials: 'include',
+        body: JSON.stringify({ assets: payloadAssets })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Server rejected bulk asset intake.');
+      }
+
+      setServerReport({
+        imported: data.imported || 0,
+        skipped: data.skipped || 0,
+        errors: data.errors || [],
+        warnings: data.warnings || []
+      });
+
+      if (data.imported > 0) {
+        // Build mock typed assets for immediate client view update
+        const importedList: Asset[] = payloadAssets.slice(0, data.imported).map((item, idx) => ({
+          id: `ast-${Date.now()}-${idx}`,
+          orgId: organization.id,
+          ...item,
+          imageUrl: ''
+        }));
+        onBulkAddAssets(importedList);
+      }
+    } catch (err: any) {
+      setServerReport({
+        imported: 0,
+        skipped: parsedRows.length,
+        errors: [err.message || 'Bulk import failed. Please check connection and try again.'],
+        warnings: []
+      });
+    } finally {
+      setIsCommitting(false);
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/90 backdrop-blur-md flex flex-col items-center p-3 sm:p-6 animate-in fade-in duration-200">
+    <div data-modal-overlay className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/90 backdrop-blur-md flex flex-col items-center p-3 sm:p-6 animate-in fade-in duration-200">
       <div className="w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-2xl flex flex-col gap-6 my-4 sm:my-8">
         
         {/* Header */}
@@ -560,6 +720,12 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
             >
               {isProcessing ? 'Reading file...' : 'Browse Computer'}
             </button>
+            {uploadError && (
+              <div className="mt-4 p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-400 flex items-center gap-2 max-w-md">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                <span>{uploadError}</span>
+              </div>
+            )}
           </div>
         )}
 
@@ -768,20 +934,67 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
               </table>
             </div>
 
+            {/* Server Ingestion Report Banner */}
+            {serverReport && (
+              <div className={`p-4 rounded-2xl border space-y-2 animate-in fade-in ${
+                serverReport.errors.length > 0
+                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                  : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+              }`}>
+                <div className="flex items-center justify-between font-bold text-xs">
+                  <div className="flex items-center gap-2">
+                    {serverReport.errors.length > 0 ? <AlertTriangle className="w-4 h-4 text-amber-400" /> : <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+                    <span>Batch Intake Complete: {serverReport.imported} assets imported, {serverReport.skipped} skipped</span>
+                  </div>
+                  <button
+                    onClick={onClose}
+                    className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs"
+                  >
+                    Close Window
+                  </button>
+                </div>
+                {serverReport.errors.length > 0 && (
+                  <div className="text-[11px] font-mono space-y-1 max-h-32 overflow-y-auto text-rose-400 pt-1">
+                    {serverReport.errors.map((err, i) => (
+                      <div key={i}>• {err}</div>
+                    ))}
+                  </div>
+                )}
+                {serverReport.warnings.length > 0 && (
+                  <div className="text-[11px] font-mono space-y-1 max-h-24 overflow-y-auto text-amber-400 pt-1">
+                    {serverReport.warnings.map((w, i) => (
+                      <div key={i}>⚠️ {w}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Footer actions */}
             <div className="flex items-center justify-between pt-2">
               <button
                 onClick={() => setStep('MAP')}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+                disabled={isCommitting}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
               >
                 Back to Column Mapping
               </button>
               <button
                 onClick={handleCommitImport}
-                className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
+                disabled={isCommitting || (validCount === 0 && duplicateStrategy === 'SKIP')}
+                className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
               >
-                <Database className="w-4 h-4" />
-                <span>Import {duplicateStrategy === 'SKIP' ? validCount : validCount + duplicateCount} Assets to TiDB</span>
+                {isCommitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Transacting to TiDB Cloud...</span>
+                  </>
+                ) : (
+                  <>
+                    <Database className="w-4 h-4" />
+                    <span>Import {duplicateStrategy === 'SKIP' ? validCount : validCount + duplicateCount} Assets to TiDB</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

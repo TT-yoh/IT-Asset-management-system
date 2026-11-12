@@ -61,7 +61,7 @@ test('2. USE_IN_MEMORY_DB=true is strictly rejected in production', () => {
         AUDIT_HMAC_KEY: 'c4d8e2f1a3b5c7d9e0f2a4b6c8d0e1f3a5b7c9d1e2f4a6b8c0d2e3f5a7b9c1d3'
       });
     },
-    /USE_IN_MEMORY_DB \/ ALLOW_IN_MEMORY_DB is strictly prohibited in production/
+    /USE_IN_MEMORY_DB \/ ALLOW_IN_MEMORY_DB is (?:strictly prohibited in production|honoured ONLY when NODE_ENV=test)/
   );
 });
 

@@ -3,17 +3,18 @@ import {
   ArrowLeft, Filter, Layers, CheckCircle, AlertTriangle, 
   HelpCircle, ShieldCheck, DollarSign, ListFilter, Trash2
 } from 'lucide-react';
-import { INITIAL_ASSETS, MINEAZY_BRANCHES, CATEGORIES } from '../../../mockData';
-import { ReportExport } from '../../../components/ReportExport';
+import { Asset } from '../../types';
+import { CATEGORIES } from '../../constants/categories';
+import { ReportExport } from '../ReportExport';
 
 interface ReportsInventoryProps {
   onBack: () => void;
-  assets?: typeof INITIAL_ASSETS;
+  assets?: Asset[];
 }
 
 export default function ReportsInventoryPage({
   onBack,
-  assets = INITIAL_ASSETS
+  assets = []
 }: ReportsInventoryProps) {
   // Filters
   const [selectedBranch, setSelectedBranch] = useState<string>('ALL');
@@ -30,6 +31,14 @@ export default function ReportsInventoryPage({
     setSelectedCondition('ALL');
     setSearchQuery('');
   };
+
+  const branchOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    assets.forEach(a => {
+      if (a.branchId && a.branchName) map.set(a.branchId, a.branchName);
+    });
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [assets]);
 
   // Filtered Assets list
   const filteredAssets = useMemo(() => {
@@ -160,7 +169,7 @@ export default function ReportsInventoryPage({
               className="w-full bg-slate-950 text-slate-300 text-xs font-medium border border-slate-800 focus:border-indigo-500 focus:outline-none rounded-xl px-3 py-2.5"
             >
               <option value="ALL">All Branches</option>
-              {MINEAZY_BRANCHES.map(b => (
+              {branchOptions.map(b => (
                 <option key={b.id} value={b.id}>{b.name}</option>
               ))}
             </select>

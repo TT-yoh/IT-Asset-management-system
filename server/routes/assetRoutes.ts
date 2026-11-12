@@ -1,9 +1,18 @@
 import crypto from 'crypto';
 import express, { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../db';
-import { authenticate, requirePermission, idempotent } from '../middleware';
+import { authenticate, requirePermission, idempotent, asyncHandler } from '../middleware';
 import { hasPermission, canApproveWriteOff } from '../permissions';
 import { recordAuditEvent } from '../audit';
+import { calculateStraightLineDepreciation } from '../../shared/finance';
+import { issueNextAssetTag } from '../assetTags';
+import {
+  EXTENDED_ASSET_COLUMN_SQL,
+  EXTENDED_ASSET_PLACEHOLDER_SQL,
+  EXTENDED_ASSET_UPDATE_SQL,
+  extendedColumnValues,
+  resolveExtendedAssetColumns
+} from '../assetFields';
 
 export const assetRouter = Router();
 assetRouter.use(authenticate);
@@ -30,16 +39,18 @@ const EXPLICIT_ASSET_COLUMNS = `
   \`id\`, \`org_id\`, \`branch_id\`, \`branch_name\`, \`category_id\`, \`category_name\`,
   \`asset_code\`, \`name\`, \`model\`, \`serial_number\`, \`mac_address\`, \`phone_number\`,
   \`registered_email\`, \`imei_number\`, \`status\`, \`asset_condition\`, \`purchase_date\`,
-  \`purchase_cost\`, \`warranty_expiry\`, \`current_value\`, \`assigned_to_user_id\`,
+  \`purchase_cost\`, \`warranty_expiry\`, \`current_value\`, \`cost_source\`, \`assigned_to_user_id\`,
   \`assigned_to_user_name\`, \`assigned_to_user_avatar\`, \`assigned_at\`, \`image_url\`,
-  \`notes\`, \`version\`, \`created_at\`, \`updated_at\`
+  \`notes\`, \`version\`, \`created_at\`, \`updated_at\`,
+  \`manufacturer\`, \`supplier\`, \`invoice_number\`, \`location_detail\`, \`department_id\`,
+  \`department_name\`, \`ownership_type\`, \`lease_end_date\`, \`specs\`
 `;
 
 /**
  * GET /api/assets
  * Strictly scoped by session org_id and branch boundary with explicit column projection
  */
-assetRouter.get('/', requirePermission('assets:read'), async (req: Request, res: Response) => {
+assetRouter.get('/', requirePermission('assets:read'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, role, branchId } = req.auth!;
 
   let sql = `SELECT ${EXPLICIT_ASSET_COLUMNS} FROM \`assets\` WHERE \`org_id\` = ?`;
@@ -59,13 +70,40 @@ assetRouter.get('/', requirePermission('assets:read'), async (req: Request, res:
 
   const rows = await query(sql, params);
   res.json({ assets: rows });
-});
+}));
+
+/**
+ * GET /api/assets/next-tag
+ * Preview of the next sequential asset tag (ORG-CAT-00001) for a category.
+ * Nothing is reserved: the number may be taken by someone else before saving.
+ */
+assetRouter.get('/next-tag', requirePermission('assets:create'), asyncHandler(async (req: Request, res: Response) => {
+  const { orgId } = req.auth!;
+  const categoryId = typeof req.query.categoryId === 'string' ? req.query.categoryId : undefined;
+  const categoryName = typeof req.query.categoryName === 'string' ? req.query.categoryName : undefined;
+  const issued = await issueNextAssetTag(orgId, categoryId, categoryName, { reserve: false });
+  res.json(issued);
+}));
+
+/**
+ * POST /api/assets/next-tag
+ * Reserves the next sequential asset tag for a category. Concurrent callers
+ * always receive different tags; a reserved number is never issued again.
+ */
+assetRouter.post('/next-tag', requirePermission('assets:create'), asyncHandler(async (req: Request, res: Response) => {
+  const { orgId } = req.auth!;
+  const body = req.body || {};
+  const categoryId = typeof body.categoryId === 'string' ? body.categoryId : undefined;
+  const categoryName = typeof body.categoryName === 'string' ? body.categoryName : undefined;
+  const issued = await issueNextAssetTag(orgId, categoryId, categoryName, { reserve: true });
+  res.status(201).json(issued);
+}));
 
 /**
  * GET /api/assets/check-redundancy
  * Scoped pre-flight redundancy check for Asset Tag, Serial, MAC, and IMEI without leaking cross-tenant data
  */
-assetRouter.get('/check-redundancy', requirePermission('assets:read'), async (req: Request, res: Response) => {
+assetRouter.get('/check-redundancy', requirePermission('assets:read'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, role, branchId } = req.auth!;
 
   const assetCode = String(req.query.assetCode || '').trim();
@@ -149,14 +187,14 @@ assetRouter.get('/check-redundancy', requirePermission('assets:read'), async (re
     conflictValue: conflictVal,
     message: `${conflictField} "${conflictVal}" is already registered.`
   });
-});
+}));
 
 /**
  * POST /api/assets
  * Creates asset with org_id derived strictly from session
  * Records CREATE_ASSET in the same DB transaction!
  */
-assetRouter.post('/', requirePermission('assets:create'), idempotent(), async (req: Request, res: Response) => {
+assetRouter.post('/', requirePermission('assets:create'), idempotent(), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, role, userId: actorId, fullName: actorName, branchId: userBranchId } = req.auth!;
   const data = req.body;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -249,14 +287,21 @@ assetRouter.post('/', requirePermission('assets:create'), idempotent(), async (r
     return;
   }
 
+  const createCategoryId = data.categoryId || data.category_id || 'cat-gen';
+  const createCategoryName = data.categoryName || data.category_name || 'Hardware';
+  const extended = await resolveExtendedAssetColumns(orgId, data, createCategoryId, createCategoryName);
+
   const insertSql = `
     INSERT INTO \`assets\` (
       \`id\`, \`org_id\`, \`branch_id\`, \`branch_name\`, \`category_id\`, \`category_name\`,
       \`asset_code\`, \`name\`, \`model\`, \`serial_number\`, \`mac_address\`, \`phone_number\`,
       \`registered_email\`, \`imei_number\`, \`status\`, \`asset_condition\`, \`purchase_date\`,
-      \`purchase_cost\`, \`warranty_expiry\`, \`current_value\`, \`image_url\`, \`notes\`, \`version\`
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1);
+      \`purchase_cost\`, \`warranty_expiry\`, \`current_value\`, \`cost_source\`, \`image_url\`, \`notes\`,
+      ${EXTENDED_ASSET_COLUMN_SQL}, \`version\`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${EXTENDED_ASSET_PLACEHOLDER_SQL}, 1);
   `;
+
+  const costSource = (data.costSource || data.cost_source) === 'ESTIMATED' ? 'ESTIMATED' : 'MANUAL';
 
   try {
     await withTransaction(async (tx) => {
@@ -265,8 +310,8 @@ assetRouter.post('/', requirePermission('assets:create'), idempotent(), async (r
         orgId,
         effectiveBranchId,
         effectiveBranchName,
-        data.categoryId || data.category_id || 'cat-gen',
-        data.categoryName || data.category_name || 'Hardware',
+        createCategoryId,
+        createCategoryName,
         assetCode,
         name,
         data.model || '',
@@ -281,8 +326,10 @@ assetRouter.post('/', requirePermission('assets:create'), idempotent(), async (r
         Number(data.purchaseCost ?? data.purchase_cost ?? 0),
         data.warrantyExpiry || data.warranty_expiry || null,
         Number(data.currentValue ?? data.current_value ?? data.purchaseCost ?? data.purchase_cost ?? 0),
+        costSource,
         data.imageUrl || data.image_url || '',
-        data.notes || null
+        data.notes || null,
+        ...extendedColumnValues(extended)
       ]);
 
       await recordAuditEvent(tx, {
@@ -313,14 +360,17 @@ assetRouter.post('/', requirePermission('assets:create'), idempotent(), async (r
   } catch (_err) {
     res.status(500).json({ error: 'Asset creation transaction failed.' });
   }
-});
+}));
 
 /**
  * POST /api/assets/bulk
- * High-throughput batch ingestion of multiple assets in a single database transaction.
- * Capped at 500 rows with intra-batch duplicate detection and transactional audit recording.
+ * Addendum 4 Section D: High-throughput authoritative batch ingestion.
+ * Validates every row against tenant schemas (branch, category, unique tag/serial).
+ * Generates asset tags from sequence if omitted (no random suffixes).
+ * Calculates currentValue via shared/finance.ts if omitted.
+ * Free text in assignedTo cannot create custody (requires real user checkout).
  */
-assetRouter.post('/bulk', express.json({ limit: '5mb' }), requirePermission('assets:create'), idempotent(), async (req: Request, res: Response) => {
+assetRouter.post('/bulk', express.json({ limit: '5mb' }), requirePermission('assets:create'), idempotent(), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, role, userId: actorId, fullName: actorName, branchId: userBranchId } = req.auth!;
   const { assets: rawAssets } = req.body;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -335,10 +385,11 @@ assetRouter.post('/bulk', express.json({ limit: '5mb' }), requirePermission('ass
     return;
   }
 
-  const results: { imported: number; skipped: number; errors: string[] } = {
+  const results: { imported: number; skipped: number; errors: string[]; warnings: string[] } = {
     imported: 0,
     skipped: 0,
-    errors: []
+    errors: [],
+    warnings: []
   };
 
   const seenCodes = new Set<string>();
@@ -346,48 +397,145 @@ assetRouter.post('/bulk', express.json({ limit: '5mb' }), requirePermission('ass
 
   try {
     await withTransaction(async (tx) => {
+      // 1. Preload tenant branches and categories
+      const dbBranches = await tx<any>('SELECT `id`, `name` FROM `branches` WHERE `org_id` = ?;', [orgId]);
+      const branchById = new Map<string, { id: string; name: string }>();
+      const branchByName = new Map<string, { id: string; name: string }>();
+      for (const b of dbBranches) {
+        branchById.set(b.id, b);
+        branchByName.set(b.name.toLowerCase().trim(), b);
+      }
+
+      const dbCats = await tx<any>('SELECT `id`, `name`, `depreciation_years` FROM `asset_categories`;');
+      const catById = new Map<string, { id: string; name: string; depreciation_years: number }>();
+      const catByName = new Map<string, { id: string; name: string; depreciation_years: number }>();
+      for (const c of dbCats) {
+        catById.set(c.id, c);
+        catByName.set(c.name.toLowerCase().trim(), c);
+      }
+
+      // 2. Preload existing asset tags and serial numbers in this organization to check DB duplicates
+      const existingRows = await tx<any>('SELECT LOWER(`asset_code`) as code, LOWER(`serial_number`) as serial FROM `assets` WHERE `org_id` = ?;', [orgId]);
+      const existingTags = new Set<string>();
+      const existingSerials = new Set<string>();
+      for (const r of existingRows) {
+        if (r.code) existingTags.add(r.code);
+        if (r.serial) existingSerials.add(r.serial);
+      }
+
+      // 3. Sequence counter for auto-generating omitted tags
+      const countRows = await tx<any>('SELECT COUNT(*) as cnt FROM `assets` WHERE `org_id` = ?;', [orgId]);
+      let nextSeqCounter = (countRows[0]?.cnt || 0) + 1;
+
       const validRows: any[][] = [];
 
       for (let i = 0; i < rawAssets.length; i++) {
-        const item = rawAssets[i];
-        const assetCode = String(item.assetCode || item.asset_code || `AST-${Date.now()}-${i}`).trim();
+        const item = rawAssets[i] || {};
+        const rowNum = i + 1;
+
+        // Name is required
         const name = String(item.name || item.assetName || item.asset_name || '').trim();
         if (!name) {
           results.skipped++;
-          results.errors.push(`Row #${i + 1}: Name is required`);
+          results.errors.push(`Row #${rowNum}: Device Name is required`);
           continue;
+        }
+
+        // Branch matching (fail closed - never silent fallback)
+        const branchKey = item.branchId || item.branch_id;
+        const branchNameKey = String(item.branchName || item.branch_name || '').toLowerCase().trim();
+        let targetBranch = branchKey ? branchById.get(branchKey) : (branchNameKey ? branchByName.get(branchNameKey) : undefined);
+
+        // Branch manager default to their own branch if not specified
+        if (!targetBranch && role === 'BRANCH_MANAGER' && userBranchId) {
+          targetBranch = branchById.get(userBranchId);
+        }
+
+        if (!targetBranch) {
+          results.skipped++;
+          results.errors.push(`Row #${rowNum}: Unknown branch "${item.branchName || item.branch_name || item.branchId}". Branch must exist in your organization.`);
+          continue;
+        }
+
+        if (role === 'BRANCH_MANAGER' && userBranchId && targetBranch.id !== userBranchId) {
+          results.skipped++;
+          results.errors.push(`Row #${rowNum}: Branch managers can only import assets into their assigned branch.`);
+          continue;
+        }
+
+        // Category matching (fail closed)
+        const catKey = item.categoryId || item.category_id;
+        const catNameKey = String(item.categoryName || item.category_name || item.category || '').toLowerCase().trim();
+        const targetCat = catKey ? catById.get(catKey) : (catNameKey ? catByName.get(catNameKey) : undefined);
+
+        if (!targetCat) {
+          results.skipped++;
+          results.errors.push(`Row #${rowNum}: Unknown category "${item.categoryName || item.category || item.categoryId}". Category does not exist.`);
+          continue;
+        }
+
+        // Asset tag generation or validation
+        let assetCode = String(item.assetCode || item.asset_code || '').trim();
+        if (!assetCode) {
+          assetCode = `OMNI-TAG-${String(nextSeqCounter++).padStart(5, '0')}`;
         }
 
         const cleanCode = assetCode.toLowerCase();
         if (seenCodes.has(cleanCode)) {
           results.skipped++;
-          results.errors.push(`Row #${i + 1}: Duplicate asset code "${assetCode}" in batch`);
+          results.errors.push(`Row #${rowNum}: Duplicate asset tag "${assetCode}" within import file.`);
+          continue;
+        }
+        if (existingTags.has(cleanCode)) {
+          results.skipped++;
+          results.errors.push(`Row #${rowNum}: Asset tag "${assetCode}" already registered in database.`);
           continue;
         }
         seenCodes.add(cleanCode);
 
+        // Serial number validation
         const serialNumber = String(item.serialNumber || item.serial_number || `SN-${assetCode}`).trim();
-        const isAutoSerial = serialNumber.toLowerCase().startsWith('sn-ast') || serialNumber.toLowerCase().startsWith('sn-bulk');
+        const isAutoSerial = serialNumber.toLowerCase().startsWith('sn-omni') || serialNumber.toLowerCase().startsWith('sn-ast');
         if (!isAutoSerial) {
           const cleanSerial = serialNumber.toLowerCase();
           if (seenSerials.has(cleanSerial)) {
             results.skipped++;
-            results.errors.push(`Row #${i + 1}: Duplicate serial number "${serialNumber}" in batch`);
+            results.errors.push(`Row #${rowNum}: Duplicate serial number "${serialNumber}" within import file.`);
+            continue;
+          }
+          if (existingSerials.has(cleanSerial)) {
+            results.skipped++;
+            results.errors.push(`Row #${rowNum}: Serial number "${serialNumber}" already registered in database.`);
             continue;
           }
           seenSerials.add(cleanSerial);
         }
 
-        const assetId = (item.id && typeof item.id === 'string' && /^[a-zA-Z0-9_-]{3,64}$/.test(item.id)) ? item.id : crypto.randomUUID();
-        const effectiveBranchId = role === 'BRANCH_MANAGER' ? userBranchId : (item.branchId || item.branch_id || userBranchId);
+        // Free text in assignedTo cannot create custody (drop with warning)
+        if (item.assignedTo && typeof item.assignedTo === 'string' && item.assignedTo.trim() && !item.assignedToUserId) {
+          results.warnings.push(`Row #${rowNum}: Free-text custodian "${item.assignedTo}" dropped. Custody must be formally assigned via checkout.`);
+        }
+
+        const purchaseCost = Math.max(0, Number(item.purchaseCost ?? item.purchase_cost ?? 0));
+        const purchaseDate = String(item.purchaseDate || item.purchase_date || new Date().toISOString().split('T')[0]!).trim();
+
+        // Calculate currentValue using shared/finance.ts if omitted
+        let currentValue = Number(item.currentValue ?? item.current_value);
+        if (isNaN(currentValue) || currentValue <= 0) {
+          const usefulMonths = Math.max(12, (targetCat.depreciation_years || 3) * 12);
+          currentValue = calculateStraightLineDepreciation(purchaseCost, purchaseDate, { usefulLifeMonths: usefulMonths }).bookValue;
+        }
+
+        const costSource = (item.costSource || item.cost_source) === 'ESTIMATED' ? 'ESTIMATED' : 'MANUAL';
+        const assetId = crypto.randomUUID();
 
         validRows.push([
           assetId,
           orgId,
-          effectiveBranchId,
-          item.branchName || item.branch_name || 'Main Hub',
-          item.categoryId || item.category_id || 'cat-gen',
-          item.categoryName || item.category_name || 'Hardware',
+          targetBranch.id,
+          targetBranch.name,
+          targetCat.id,
+          targetCat.name,
           assetCode,
           name,
           item.model || '',
@@ -398,10 +546,11 @@ assetRouter.post('/bulk', express.json({ limit: '5mb' }), requirePermission('ass
           item.imeiNumber || item.imei_number || null,
           normalizeStatus(item.status),
           normalizeCondition(item.condition || item.assetCondition),
-          item.purchaseDate || item.purchase_date || new Date().toISOString().split('T')[0],
-          Number(item.purchaseCost ?? item.purchase_cost ?? 0),
+          purchaseDate,
+          purchaseCost,
           item.warrantyExpiry || item.warranty_expiry || null,
-          Number(item.currentValue ?? item.current_value ?? item.purchaseCost ?? item.purchase_cost ?? 0),
+          currentValue,
+          costSource,
           item.imageUrl || item.image_url || '',
           item.notes || null
         ]);
@@ -409,17 +558,17 @@ assetRouter.post('/bulk', express.json({ limit: '5mb' }), requirePermission('ass
         results.imported++;
       }
 
-      // Execute in batch chunks of 50 to maximize throughput and minimize network round trips
+      // Execute in batch chunks of 50
       const CHUNK_SIZE = 50;
       for (let c = 0; c < validRows.length; c += CHUNK_SIZE) {
         const chunk = validRows.slice(c, c + CHUNK_SIZE);
-        const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)').join(', ');
+        const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)').join(', ');
         const bulkInsertSql = `
           INSERT INTO \`assets\` (
             \`id\`, \`org_id\`, \`branch_id\`, \`branch_name\`, \`category_id\`, \`category_name\`,
             \`asset_code\`, \`name\`, \`model\`, \`serial_number\`, \`mac_address\`, \`phone_number\`,
             \`registered_email\`, \`imei_number\`, \`status\`, \`asset_condition\`, \`purchase_date\`,
-            \`purchase_cost\`, \`warranty_expiry\`, \`current_value\`, \`image_url\`, \`notes\`, \`version\`
+            \`purchase_cost\`, \`warranty_expiry\`, \`current_value\`, \`cost_source\`, \`image_url\`, \`notes\`, \`version\`
           ) VALUES ${placeholders};
         `;
         const flatParams = chunk.flat();
@@ -447,17 +596,19 @@ assetRouter.post('/bulk', express.json({ limit: '5mb' }), requirePermission('ass
     });
 
     res.status(201).json({ success: true, ...results });
-  } catch (_err) {
-    res.status(500).json({ error: 'Bulk asset insertion failed.' });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Bulk asset import transaction failed: ' + (err.message || 'database error') });
   }
-});
+}));
 
 /**
  * PUT /api/assets/:id
- * Updates asset and records UPDATE_ASSET in the same DB transaction!
+ * Addendum 4 Section E1: Strict persistence contract. Whitelist updatable fields.
+ * Updates asset and records UPDATE_ASSET in the same DB transaction.
  * Enforces mandatory baseVersion (OCC), valuation permissions, and write-off SoD guards.
+ * Prohibits changing branchId/branchName directly (use dedicated transfer-branch endpoint).
  */
-assetRouter.put('/:id', requirePermission('assets:update'), async (req: Request, res: Response) => {
+assetRouter.put('/:id', requirePermission('assets:update'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, role, userId: actorId, fullName: actorName, branchId: userBranchId } = req.auth!;
   const assetId = req.params.id;
   const data = req.body;
@@ -555,22 +706,51 @@ assetRouter.put('/:id', requirePermission('assets:update'), async (req: Request,
 
   const targetValue = isUpdatingValue ? Number(data.currentValue ?? data.current_value) : prev.current_value;
 
+  // Whitelisted updatable fields (strictly excluding id, org_id, branch_id, asset_code, custody)
+  const newName = typeof data.name === 'string' && data.name.trim() ? data.name.trim() : prev.name;
+  const newModel = typeof data.model === 'string' ? data.model.trim() : prev.model;
+  const newSerial = typeof data.serialNumber === 'string' && data.serialNumber.trim() ? data.serialNumber.trim() : prev.serial_number;
+  const newMac = data.macAddress !== undefined ? (data.macAddress || null) : prev.mac_address;
+  const newImei = data.imeiNumber !== undefined ? (data.imeiNumber || null) : prev.imei_number;
+  const newPhone = data.phoneNumber !== undefined ? (data.phoneNumber || null) : prev.phone_number;
+  const newCatId = data.categoryId || data.category_id || prev.category_id;
+  const newCatName = data.categoryName || data.category_name || prev.category_name;
+  const newCost = data.purchaseCost !== undefined ? Number(data.purchaseCost) : prev.purchase_cost;
+  const newWarranty = data.warrantyExpiry !== undefined ? (data.warrantyExpiry || null) : prev.warranty_expiry;
+  const newCostSource = data.costSource === 'ESTIMATED' ? 'ESTIMATED' : (data.costSource === 'MANUAL' ? 'MANUAL' : prev.cost_source);
+  const newNotes = data.notes !== undefined ? (data.notes || null) : prev.notes;
+  const newImage = data.imageUrl !== undefined ? (data.imageUrl || '') : prev.image_url;
+  const extended = await resolveExtendedAssetColumns(orgId, data, newCatId, newCatName, prev);
+
   const updateSql = `
     UPDATE \`assets\` SET
-      \`name\` = ?, \`model\` = ?, \`status\` = ?, \`asset_condition\` = ?, \`current_value\` = ?, \`notes\` = ?,
-      \`version\` = \`version\` + 1
+      \`name\` = ?, \`model\` = ?, \`serial_number\` = ?, \`mac_address\` = ?, \`imei_number\` = ?, \`phone_number\` = ?,
+      \`category_id\` = ?, \`category_name\` = ?, \`status\` = ?, \`asset_condition\` = ?,
+      \`purchase_cost\` = ?, \`warranty_expiry\` = ?, \`current_value\` = ?, \`cost_source\` = ?,
+      \`notes\` = ?, \`image_url\` = ?, ${EXTENDED_ASSET_UPDATE_SQL}, \`version\` = \`version\` + 1
     WHERE \`id\` = ? AND \`org_id\` = ? AND \`version\` = ?;
   `;
 
   try {
     await withTransaction(async (tx) => {
       const updateRes = await tx(updateSql, [
-        data.name || prev.name,
-        data.model ?? prev.model,
+        newName,
+        newModel,
+        newSerial,
+        newMac,
+        newImei,
+        newPhone,
+        newCatId,
+        newCatName,
         targetStatus,
         updatedCondition,
+        newCost,
+        newWarranty,
         targetValue,
-        data.notes ?? prev.notes,
+        newCostSource,
+        newNotes,
+        newImage,
+        ...extendedColumnValues(extended),
         assetId,
         orgId,
         currentVersion
@@ -592,7 +772,7 @@ assetRouter.put('/:id', requirePermission('assets:update'), async (req: Request,
         action: 'UPDATE_ASSET',
         entityType: 'Asset',
         entityId: assetId,
-        entityName: data.name || prev.name,
+        entityName: newName,
         changes: {
           previous: { status: prev.status, condition: prev.asset_condition, value: prev.current_value, version: currentVersion },
           updated: { status: targetStatus, condition: updatedCondition, value: targetValue, version: currentVersion + 1 }
@@ -606,14 +786,106 @@ assetRouter.put('/:id', requirePermission('assets:update'), async (req: Request,
     const statusCode = err.statusCode || 500;
     res.status(statusCode).json({ error: statusCode === 409 ? err.message : 'Asset update transaction failed.' });
   }
-});
+}));
+
+/**
+ * Addendum 4 Section E1: Dedicated Branch Transfer Endpoint
+ * POST /api/assets/:id/transfer-branch
+ * Moves an asset between branches within the tenant boundary.
+ * Audited, verifies target branch exists in the caller's organization.
+ */
+assetRouter.post('/:id/transfer-branch', requirePermission('assets:update'), asyncHandler(async (req: Request, res: Response) => {
+  const { orgId, role, userId: actorId, fullName: actorName, branchId: userBranchId } = req.auth!;
+  const assetId = req.params.id;
+  const { targetBranchId, reason } = req.body;
+  const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
+
+  if (!targetBranchId || typeof targetBranchId !== 'string') {
+    res.status(400).json({ error: 'targetBranchId is required.' });
+    return;
+  }
+
+  // 1. Verify asset exists
+  let verifySql = `SELECT ${EXPLICIT_ASSET_COLUMNS} FROM \`assets\` WHERE \`id\` = ? AND \`org_id\` = ?`;
+  const verifyParams: any[] = [assetId, orgId];
+  if (role === 'BRANCH_MANAGER') {
+    verifySql += ' AND `branch_id` = ?';
+    verifyParams.push(userBranchId);
+  }
+
+  const existing = await query(verifySql, verifyParams);
+  if (existing.length === 0) {
+    res.status(404).json({ error: 'Asset not found or outside authorized branch boundary.' });
+    return;
+  }
+
+  const prev = existing[0]!;
+
+  // 2. Cannot transfer assets that are currently checked out
+  if (prev.assigned_to_user_id) {
+    res.status(400).json({
+      error: `Asset is currently checked out to "${prev.assigned_to_user_name}". It must be returned before transferring branches.`,
+      code: 'ASSET_CHECKED_OUT'
+    });
+    return;
+  }
+
+  // 3. Verify target branch belongs to caller's org
+  const branchRows = await query<any>(
+    'SELECT `id`, `name` FROM `branches` WHERE `id` = ? AND `org_id` = ? LIMIT 1;',
+    [targetBranchId.trim(), orgId]
+  );
+  if (branchRows.length === 0) {
+    res.status(400).json({ error: 'Target branch does not exist in your organization.' });
+    return;
+  }
+
+  const targetBranch = branchRows[0]!;
+  if (targetBranch.id === prev.branch_id) {
+    res.status(400).json({ error: 'Asset is already assigned to this branch.' });
+    return;
+  }
+
+  await withTransaction(async (tx) => {
+    await tx(
+      'UPDATE `assets` SET `branch_id` = ?, `branch_name` = ?, `version` = `version` + 1 WHERE `id` = ? AND `org_id` = ?;',
+      [targetBranch.id, targetBranch.name, assetId, orgId]
+    );
+
+    await recordAuditEvent(tx, {
+      orgId,
+      actorId,
+      userName: actorName,
+      role,
+      action: 'TRANSFER_BRANCH',
+      entityType: 'Asset',
+      entityId: assetId,
+      entityName: prev.name,
+      changes: {
+        fromBranchId: prev.branch_id,
+        fromBranchName: prev.branch_name,
+        toBranchId: targetBranch.id,
+        toBranchName: targetBranch.name,
+        reason: reason || 'Inter-facility inventory rebalancing'
+      },
+      ipAddress
+    });
+  });
+
+  res.json({
+    success: true,
+    message: `Asset successfully transferred from ${prev.branch_name} to ${targetBranch.name}.`,
+    branchId: targetBranch.id,
+    branchName: targetBranch.name
+  });
+}));
 
 /**
  * DELETE /api/assets/:id
  * Only ADMIN can execute hard deletion, and only on assets with ZERO linked records and NO active assignment.
  * Assets with history must be written off (status: DISPOSED) to preserve custody ledger integrity.
  */
-assetRouter.delete('/:id', requirePermission('assets:delete'), idempotent(), async (req: Request, res: Response) => {
+assetRouter.delete('/:id', requirePermission('assets:delete'), idempotent(), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, role, userId: actorId, fullName: actorName } = req.auth!;
   const assetId = req.params.id;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -704,4 +976,4 @@ assetRouter.delete('/:id', requirePermission('assets:delete'), idempotent(), asy
   } catch (_err) {
     res.status(500).json({ error: 'Asset deletion transaction failed.' });
   }
-});
+}));

@@ -1,13 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useMemo } from 'react';
 import { Asset, CheckoutRecord, MaintenanceRecord, BudgetAllocation, AuditLogItem, AssetStatus } from '../types';
 import {
-  INITIAL_ASSETS,
-  INITIAL_CHECKOUTS,
-  INITIAL_MAINTENANCE,
-  INITIAL_BUDGETS,
-  INITIAL_AUDIT_LOGS
-} from '../mockData';
-import {
   STORAGE_KEYS,
   getScopedKey,
   loadInitialData,
@@ -43,6 +36,8 @@ interface AssetContextType {
   searchQuery: string;
   setSearchQuery: (query: string) => void;
   isTiDBLive: boolean;
+  /** True until the first server data load finishes (success or failure). */
+  isInitialDataLoading: boolean;
   lastSyncedAt: string;
   tiDBSyncTime: string;
   showTiDBModal: boolean;
@@ -52,7 +47,7 @@ interface AssetContextType {
   handleUpdateAsset: (updatedAst: Asset) => Promise<void>;
   handleDeleteAsset: (astId: string) => Promise<void>;
   handleBulkAddAssets: (newAssets: Asset[]) => Promise<void>;
-  handleBatchUpdateStatus: (assetIds: string[], newStatus: AssetStatus) => Promise<void>;
+  handleBatchUpdateStatus: (assetIds: string[], newStatus: AssetStatus, reason?: string) => Promise<void>;
   handleBatchTransferBranch: (assetIds: string[], targetBranchId: string, targetBranchName: string) => Promise<void>;
   handleBatchDeleteAssets: (assetIds: string[]) => Promise<void>;
   handleNewCheckout: (chk: CheckoutRecord, updatedAsset?: Asset) => Promise<void>;
@@ -76,16 +71,17 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const scopedBudgetsKey = useMemo(() => getScopedKey(STORAGE_KEYS.BUDGETS, currentOrg?.id, currentUser?.id), [currentOrg?.id, currentUser?.id]);
 
   // Synchronously initialize from tenant/user scoped local cache
-  const [assets, setAssets] = useState<Asset[]>(() => loadFromStorage<Asset[]>(scopedAssetsKey, INITIAL_ASSETS));
-  const [checkouts, setCheckouts] = useState<CheckoutRecord[]>(() => loadFromStorage<CheckoutRecord[]>(scopedChksKey, INITIAL_CHECKOUTS));
-  const [maintenances, setMaintenances] = useState<MaintenanceRecord[]>(() => loadFromStorage<MaintenanceRecord[]>(scopedMaintsKey, INITIAL_MAINTENANCE));
-  const [budgets, setBudgets] = useState<BudgetAllocation[]>(() => loadFromStorage<BudgetAllocation[]>(scopedBudgetsKey, INITIAL_BUDGETS));
+  const [assets, setAssets] = useState<Asset[]>(() => loadFromStorage<Asset[]>(scopedAssetsKey, []));
+  const [checkouts, setCheckouts] = useState<CheckoutRecord[]>(() => loadFromStorage<CheckoutRecord[]>(scopedChksKey, []));
+  const [maintenances, setMaintenances] = useState<MaintenanceRecord[]>(() => loadFromStorage<MaintenanceRecord[]>(scopedMaintsKey, []));
+  const [budgets, setBudgets] = useState<BudgetAllocation[]>(() => loadFromStorage<BudgetAllocation[]>(scopedBudgetsKey, []));
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   const [lastSyncedAt, setLastSyncedAt] = useState<string>('TiDB Primary (HTAP)');
   const [isTiDBLive, setIsTiDBLive] = useState<boolean>(isTiDBConfigured());
   const [showTiDBModal, setShowTiDBModal] = useState<boolean>(false);
+  const [isInitialDataLoading, setIsInitialDataLoading] = useState<boolean>(true);
   const [tiDBSyncTime, setTiDBSyncTime] = useState<string>(getLastTiDBSyncTime());
 
   const refreshAppData = async () => {
@@ -105,6 +101,8 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setLastSyncedAt(data.lastSyncedAt);
     } catch (err) {
       console.warn('Initial data load notice:', err);
+    } finally {
+      setIsInitialDataLoading(false);
     }
   };
 
@@ -435,9 +433,9 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
   };
 
-  const handleBatchUpdateStatus = async (assetIds: string[], newStatus: AssetStatus) => {
+  const handleBatchUpdateStatus = async (assetIds: string[], newStatus: AssetStatus, reason?: string) => {
     const idSet = new Set(assetIds);
-    const updatedAssets = assets.map(a => idSet.has(a.id) ? { ...a, status: newStatus } : a);
+    const updatedAssets = assets.map(a => idSet.has(a.id) ? { ...a, status: newStatus, notes: reason ? `${a.notes ? a.notes + ' | ' : ''}Write-off reason: ${reason}` : a.notes } : a);
     setAssets(updatedAssets);
 
     for (const id of assetIds) {
@@ -446,10 +444,10 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ status: newStatus })
+          body: JSON.stringify({ status: newStatus, notes: reason })
         });
       } catch {
-        queueOfflineMutation('assets', 'UPDATE', { id, status: newStatus });
+        queueOfflineMutation('assets', 'UPDATE', { id, status: newStatus, notes: reason });
       }
     }
     await refreshAppData();
@@ -462,11 +460,11 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     for (const id of assetIds) {
       try {
-        await fetch(`/api/assets/${encodeURIComponent(id)}`, {
-          method: 'PUT',
+        await fetch(`/api/assets/${encodeURIComponent(id)}/transfer-branch`, {
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ branchId: targetBranchId, branchName: targetBranchName })
+          body: JSON.stringify({ targetBranchId, reason: 'Batch facility transfer' })
         });
       } catch {
         queueOfflineMutation('assets', 'UPDATE', { id, branchId: targetBranchId, branchName: targetBranchName });
@@ -650,6 +648,7 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         searchQuery,
         setSearchQuery,
         isTiDBLive,
+        isInitialDataLoading,
         lastSyncedAt,
         tiDBSyncTime,
         showTiDBModal,

@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Asset, Branch, AssetCategory, Organization, User } from '../../types';
+import { Asset, Branch, AssetCategory, Organization, User, Department } from '../../types';
+import { AssetExtendedFields } from './AssetExtendedFields';
+import { isSerialRequired, sanitizeSpecs } from '../../../shared/asset-fields';
 import { 
   X, 
   Sparkles, 
@@ -24,6 +26,33 @@ import {
 import { fetchHardwareSpecs } from '../../lib/ai/specs';
 import { AssetService } from '../../lib/asset-service';
 
+/**
+ * Ask the server for the next sequential asset tag (ORG-CAT-00001).
+ * reserve=false previews the next tag; reserve=true consumes the number.
+ * Resolves null when offline or the server cannot answer, so callers can fall back.
+ */
+async function requestAssetTag(reserve: boolean, categoryId?: string, categoryName?: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  try {
+    const query = new URLSearchParams({ categoryId: categoryId || '', categoryName: categoryName || '' });
+    const res = await fetch(reserve ? '/api/assets/next-tag' : `/api/assets/next-tag?${query.toString()}`, {
+      method: reserve ? 'POST' : 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: reserve ? JSON.stringify({ categoryId, categoryName }) : undefined,
+      signal: controller.signal
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return typeof data?.tag === 'string' && data.tag ? data.tag : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 interface AssetUpsertModalProps {
   isOpen: boolean;
   editingAsset: Asset | null;
@@ -31,6 +60,7 @@ interface AssetUpsertModalProps {
   existingAssets?: Asset[];
   branches: Branch[];
   categories: AssetCategory[];
+  departments?: Department[];
   currentOrg: Organization;
   currentUser?: User;
   onClose: () => void;
@@ -44,6 +74,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
   existingAssets,
   branches,
   categories,
+  departments = [],
   currentOrg,
   currentUser,
   onClose,
@@ -69,14 +100,24 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
     purchaseDate: new Date().toISOString().split('T')[0],
     purchaseCost: 0,
     currentValue: 0,
-    warrantyExpiry: new Date(Date.now() + 365 * 24 * 3600 * 1000 * 3).toISOString().split('T')[0],
+    costSource: 'MANUAL',
+    warrantyExpiry: '',
     notes: '',
     imageUrl: ''
   });
 
+  const [suggestedCost, setSuggestedCost] = useState<number | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuccessMessage, setAiSuccessMessage] = useState('');
   const [formError, setFormError] = useState('');
+
+  const [isSaving, setIsSaving] = useState(false);
+  const [isTagLoading, setIsTagLoading] = useState(false);
+  // The tag most recently filled in automatically. While the field still holds
+  // this value the tag is "ours" to replace (category change) and to reserve on save.
+  const autoTagRef = React.useRef<string | null>(null);
+  const assetCodeRef = React.useRef<string>('');
+  assetCodeRef.current = (formData.assetCode || '').trim();
 
   const formBodyRef = React.useRef<HTMLFormElement>(null);
   const modalContainerRef = React.useRef<HTMLDivElement>(null);
@@ -201,7 +242,18 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
     };
   }, [formData.assetCode, formData.serialNumber, formData.macAddress, formData.imeiNumber, formData.model, formData.name, existingAssets, editingAsset]);
 
-  const generateUniqueTag = () => {
+  const generateUniqueTag = async () => {
+    // Preferred: the server's next sequential tag for this category.
+    setIsTagLoading(true);
+    const serverTag = await requestAssetTag(false, formData.categoryId, formData.categoryName);
+    setIsTagLoading(false);
+    if (serverTag) {
+      autoTagRef.current = serverTag;
+      setFormData(prev => ({ ...prev, assetCode: serverTag }));
+      return;
+    }
+
+    // Offline fallback: a random tag checked against the assets loaded in this browser.
     let newTag = '';
     let isUnique = false;
     let attempts = 0;
@@ -220,6 +272,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
         isUnique = true;
       }
     }
+    autoTagRef.current = null;
     setFormData(prev => ({ ...prev, assetCode: newTag }));
   };
 
@@ -228,6 +281,8 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
       setFormData(editingAsset);
     } else {
       const generatedCode = prefilledTag || `AST-${Math.floor(1000 + Math.random() * 9000)}`;
+      // A scanned/prefilled tag is the user's choice; a placeholder is replaced by the server's next tag.
+      autoTagRef.current = prefilledTag ? null : generatedCode;
       const defaultBranch = (currentUser?.role === 'BRANCH_MANAGER' && currentUser.branchId)
         ? (branches.find(b => b.id === currentUser.branchId) || { id: currentUser.branchId, name: currentUser.branchName || '' })
         : (branches[0] || { id: '', name: '' });
@@ -249,17 +304,51 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
         purchaseDate: new Date().toISOString().split('T')[0],
         purchaseCost: 0,
         currentValue: 0,
-        warrantyExpiry: new Date(Date.now() + 365 * 24 * 3600 * 1000 * 3).toISOString().split('T')[0],
+        costSource: 'MANUAL',
+        warrantyExpiry: '',
         notes: '',
         imageUrl: ''
       });
     }
     setActiveStep(1);
+    setSuggestedCost(null);
     setAiSuccessMessage('');
     setFormError('');
+    setIsSaving(false);
   }, [editingAsset, prefilledTag, isOpen, branches, categories]);
 
+  // New assets: show the server's next sequential tag for the selected category,
+  // as long as the user has not typed a tag of their own.
+  useEffect(() => {
+    if (!isOpen || editingAsset || !autoTagRef.current) return;
+    let cancelled = false;
+    requestAssetTag(false, formData.categoryId, formData.categoryName).then((tag) => {
+      if (cancelled || !tag) return;
+      if (!autoTagRef.current || assetCodeRef.current !== autoTagRef.current) return;
+      autoTagRef.current = tag;
+      setFormData(prev => ({ ...prev, assetCode: tag }));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, editingAsset, formData.categoryId]);
+
   if (!isOpen) return null;
+
+  const handleApplySuggestedCost = () => {
+    if (suggestedCost !== null && suggestedCost > 0) {
+      const autoVal = AssetService.calculateCurrentValue(suggestedCost, formData.purchaseDate || new Date().toISOString().split('T')[0]!);
+      setFormData(prev => ({
+        ...prev,
+        purchaseCost: suggestedCost,
+        currentValue: autoVal,
+        costSource: 'ESTIMATED'
+      }));
+      setSuggestedCost(null);
+      setAiSuccessMessage(`Applied suggested MSRP ($${suggestedCost.toLocaleString()}) with source: ESTIMATED.`);
+    }
+  };
 
   const handleCatalogAutoFill = async () => {
     const query = formData.model || formData.name;
@@ -280,18 +369,20 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
         specs.suggestedCategory.toLowerCase().includes(c.name.toLowerCase())
       );
 
+      if (specs.estimatedCostUSD > 0) {
+        setSuggestedCost(specs.estimatedCostUSD);
+      }
+
       setFormData(prev => ({
         ...prev,
         name: prev.name || `${specs.manufacturer} ${specs.model}`,
         model: specs.model,
         categoryId: matchedCat ? matchedCat.id : prev.categoryId,
         categoryName: matchedCat ? matchedCat.name : prev.categoryName,
-        purchaseCost: specs.estimatedCostUSD || prev.purchaseCost,
-        currentValue: specs.estimatedCostUSD || prev.currentValue,
         notes: `${specs.cpu} | ${specs.ram} | ${specs.storage}${specs.ports ? ` | Ports: ${specs.ports}` : ''}\n${specs.notes}`
       }));
 
-      setAiSuccessMessage(`Catalog specs populated for ${specs.model}!`);
+      setAiSuccessMessage(`Catalog specs populated for ${specs.model}!${specs.estimatedCostUSD > 0 ? ` Suggested MSRP: $${specs.estimatedCostUSD.toLocaleString()} (Click "Apply to Cost" to accept).` : ''}`);
     } catch (err: any) {
       setFormError('Failed to populate specs: ' + err.message);
     } finally {
@@ -311,13 +402,8 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
     try {
       const specs = await fetchHardwareSpecs(query);
       if (specs.estimatedCostUSD > 0) {
-        const autoVal = AssetService.calculateCurrentValue(specs.estimatedCostUSD, formData.purchaseDate || new Date().toISOString().split('T')[0]!);
-        setFormData(prev => ({
-          ...prev,
-          purchaseCost: specs.estimatedCostUSD,
-          currentValue: autoVal
-        }));
-        setAiSuccessMessage(`Estimated retail MSRP ($${specs.estimatedCostUSD.toLocaleString()}) applied for ${specs.model}!`);
+        setSuggestedCost(specs.estimatedCostUSD);
+        setAiSuccessMessage(`Suggested MSRP: $${specs.estimatedCostUSD.toLocaleString()} (Unverified Estimate). Click "Apply to Cost" to accept.`);
       } else {
         setFormError('No standard MSRP found for this model. You can enter an estimated current value or $0.');
       }
@@ -328,8 +414,9 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
 
     if (!formData.name?.trim() || !formData.assetCode?.trim()) {
       setFormError('Asset Name and Asset Code are required.');
@@ -359,13 +446,34 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
     const branch = branches.find(b => b.id === formData.branchId) || branches[0]!;
     const category = categories.find(c => c.id === formData.categoryId) || categories[0]!;
 
+    // New computers, servers and network gear must carry the manufacturer's serial number.
+    if (!editingAsset && isSerialRequired(category.id, category.name) && !formData.serialNumber?.trim()) {
+      setFormError(`A manufacturer serial number is required for ${category.name}. It is printed on the device or its box.`);
+      return;
+    }
+
+    if (formData.ownershipType === 'LEASED' && formData.leaseEndDate && formData.purchaseDate && formData.leaseEndDate < formData.purchaseDate) {
+      setFormError('Lease end date cannot be before the acquisition date.');
+      return;
+    }
+
+    // An untouched automatic tag is only a preview. Reserve the real number now so two
+    // people enrolling at the same time can never end up with the same tag.
+    let finalAssetCode = formData.assetCode.trim();
+    if (!editingAsset && autoTagRef.current && finalAssetCode === autoTagRef.current) {
+      setIsSaving(true);
+      const reservedTag = await requestAssetTag(true, category.id, category.name);
+      setIsSaving(false);
+      if (reservedTag) finalAssetCode = reservedTag;
+    }
+
     const payload: Asset = {
-      id: editingAsset?.id || `ast-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      id: editingAsset?.id || '',
       orgId: currentOrg.id,
       name: formData.name.trim(),
       model: formData.model?.trim() || formData.name.trim(),
-      assetCode: formData.assetCode.trim(),
-      serialNumber: formData.serialNumber?.trim() || (formData.imeiNumber ? `IMEI-${formData.imeiNumber.trim()}` : `SN-${formData.assetCode.trim()}`),
+      assetCode: finalAssetCode,
+      serialNumber: formData.serialNumber?.trim() || (formData.imeiNumber ? `IMEI-${formData.imeiNumber.trim()}` : ''),
       macAddress: formData.macAddress?.trim(),
       imeiNumber: formData.imeiNumber?.trim(),
       phoneNumber: formData.phoneNumber?.trim(),
@@ -378,12 +486,22 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
       purchaseDate: formData.purchaseDate || new Date().toISOString().split('T')[0]!,
       purchaseCost: Number(formData.purchaseCost) || 0,
       currentValue: Number(formData.currentValue ?? formData.purchaseCost) || 0,
+      costSource: formData.costSource || 'MANUAL',
       warrantyExpiry: formData.warrantyExpiry || '',
       assignedToUserId: editingAsset?.assignedToUserId,
       assignedToUserName: editingAsset?.assignedToUserName,
       assignedAt: editingAsset?.assignedAt,
       imageUrl: formData.imageUrl || '',
-      notes: formData.notes || ''
+      notes: formData.notes || '',
+      manufacturer: formData.manufacturer?.trim() || '',
+      supplier: formData.supplier?.trim() || '',
+      invoiceNumber: formData.invoiceNumber?.trim() || '',
+      locationDetail: formData.locationDetail?.trim() || '',
+      departmentId: formData.departmentId || '',
+      departmentName: formData.departmentName || '',
+      ownershipType: formData.ownershipType || 'OWNED',
+      leaseEndDate: formData.ownershipType === 'LEASED' ? (formData.leaseEndDate || '') : '',
+      specs: sanitizeSpecs(category.id, category.name, formData.specs) || {}
     };
 
     onSave(payload);
@@ -393,7 +511,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
   return (
     <div
       ref={modalContainerRef}
-      className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/85 backdrop-blur-sm flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4"
+      data-modal-overlay className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/85 backdrop-blur-sm flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4"
     >
       <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
@@ -541,7 +659,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                         </label>
                         <button
                           type="button"
-                          onClick={generateUniqueTag}
+                          onClick={generateUniqueTag} disabled={isTagLoading}
                           className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-semibold transition cursor-pointer"
                           title="Generate a unique conflict-free asset tag"
                         >
@@ -570,7 +688,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                           </div>
                           <button
                             type="button"
-                            onClick={generateUniqueTag}
+                            onClick={generateUniqueTag} disabled={isTagLoading}
                             className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-[10px] font-semibold shrink-0 cursor-pointer transition"
                           >
                             New Tag
@@ -774,12 +892,27 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                         onChange={(e) => {
                           const cost = Number(e.target.value);
                           const calcVal = AssetService.calculateCurrentValue(cost, formData.purchaseDate || new Date().toISOString().split('T')[0]!);
-                          setFormData({ ...formData, purchaseCost: cost, currentValue: calcVal });
+                          setFormData({ ...formData, purchaseCost: cost, currentValue: calcVal, costSource: 'MANUAL' });
                         }}
                         className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
                       />
+                      {suggestedCost !== null && suggestedCost > 0 && (
+                        <div className="mt-2 p-2 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between text-xs text-amber-300">
+                          <span className="flex items-center gap-1.5 font-medium">
+                            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                            Suggested MSRP: <strong>${suggestedCost.toLocaleString()}</strong> (Unverified Estimate)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleApplySuggestedCost}
+                            className="px-2 py-0.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-[11px] transition cursor-pointer"
+                          >
+                            Apply to Cost
+                          </button>
+                        </div>
+                      )}
                       <p className="text-[10px] text-slate-400 mt-0.5">
-                        Leave at $0 if original invoice is unknown; you can enter an estimated current value below.
+                        Leave at $0 if original invoice is unknown; you can enter an estimated current value below.{formData.costSource === 'ESTIMATED' ? ' (Currently set to AI Estimated MSRP)' : ''}
                       </p>
                     </div>
 
@@ -866,7 +999,9 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
 
                     <button
                       type="submit"
-                      className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold shadow-lg shadow-emerald-600/20 flex items-center gap-1.5 transition-all"
+                      disabled={isSaving}
+                      aria-busy={isSaving}
+                      className="disabled:opacity-60 disabled:cursor-not-allowed px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold shadow-lg shadow-emerald-600/20 flex items-center gap-1.5 transition-all"
                     >
                       <Check className="w-4 h-4" /> Save & Enroll
                     </button>
@@ -943,7 +1078,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                       </label>
                       <button
                         type="button"
-                        onClick={generateUniqueTag}
+                        onClick={generateUniqueTag} disabled={isTagLoading}
                         className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-semibold transition cursor-pointer"
                         title="Generate a unique conflict-free asset tag"
                       >
@@ -972,7 +1107,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                         </div>
                         <button
                           type="button"
-                          onClick={generateUniqueTag}
+                          onClick={generateUniqueTag} disabled={isTagLoading}
                           className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-[10px] font-semibold shrink-0 cursor-pointer transition"
                         >
                           New Tag
@@ -1223,12 +1358,27 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                       onChange={(e) => {
                         const cost = Number(e.target.value);
                         const autoVal = AssetService.calculateCurrentValue(cost, formData.purchaseDate || new Date().toISOString().split('T')[0]!);
-                        setFormData({ ...formData, purchaseCost: cost, currentValue: autoVal });
+                        setFormData({ ...formData, purchaseCost: cost, currentValue: autoVal, costSource: 'MANUAL' });
                       }}
                       className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
                     />
+                    {suggestedCost !== null && suggestedCost > 0 && (
+                      <div className="mt-2 p-2 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between text-xs text-amber-300">
+                        <span className="flex items-center gap-1.5 font-medium">
+                          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                          Suggested MSRP: <strong>${suggestedCost.toLocaleString()}</strong> (Unverified Estimate)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleApplySuggestedCost}
+                          className="px-2 py-0.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-[11px] transition cursor-pointer"
+                        >
+                          Apply to Cost
+                        </button>
+                      </div>
+                    )}
                     <p className="text-[10px] text-slate-400 mt-0.5">
-                      Enter $0 if initial invoice is missing; you can set an estimated present value below.
+                      Enter $0 if initial invoice is missing; you can set an estimated present value below.{formData.costSource === 'ESTIMATED' ? ' (Cost Source: ESTIMATED)' : ''}
                     </p>
                   </div>
 
@@ -1364,6 +1514,13 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                 </div>
               </div>
 
+              {/* 5. Sourcing, ownership & device-specific details */}
+              <AssetExtendedFields
+                formData={formData}
+                departments={departments}
+                onChange={(patch) => setFormData(prev => ({ ...prev, ...patch }))}
+              />
+
               {/* Submit / Cancel Actions */}
               <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
                 <button
@@ -1375,7 +1532,9 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold shadow-lg shadow-emerald-600/20 flex items-center gap-1.5 transition-all"
+                  disabled={isSaving}
+                  aria-busy={isSaving}
+                  className="disabled:opacity-60 disabled:cursor-not-allowed px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold shadow-lg shadow-emerald-600/20 flex items-center gap-1.5 transition-all"
                 >
                   <Check className="w-4 h-4" /> Save to TiDB Ledger
                 </button>

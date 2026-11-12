@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { query, withTransaction } from '../db';
-import { authenticate, requirePermission } from '../middleware';
+import { authenticate, requirePermission, asyncHandler } from '../middleware';
 import { hasPermission } from '../permissions';
 import { recordAuditEvent } from '../audit';
 
@@ -34,7 +34,7 @@ const UpdateDepartmentSchema = z.object({
  * GET /api/departments
  * Scoped strictly by tenant org_id with explicit columns
  */
-departmentRouter.get('/', requirePermission('departments:read'), async (req: Request, res: Response) => {
+departmentRouter.get('/', requirePermission('departments:read'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId } = req.auth!;
 
   const rows = await query(
@@ -43,13 +43,13 @@ departmentRouter.get('/', requirePermission('departments:read'), async (req: Req
   );
 
   res.json({ departments: rows });
-});
+}));
 
 /**
  * POST /api/departments
  * Ignores client-supplied id; generates UUID; plain INSERT; checks budgets:manage if budgetAllocated > 0.
  */
-departmentRouter.post('/', requirePermission('departments:manage'), async (req: Request, res: Response) => {
+departmentRouter.post('/', requirePermission('departments:manage'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
@@ -110,13 +110,13 @@ departmentRouter.post('/', requirePermission('departments:manage'), async (req: 
     }
     res.status(500).json({ error: 'Department creation transaction failed.' });
   }
-});
+}));
 
 /**
  * PUT /api/departments/:id
  * Enforces OCC via baseVersion. Requires budgets:manage if budget_allocated changes.
  */
-departmentRouter.put('/:id', requirePermission('departments:manage'), async (req: Request, res: Response) => {
+departmentRouter.put('/:id', requirePermission('departments:manage'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const deptId = req.params.id;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -202,13 +202,13 @@ departmentRouter.put('/:id', requirePermission('departments:manage'), async (req
     }
     res.status(500).json({ error: 'Department update transaction failed.' });
   }
-});
+}));
 
 /**
  * DELETE /api/departments/:id
  * Refuses inside one transaction when users or budgets reference it.
  */
-departmentRouter.delete('/:id', requirePermission('departments:manage'), async (req: Request, res: Response) => {
+departmentRouter.delete('/:id', requirePermission('departments:manage'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const deptId = req.params.id;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -273,4 +273,4 @@ departmentRouter.delete('/:id', requirePermission('departments:manage'), async (
       res.status(500).json({ error: 'Department deletion transaction failed.' });
     }
   }
-});
+}));

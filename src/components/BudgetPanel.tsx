@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { BudgetAllocation, Organization } from '../types';
-import { PieChart as PieIcon, DollarSign, TrendingUp, Calculator, ArrowRight } from 'lucide-react';
+import { PieChart as PieIcon, DollarSign, TrendingUp, Calculator, ArrowRight, AlertTriangle } from 'lucide-react';
+import { calculateStraightLineDepreciation } from '../../shared/finance';
 
 interface BudgetPanelProps {
   currentOrg: Organization;
@@ -19,18 +20,40 @@ export const BudgetPanel: React.FC<BudgetPanelProps> = ({
   const orgBudgets = budgets.filter(b => b.orgId === currentOrg.id);
   const totalAllocated = orgBudgets.reduce((a, b) => a + (b.allocated || 0), 0);
   const totalSpent = orgBudgets.reduce((a, b) => a + (b.spent || 0), 0);
-  const remaining = Math.max(0, totalAllocated - totalSpent);
+  const remaining = totalAllocated - totalSpent;
+  const isOverspent = remaining < 0;
 
-  // Depreciation calculation formula
-  const annualStraight = (calcCost - calcSalvage) / Math.max(calcYears, 1);
-  const rateDeclining = 2 / Math.max(calcYears, 1); // Double declining rate
+  // Derive dynamic fiscal year
+  const activeFiscalYear = orgBudgets[0]?.fiscalYear || new Date().getFullYear();
+
+  // Depreciation calculation using shared/finance.ts standard straight-line formulas
+  const usefulLifeMonths = Math.max(1, calcYears * 12);
+  const salvageFactor = calcCost > 0 ? Math.min(1, Math.max(0, calcSalvage / calcCost)) : 0.1;
 
   const schedule: { year: number; start: number; dep: number; end: number }[] = [];
   let currBook = calcCost;
   for (let i = 1; i <= calcYears; i++) {
     const start = currBook;
-    let dep = method === 'STRAIGHT_LINE' ? annualStraight : currBook * rateDeclining;
-    if (currBook - dep < calcSalvage) dep = Math.max(currBook - calcSalvage, 0);
+    let dep = 0;
+    if (method === 'STRAIGHT_LINE') {
+      const asOfDate = new Date(2000 + i, 0, 1);
+      const prevDate = new Date(2000 + i - 1, 0, 1);
+      const curRes = calculateStraightLineDepreciation(calcCost, new Date(2000, 0, 1), {
+        usefulLifeMonths,
+        salvageFactor,
+        asOfDate
+      });
+      const prevRes = calculateStraightLineDepreciation(calcCost, new Date(2000, 0, 1), {
+        usefulLifeMonths,
+        salvageFactor,
+        asOfDate: prevDate
+      });
+      dep = Math.max(0, curRes.accumulatedDepreciation - prevRes.accumulatedDepreciation);
+    } else {
+      const rateDeclining = 2 / Math.max(calcYears, 1);
+      dep = currBook * rateDeclining;
+      if (currBook - dep < calcSalvage) dep = Math.max(currBook - calcSalvage, 0);
+    }
     const end = Math.max(currBook - dep, calcSalvage);
     schedule.push({ year: i, start: Math.round(start), dep: Math.round(dep), end: Math.round(end) });
     currBook = end;
@@ -42,7 +65,7 @@ export const BudgetPanel: React.FC<BudgetPanelProps> = ({
         <div>
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <PieIcon className="w-5 h-5 text-indigo-400" />
-            <span>Fiscal Year IT Budget & Forecasting</span>
+            <span>Fiscal Year IT Budget &amp; Forecasting</span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">Monitor departmental procurement allocations and simulate multi-year hardware depreciation schedules.</p>
         </div>
@@ -50,7 +73,12 @@ export const BudgetPanel: React.FC<BudgetPanelProps> = ({
         <div className="flex items-center space-x-4 bg-slate-950 px-4 py-2 rounded-xl border border-slate-800 text-xs">
           <div><span className="text-slate-500 block">Total Budget</span><span className="text-white font-bold">${totalAllocated.toLocaleString()}</span></div>
           <div className="h-6 w-px bg-slate-800" />
-          <div><span className="text-slate-500 block">Remaining</span><span className="text-emerald-400 font-bold">${remaining.toLocaleString()}</span></div>
+          <div>
+            <span className="text-slate-500 block">Remaining</span>
+            <span className={`font-bold ${isOverspent ? 'text-rose-400' : 'text-emerald-400'}`}>
+              {isOverspent ? `-$${Math.abs(remaining).toLocaleString()}` : `$${remaining.toLocaleString()}`}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -59,7 +87,7 @@ export const BudgetPanel: React.FC<BudgetPanelProps> = ({
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
-              <span className="text-xs font-bold text-white uppercase tracking-wider">Department Budget Ledger (FY 2026)</span>
+              <span className="text-xs font-bold text-white uppercase tracking-wider">Department Budget Ledger (FY {activeFiscalYear})</span>
               <span className="text-[10px] text-emerald-400/90 font-mono">Fiscal Allocations</span>
             </div>
 
@@ -93,10 +121,24 @@ export const BudgetPanel: React.FC<BudgetPanelProps> = ({
             </div>
           </div>
 
-          <div className="mt-6 p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-[11px] flex items-center justify-between">
+          <div className={`mt-6 p-3 rounded-xl border text-[11px] flex items-center justify-between ${
+            isOverspent
+              ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+              : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-300'
+          }`}>
             <div className="flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-indigo-400" />
-              <span>Q3 Hardware Refresh Procurement forecasted within budget threshold.</span>
+              {isOverspent ? (
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+              ) : (
+                <TrendingUp className="w-4 h-4 text-indigo-400 shrink-0" />
+              )}
+              <span>
+                {isOverspent
+                  ? `Budget overspend detected: -$${Math.abs(remaining).toLocaleString()} deficit across active allocations.`
+                  : totalAllocated > 0
+                    ? `${((totalSpent / totalAllocated) * 100).toFixed(1)}% of total FY ${activeFiscalYear} allocation utilized ($${remaining.toLocaleString()} remaining balance).`
+                    : 'No active budget allocations registered for this fiscal year.'}
+              </span>
             </div>
           </div>
         </div>

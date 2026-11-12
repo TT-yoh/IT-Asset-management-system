@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../db';
-import { authenticate, requirePermission, idempotent } from '../middleware';
+import { authenticate, requirePermission, idempotent, asyncHandler } from '../middleware';
 import { canApproveWriteOff, canCertifyDamagedReturn } from '../permissions';
 import { recordAuditEvent } from '../audit';
 import { normalizeCondition } from './assetRoutes';
@@ -21,7 +21,7 @@ const EXPLICIT_CHECKOUT_COLUMNS = `
  * GET /api/checkouts
  * Explicitly projected and tenant-scoped equipment checkouts
  */
-checkoutRouter.get('/', requirePermission('checkouts:read'), async (req: Request, res: Response) => {
+checkoutRouter.get('/', requirePermission('checkouts:read'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, role, userId, branchId } = req.auth!;
 
   let sql = `
@@ -47,14 +47,14 @@ checkoutRouter.get('/', requirePermission('checkouts:read'), async (req: Request
 
   const rows = await query(sql, params);
   res.json({ checkouts: rows });
-});
+}));
 
 /**
  * POST /api/checkouts
  * Records CHECKOUT_ASSET in the same DB transaction!
  * Validates target user in tenant, asset active status, and concurrency lock.
  */
-checkoutRouter.post('/', requirePermission('checkouts:create'), idempotent(), async (req: Request, res: Response) => {
+checkoutRouter.post('/', requirePermission('checkouts:create'), idempotent(), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const data = req.body;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -209,7 +209,7 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), idempotent(), as
       code: isConflict ? 'ALREADY_CHECKED_OUT' : 'CHECKOUT_FAILED'
     });
   }
-});
+}));
 
 /**
  * POST /api/checkouts/:id/return
@@ -217,7 +217,7 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), idempotent(), as
  * Enforces Separation of Duties: custody holder cannot self-certify damage.
  * On damage: sets DAMAGED_DURING_CHECKOUT, asset to REPAIR, and auto-generates maintenance work order.
  */
-checkoutRouter.post('/:id/return', requirePermission('checkouts:return'), idempotent(), async (req: Request, res: Response) => {
+checkoutRouter.post('/:id/return', requirePermission('checkouts:return'), idempotent(), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role, branchId: actorBranchId } = req.auth!;
   const chkId = req.params.id;
   const { returnCondition, damageReported, damageDescription, notes } = req.body;
@@ -332,13 +332,13 @@ checkoutRouter.post('/:id/return', requirePermission('checkouts:return'), idempo
   } catch (_err) {
     res.status(500).json({ error: 'Return transaction failed.' });
   }
-});
+}));
 
 /**
  * POST /api/checkouts/:id/writeoff
  * Certifies damage write-off or loss waiver with Separation of Duties guard.
  */
-checkoutRouter.post('/:id/writeoff', requirePermission('checkouts:writeoff'), idempotent(), async (req: Request, res: Response) => {
+checkoutRouter.post('/:id/writeoff', requirePermission('checkouts:writeoff'), idempotent(), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const chkId = req.params.id;
   const { reason, notes, isLost } = req.body;
@@ -413,4 +413,4 @@ checkoutRouter.post('/:id/writeoff', requirePermission('checkouts:writeoff'), id
   } catch (_err) {
     res.status(500).json({ error: 'Write-off transaction failed.' });
   }
-});
+}));

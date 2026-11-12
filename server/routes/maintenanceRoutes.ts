@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../db';
-import { authenticate, requirePermission, idempotent } from '../middleware';
+import { authenticate, requirePermission, idempotent, asyncHandler } from '../middleware';
 import { recordAuditEvent } from '../audit';
 
 export const maintenanceRouter = Router();
@@ -18,7 +18,7 @@ const EXPLICIT_MAINTENANCE_COLUMNS = `
  * GET /api/maintenance
  * Explicitly projected and tenant-scoped maintenance work orders
  */
-maintenanceRouter.get('/', requirePermission('maintenance:read'), async (req: Request, res: Response) => {
+maintenanceRouter.get('/', requirePermission('maintenance:read'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, role, branchId, userId } = req.auth!;
 
   let sql = `
@@ -44,7 +44,141 @@ maintenanceRouter.get('/', requirePermission('maintenance:read'), async (req: Re
 
   const rows = await query(sql, params);
   res.json({ maintenance: rows });
-});
+}));
+
+/**
+ * GET /api/maintenance/summary
+ * Authoritative server-side calculations for repairs summary and trends.
+ * Replaces client-side multipliers and hardcoded trends with real DB aggregations.
+ */
+maintenanceRouter.get('/summary', requirePermission('maintenance:read'), asyncHandler(async (req: Request, res: Response) => {
+  const { orgId, role, branchId, userId } = req.auth!;
+
+  let baseSql = 'FROM `maintenances` WHERE `org_id` = ?';
+  const baseParams: any[] = [orgId];
+
+  if (role === 'BRANCH_MANAGER') {
+    if (!branchId) {
+      res.json({
+        totalUnderRepair: 0,
+        avgRepairDays: null,
+        totalCostThisMonth: 0,
+        totalCostYear: 0,
+        mostRepairedTypes: [],
+        technicianWorkload: [],
+        costTrend: []
+      });
+      return;
+    }
+    baseSql += ' AND `branch_id` = ?';
+    baseParams.push(branchId);
+  } else if (role === 'USER') {
+    baseSql += ' AND `reported_by_user_id` = ?';
+    baseParams.push(userId);
+  }
+
+  // 1. Total under repair
+  const underRepairRows = await query<any>(
+    `SELECT COUNT(*) as count ${baseSql} AND \`status\` IN ('PENDING', 'IN_PROGRESS', 'WAITING_FOR_PARTS')`,
+    baseParams
+  );
+  const totalUnderRepair = Number(underRepairRows[0]?.count || 0);
+
+  // 2. All records matching tenant/branch scope for statistics
+  const records = await query<any>(
+    `SELECT \`start_date\`, \`actual_completion\`, \`cost\`, \`type\`, \`status\`, \`assigned_technician\`, \`created_at\`
+     ${baseSql}`,
+    baseParams
+  );
+
+  let totalDays = 0;
+  let completedCountWithDates = 0;
+  let totalCostMonth = 0;
+  let totalCostYear = 0;
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const trendMap = new Map<string, number>();
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${monthNames[d.getMonth()]} ${d.getFullYear().toString().slice(2)}`;
+    trendMap.set(key, 0);
+  }
+
+  const typeMap = new Map<string, { count: number; totalCost: number }>();
+  const techMap = new Map<string, { active: number; completed: number }>();
+
+  for (const row of records) {
+    const cost = Number(row.cost || 0);
+    const rDate = row.start_date ? new Date(row.start_date) : (row.created_at ? new Date(row.created_at) : null);
+
+    if (rDate && !isNaN(rDate.getTime())) {
+      if (rDate.getFullYear() === currentYear) {
+        totalCostYear += cost;
+        if (rDate.getMonth() === currentMonth) {
+          totalCostMonth += cost;
+        }
+      }
+      const trendKey = `${monthNames[rDate.getMonth()]} ${rDate.getFullYear().toString().slice(2)}`;
+      if (trendMap.has(trendKey)) {
+        trendMap.set(trendKey, (trendMap.get(trendKey) || 0) + cost);
+      }
+    }
+
+    if (row.status === 'COMPLETED' && row.start_date && row.actual_completion) {
+      const dStart = new Date(row.start_date).getTime();
+      const dEnd = new Date(row.actual_completion).getTime();
+      if (!isNaN(dStart) && !isNaN(dEnd) && dEnd >= dStart) {
+        const diffDays = Math.max(1, Math.round((dEnd - dStart) / 86400000));
+        totalDays += diffDays;
+        completedCountWithDates++;
+      }
+    }
+
+    const tType = row.type || 'REPAIR';
+    const curType = typeMap.get(tType) || { count: 0, totalCost: 0 };
+    curType.count += 1;
+    curType.totalCost += cost;
+    typeMap.set(tType, curType);
+
+    const tech = row.assigned_technician || 'Unassigned';
+    const curTech = techMap.get(tech) || { active: 0, completed: 0 };
+    if (row.status === 'COMPLETED') {
+      curTech.completed += 1;
+    } else {
+      curTech.active += 1;
+    }
+    techMap.set(tech, curTech);
+  }
+
+  const avgRepairDays = completedCountWithDates > 0
+    ? Math.round((totalDays / completedCountWithDates) * 10) / 10
+    : null;
+
+  const costTrend = Array.from(trendMap.entries()).map(([month, cost]) => ({ month, cost: Math.round(cost * 100) / 100 }));
+  const mostRepairedTypes = Array.from(typeMap.entries()).map(([type, val]) => ({
+    type,
+    count: val.count,
+    totalCost: Math.round(val.totalCost * 100) / 100
+  }));
+  const technicianWorkload = Array.from(techMap.entries()).map(([name, val]) => ({
+    name,
+    activeTickets: val.active,
+    completedTickets: val.completed
+  }));
+
+  res.json({
+    totalUnderRepair,
+    avgRepairDays,
+    totalCostThisMonth: Math.round(totalCostMonth * 100) / 100,
+    totalCostYear: Math.round(totalCostYear * 100) / 100,
+    mostRepairedTypes,
+    technicianWorkload,
+    costTrend
+  });
+}));
 
 /**
  * POST /api/maintenance
@@ -52,7 +186,7 @@ maintenanceRouter.get('/', requirePermission('maintenance:read'), async (req: Re
  * Restricts regular USER input to unprivileged triage values.
  * Moves ACTIVE asset to REPAIR; prevents modifying DISPOSED or SOLD assets.
  */
-maintenanceRouter.post('/', requirePermission('maintenance:create'), idempotent(), async (req: Request, res: Response) => {
+maintenanceRouter.post('/', requirePermission('maintenance:create'), idempotent(), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const data = req.body;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -147,7 +281,7 @@ maintenanceRouter.post('/', requirePermission('maintenance:create'), idempotent(
   } catch (_err) {
     res.status(500).json({ error: 'Maintenance creation transaction failed.' });
   }
-});
+}));
 
 /**
  * PUT /api/maintenance/:id
@@ -155,7 +289,7 @@ maintenanceRouter.post('/', requirePermission('maintenance:create'), idempotent(
  * Checks baseVersion OCC, verifies active work orders before releasing asset to ACTIVE,
  * and updates branch department budget spend on completion.
  */
-maintenanceRouter.put('/:id', requirePermission('maintenance:update'), async (req: Request, res: Response) => {
+maintenanceRouter.put('/:id', requirePermission('maintenance:update'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const mntId = req.params.id;
   const data = req.body;
@@ -270,4 +404,4 @@ maintenanceRouter.put('/:id', requirePermission('maintenance:update'), async (re
     const statusCode = err.statusCode || 500;
     res.status(statusCode).json({ error: statusCode === 409 ? err.message : 'Maintenance update transaction failed.' });
   }
-});
+}));

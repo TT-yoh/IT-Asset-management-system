@@ -17,18 +17,6 @@ import {
   Organization
 } from '../types';
 import {
-  INITIAL_ASSETS,
-  INITIAL_CHECKOUTS,
-  INITIAL_MAINTENANCE,
-  INITIAL_BUDGETS,
-  INITIAL_AUDIT_LOGS,
-  INITIAL_NOTIFICATIONS,
-  USERS,
-  INITIAL_BRANCHES,
-  DEPARTMENTS,
-  ORGANIZATIONS
-} from '../mockData';
-import {
   isTiDBConfigured,
   getLastTiDBSyncTime,
   updateLastTiDBSyncTime
@@ -179,9 +167,30 @@ export const mapAssetToTiDBRow = (asset: Asset) => ({
   imageUrl: asset.imageUrl || '',
   image_url: asset.imageUrl || '',
   notes: asset.notes || null,
+  costSource: asset.costSource || 'MANUAL',
+  manufacturer: asset.manufacturer || null,
+  supplier: asset.supplier || null,
+  invoiceNumber: asset.invoiceNumber || null,
+  locationDetail: asset.locationDetail || null,
+  departmentId: asset.departmentId || null,
+  ownershipType: asset.ownershipType || 'OWNED',
+  leaseEndDate: asset.leaseEndDate || null,
+  specs: asset.specs && Object.keys(asset.specs).length > 0 ? asset.specs : null,
   version: asset.version || 1,
   baseVersion: asset.version || 1
 });
+
+const parseAssetSpecs = (raw: unknown): Asset['specs'] => {
+  let value = raw;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return undefined;
+    }
+  }
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Asset['specs']) : undefined;
+};
 
 export const mapTiDBRowToAsset = (row: any): Asset => ({
   id: row.id,
@@ -211,6 +220,16 @@ export const mapTiDBRowToAsset = (row: any): Asset => ({
   assignedAt: row.assigned_at ? String(row.assigned_at) : undefined,
   imageUrl: row.image_url || '',
   notes: row.notes || undefined,
+  costSource: row.cost_source === 'ESTIMATED' ? 'ESTIMATED' : 'MANUAL',
+  manufacturer: row.manufacturer || undefined,
+  supplier: row.supplier || undefined,
+  invoiceNumber: row.invoice_number || undefined,
+  locationDetail: row.location_detail || undefined,
+  departmentId: row.department_id || undefined,
+  departmentName: row.department_name || undefined,
+  ownershipType: row.ownership_type === 'LEASED' || row.ownership_type === 'PERSONAL' ? row.ownership_type : 'OWNED',
+  leaseEndDate: row.lease_end_date ? String(row.lease_end_date).split('T')[0]! : undefined,
+  specs: parseAssetSpecs(row.specs),
   version: row.version || 1
 });
 
@@ -349,11 +368,11 @@ export const loadInitialData = async (orgId?: string, userId?: string): Promise<
           maintenances: maintenancesList,
           budgets: budgetsList,
           auditLogs: data.auditLogs || [],
-          notifications: loadFromStorage<SystemNotification[]>(getScopedKey(STORAGE_KEYS.NOTIFICATIONS, orgId, userId), INITIAL_NOTIFICATIONS),
+          notifications: loadFromStorage<SystemNotification[]>(getScopedKey(STORAGE_KEYS.NOTIFICATIONS, orgId, userId), []),
           users: data.users || [],
           branches: mappedBranches,
           departments: mappedDepts,
-          organizations: data.organizations || ORGANIZATIONS,
+          organizations: data.organizations || [],
           isTiDBLive: true,
           lastSyncedAt: updateLastTiDBSyncTime()
         };
@@ -366,12 +385,12 @@ export const loadInitialData = async (orgId?: string, userId?: string): Promise<
     // Offline or network error: load from scoped storage
   }
 
-  const cachedAssets = loadFromStorage<Asset[]>(assetsKey, INITIAL_ASSETS);
-  const cachedCheckouts = loadFromStorage<CheckoutRecord[]>(chksKey, INITIAL_CHECKOUTS);
-  const cachedMaintenances = loadFromStorage<MaintenanceRecord[]>(maintsKey, INITIAL_MAINTENANCE);
-  const cachedBudgets = loadFromStorage<BudgetAllocation[]>(budgetsKey, INITIAL_BUDGETS);
-  const cachedBranches = loadFromStorage<Branch[]>(branchesKey, INITIAL_BRANCHES);
-  const cachedDepts = loadFromStorage<Department[]>(deptsKey, DEPARTMENTS);
+  const cachedAssets = loadFromStorage<Asset[]>(assetsKey, []);
+  const cachedCheckouts = loadFromStorage<CheckoutRecord[]>(chksKey, []);
+  const cachedMaintenances = loadFromStorage<MaintenanceRecord[]>(maintsKey, []);
+  const cachedBudgets = loadFromStorage<BudgetAllocation[]>(budgetsKey, []);
+  const cachedBranches = loadFromStorage<Branch[]>(branchesKey, []);
+  const cachedDepts = loadFromStorage<Department[]>(deptsKey, []);
 
   return {
     assets: cachedAssets,
@@ -379,11 +398,11 @@ export const loadInitialData = async (orgId?: string, userId?: string): Promise<
     maintenances: cachedMaintenances,
     budgets: cachedBudgets,
     auditLogs: [], // No sensitive logs loaded from local storage
-    notifications: INITIAL_NOTIFICATIONS,
+    notifications: [],
     users: [], // No sensitive users loaded from local storage
     branches: cachedBranches,
     departments: cachedDepts,
-    organizations: ORGANIZATIONS,
+    organizations: [],
     isTiDBLive: isTiDBConfigured(),
     lastSyncedAt: getLastTiDBSyncTime()
   };
@@ -590,7 +609,7 @@ export async function deleteDepartmentFromStorage(deptId: string, _allDepts?: De
 }
 
 export async function persistNotification(notification: SystemNotification, allNotifs?: SystemNotification[]): Promise<boolean> {
-  const current = allNotifs || loadFromStorage<SystemNotification[]>(STORAGE_KEYS.NOTIFICATIONS, INITIAL_NOTIFICATIONS);
+  const current = allNotifs || loadFromStorage<SystemNotification[]>(STORAGE_KEYS.NOTIFICATIONS, []);
   const exists = current.some(n => n.id === notification.id);
   const updated = exists ? current.map(n => (n.id === notification.id ? notification : n)) : [notification, ...current];
   saveToStorage(STORAGE_KEYS.NOTIFICATIONS, updated);

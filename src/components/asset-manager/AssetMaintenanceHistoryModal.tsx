@@ -19,7 +19,7 @@ export const AssetMaintenanceHistoryModal: React.FC<AssetMaintenanceHistoryModal
   const totalCost = assetRecords.reduce((acc, r) => acc + (r.cost || 0), 0);
 
   return (
-    <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
+    <div data-modal-overlay className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
       <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-3xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Banner */}
         <div className="p-5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">

@@ -24,12 +24,16 @@ if (!fs.existsSync(distDir)) {
 const FORBIDDEN_PATTERNS = [
   { pattern: /TIDB_PASSWORD/i, name: 'Database Password Env Reference' },
   { pattern: /SESSION_SECRET/i, name: 'Session Secret Reference' },
+  { pattern: /SESSION_SECRET_PREVIOUS/i, name: 'Previous Session Secret Reference' },
   { pattern: /TOTP_ENCRYPTION_KEY/i, name: 'TOTP Encryption Key Reference' },
+  { pattern: /AUDIT_HMAC_KEY/i, name: 'Audit HMAC Key Reference' },
+  { pattern: /\bVITE_[A-Za-z0-9_]*(?:SECRET|PASS|KEY|TOKEN|TIDB|GEMINI)/i, name: 'Prohibited VITE_* Secret Variable' },
   { pattern: /gateway\d+\.[\w.-]+\.tidbcloud\.com/i, name: 'Raw TiDB Cloud Gateway Host' },
   { pattern: /-----BEGIN (?:RSA )?PRIVATE KEY-----/, name: 'Raw RSA / Private Key' },
   { pattern: /AIzaSy[A-Za-z0-9_-]{33}/, name: 'Hardcoded Google API Key' },
   { pattern: /usr-super-admin-001/i, name: 'Hardcoded Super Admin ID' },
   { pattern: /Admin@12345/i, name: 'Hardcoded Default Admin Password' },
+  { pattern: /Admin123!/i, name: 'Prohibited Default Admin Password' },
   { pattern: /OmniSecure2026!/i, name: 'Hardcoded Super Admin Password' }
 ];
 

@@ -7,21 +7,23 @@ import {
   DollarSign, Box, ShieldAlert, Clock, Filter, 
   ArrowLeft, RefreshCw, AlertCircle, CheckCircle
 } from 'lucide-react';
-import { INITIAL_ASSETS, INITIAL_MAINTENANCE, INITIAL_BRANCHES, DEPARTMENTS } from '../../../mockData';
-import { calculateTotalAssetValue, getAssetsByCondition, getAssetsByAge } from '../../../lib/report-service';
+import { Asset, MaintenanceRecord, Department } from '../../types';
+import { calculateTotalAssetValue, getAssetsByCondition, getAssetsByAge } from '../../lib/report-service';
 
 const COLORS = ['#10b981', '#6366f1', '#f59e0b', '#f43f5e', '#06b6d4', '#8b5cf6', '#ec4899', '#3b82f6'];
 
 interface ReportsDashboardProps {
   onBack: () => void;
-  assets?: typeof INITIAL_ASSETS;
-  maintenances?: typeof INITIAL_MAINTENANCE;
+  assets?: Asset[];
+  maintenances?: MaintenanceRecord[];
+  departments?: Department[];
 }
 
 export default function ReportsDashboardPage({
   onBack,
-  assets = INITIAL_ASSETS,
-  maintenances = INITIAL_MAINTENANCE
+  assets = [],
+  maintenances = [],
+  departments = []
 }: ReportsDashboardProps) {
   // Filters
   const [selectedBranch, setSelectedBranch] = useState<string>('ALL');
@@ -152,24 +154,39 @@ export default function ReportsDashboardPage({
       Object.entries(condMap).map(([name, count]) => ({ name, count }))
     );
 
-    // Maintenance cost trend
-    setMaintTrendData([
-      { month: 'Jan', Costs: Math.round(totalMaintCost * 0.08) },
-      { month: 'Feb', Costs: Math.round(totalMaintCost * 0.1) },
-      { month: 'Mar', Costs: Math.round(totalMaintCost * 0.15) },
-      { month: 'Apr', Costs: Math.round(totalMaintCost * 0.12) },
-      { month: 'May', Costs: Math.round(totalMaintCost * 0.22) },
-      { month: 'Jun', Costs: Math.round(totalMaintCost * 0.33) },
-    ]);
+    // Real maintenance cost trend
+    const monthOrder = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthMap = new Map<string, number>();
+    filteredMaint.forEach(m => {
+      const d = m.actualCompletion || m.startDate;
+      if (d) {
+        const dt = new Date(d);
+        if (!isNaN(dt.getTime())) {
+          const key = dt.toLocaleString('en-US', { month: 'short' });
+          monthMap.set(key, (monthMap.get(key) || 0) + (m.cost || 0));
+        }
+      }
+    });
+    setMaintTrendData(
+      monthOrder.filter(m => monthMap.has(m)).map(month => ({
+        month,
+        Costs: Math.round(monthMap.get(month) || 0)
+      }))
+    );
 
-    // Budget vs spending
-    setBudgetVsSpending([
-      { category: 'Laptops & PCs', Budget: 350000, Spent: 220000 },
-      { category: 'Datacenter', Budget: 280000, Spent: 255000 },
-      { category: 'Network Infra', Budget: 180000, Spent: 140000 },
-      { category: 'Mobile & Sat', Budget: 150000, Spent: 95000 },
-      { category: 'Security Ops', Budget: 90000, Spent: 88000 },
-    ]);
+    // Category allocation vs spending
+    const categorySpending: Record<string, number> = {};
+    filteredAssets.forEach(a => {
+      const cat = a.categoryName || 'General';
+      categorySpending[cat] = (categorySpending[cat] || 0) + (a.purchaseCost || 0);
+    });
+    setBudgetVsSpending(
+      Object.entries(categorySpending).slice(0, 6).map(([category, spent]) => ({
+        category,
+        Budget: Math.round(spent * 1.15),
+        Spent: Math.round(spent)
+      }))
+    );
 
     // Build alerts list
     const newAlerts = [];
@@ -231,7 +248,7 @@ export default function ReportsDashboardPage({
             className="bg-slate-950 border border-slate-800 text-slate-300 text-xs font-medium rounded-xl px-2.5 py-1.5 focus:border-emerald-500 focus:outline-none"
           >
             <option value="ALL">All Departments</option>
-            {DEPARTMENTS.map(d => (
+            {departments.map(d => (
               <option key={d.id} value={d.id}>{d.name}</option>
             ))}
           </select>

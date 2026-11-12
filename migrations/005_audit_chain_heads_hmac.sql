@@ -36,3 +36,4 @@ INSERT INTO `audit_chain_heads` (`org_id`, `last_seq`, `last_hash`)
   LEFT JOIN `audit_chain_heads` ach ON o.`id` = ach.`org_id`
   WHERE ach.`org_id` IS NULL
 ON DUPLICATE KEY UPDATE `org_id` = `org_id`;
+

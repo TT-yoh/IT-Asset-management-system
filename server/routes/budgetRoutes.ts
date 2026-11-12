@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { query, withTransaction } from '../db';
-import { authenticate, requirePermission, idempotent } from '../middleware';
+import { authenticate, requirePermission, idempotent, asyncHandler } from '../middleware';
 import { recordAuditEvent } from '../audit';
 
 export const budgetRouter = Router();
@@ -33,7 +33,7 @@ const UpdateBudgetSchema = z.object({
  * GET /api/budgets
  * Scoped strictly by tenant org_id with explicit columns
  */
-budgetRouter.get('/', requirePermission('budgets:read'), async (req: Request, res: Response) => {
+budgetRouter.get('/', requirePermission('budgets:read'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId } = req.auth!;
 
   const rows = await query(
@@ -42,13 +42,13 @@ budgetRouter.get('/', requirePermission('budgets:read'), async (req: Request, re
   );
 
   res.json({ budgets: rows });
-});
+}));
 
 /**
  * POST /api/budgets
  * Ignores client id; generates UUID; plain INSERT; spent initialized to 0 (never trusted from POST body).
  */
-budgetRouter.post('/', requirePermission('budgets:manage'), idempotent(), async (req: Request, res: Response) => {
+budgetRouter.post('/', requirePermission('budgets:manage'), idempotent(), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
@@ -105,13 +105,13 @@ budgetRouter.post('/', requirePermission('budgets:manage'), idempotent(), async 
     }
     res.status(500).json({ error: 'Budget allocation transaction failed.' });
   }
-});
+}));
 
 /**
  * PUT /api/budgets/:id
  * Enforces OCC via baseVersion. If spent is modified, requires a reason.
  */
-budgetRouter.put('/:id', requirePermission('budgets:manage'), idempotent(), async (req: Request, res: Response) => {
+budgetRouter.put('/:id', requirePermission('budgets:manage'), idempotent(), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const budgetId = req.params.id;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -206,12 +206,12 @@ budgetRouter.put('/:id', requirePermission('budgets:manage'), idempotent(), asyn
     }
     res.status(500).json({ error: 'Budget update transaction failed.' });
   }
-});
+}));
 
 /**
  * DELETE /api/budgets/:id
  */
-budgetRouter.delete('/:id', requirePermission('budgets:manage'), async (req: Request, res: Response) => {
+budgetRouter.delete('/:id', requirePermission('budgets:manage'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const budgetId = req.params.id;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -244,4 +244,4 @@ budgetRouter.delete('/:id', requirePermission('budgets:manage'), async (req: Req
   } catch (_err) {
     res.status(500).json({ error: 'Budget deletion transaction failed.' });
   }
-});
+}));

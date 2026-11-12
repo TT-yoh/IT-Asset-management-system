@@ -12,7 +12,7 @@ export const RepairsSummaryModal: React.FC<RepairsSummaryModalProps> = ({
   onClose
 }) => {
   return (
-    <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
+    <div data-modal-overlay className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
       <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-4xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Top Header */}
         <div className="p-5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
@@ -45,7 +45,9 @@ export const RepairsSummaryModal: React.FC<RepairsSummaryModalProps> = ({
             <div className="p-2.5 rounded-lg bg-amber-500/10 text-amber-400"><Clock className="w-5 h-5" /></div>
             <div>
               <span className="text-slate-500 block text-[10px] uppercase font-mono">Avg Turnaround</span>
-              <span className="text-amber-300 font-mono font-bold text-lg">{stats.avgRepairDays} Days</span>
+              <span className="text-amber-300 font-mono font-bold text-lg">
+                {stats.avgRepairDays !== null ? `${stats.avgRepairDays} Days` : 'N/A'}
+              </span>
             </div>
           </div>
 

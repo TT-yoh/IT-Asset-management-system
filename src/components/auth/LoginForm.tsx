@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Organization } from '../../types';
+import { useFeedback } from '../../context/FeedbackContext';
 import { Building2, Mail, Lock, ShieldCheck, ArrowRight, AlertCircle, Loader2 } from 'lucide-react';
 
 interface LoginFormProps {
@@ -21,6 +22,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
   error = null,
   onRequestAccessClick
 }) => {
+  const { toast } = useFeedback();
   const [email, setEmail] = useState('jsmith@mineazy.com');
   const [password, setPassword] = useState('password123');
   const [rememberMe, setRememberMe] = useState(true);
@@ -109,7 +111,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
             </label>
             <button
               type="button"
-              onClick={() => alert('Password reset links require admin verification in Phase 2.')}
+              onClick={() => toast('Ask your organization admin to send you a password reset link.', 'info')}
               className="text-[11px] text-emerald-400 hover:text-emerald-300 transition"
             >
               Forgot password?

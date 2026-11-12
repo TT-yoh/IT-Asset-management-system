@@ -1,5 +1,6 @@
 import React from 'react';
 import { AssetStatus, Branch } from '../../types';
+import { useFeedback } from '../../context/FeedbackContext';
 import { 
   CheckSquare, 
   Trash2, 
@@ -15,7 +16,8 @@ interface BatchActionToolbarProps {
   branches: Branch[];
   canEdit?: boolean;
   canDelete?: boolean;
-  onBatchStatusChange: (status: AssetStatus) => void;
+  canWriteOff?: boolean;
+  onBatchStatusChange: (status: AssetStatus, reason?: string) => void;
   onBatchTransferBranch: (branchId: string, branchName: string) => void;
   onBatchDelete: () => void;
   onBatchPrintLabels: () => void;
@@ -27,12 +29,14 @@ export const BatchActionToolbar: React.FC<BatchActionToolbarProps> = ({
   branches,
   canEdit = true,
   canDelete = false,
+  canWriteOff = false,
   onBatchStatusChange,
   onBatchTransferBranch,
   onBatchDelete,
   onBatchPrintLabels,
   onClearSelection
 }) => {
+  const { promptText } = useFeedback();
   if (selectedCount === 0) return null;
 
   return (
@@ -50,10 +54,25 @@ export const BatchActionToolbar: React.FC<BatchActionToolbarProps> = ({
         {/* Status Dropdown */}
         {canEdit && (
           <select
-            onChange={(e) => {
-              if (e.target.value) {
-                onBatchStatusChange(e.target.value as AssetStatus);
-                e.target.value = '';
+            onChange={async (e) => {
+              const select = e.target;
+              const val = select.value as AssetStatus;
+              if (val) {
+                select.value = '';
+                const isWriteOff = val === 'DEPRECATED' || val === 'SOLD' || val === 'DISPOSED';
+                if (isWriteOff) {
+                  const reason = await promptText({
+                    title: `Write off ${selectedCount} asset${selectedCount === 1 ? '' : 's'} as ${val}?`,
+                    message: 'A write-off reason is mandatory and is recorded in the audit log.',
+                    inputLabel: 'Write-off reason',
+                    confirmLabel: 'Write off',
+                    tone: 'danger'
+                  });
+                  if (!reason) return;
+                  onBatchStatusChange(val, reason);
+                } else {
+                  onBatchStatusChange(val);
+                }
               }
             }}
             defaultValue=""
@@ -63,9 +82,13 @@ export const BatchActionToolbar: React.FC<BatchActionToolbarProps> = ({
             <option value="ACTIVE">ACTIVE</option>
             <option value="REPAIR">REPAIR</option>
             <option value="DAMAGED">DAMAGED</option>
-            <option value="DEPRECATED">DEPRECATED</option>
-            <option value="SOLD">SOLD</option>
-            <option value="DISPOSED">DISPOSED</option>
+            {canWriteOff && (
+              <>
+                <option value="DEPRECATED">DEPRECATED (Write-off)</option>
+                <option value="SOLD">SOLD (Write-off)</option>
+                <option value="DISPOSED">DISPOSED (Write-off)</option>
+              </>
+            )}
           </select>
         )}
 

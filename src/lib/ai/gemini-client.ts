@@ -1,78 +1,50 @@
-import { GoogleGenAI } from '@google/genai';
-
 /**
- * Gemini AI Client Initializer
- * Uses VITE_GEMINI_API_KEY from environment variables.
+ * Server-Backed AI Assistant Client
+ * Addendum 4 Section B1: Delegates AI generation to server POST /api/catalog/chat
+ * Completely eliminates @google/genai SDK and credentials from client bundle.
  */
-let aiInstance: GoogleGenAI | null = null;
-let currentKey = '';
 
 export const getGeminiApiKey = (): string => {
-  // Check runtime user-configured key
-  try {
-    if (typeof sessionStorage !== 'undefined') {
-      const sessionKey = sessionStorage.getItem('gemini_api_key');
-      if (sessionKey && sessionKey.trim().length > 10) return sessionKey.trim();
-    }
-    if (typeof localStorage !== 'undefined') {
-      const saved = localStorage.getItem('gemini_api_key');
-      if (saved && saved.trim().length > 10) return saved.trim();
-    }
-  } catch {}
-
   return '';
 };
 
 export const isGeminiAvailable = (): boolean => {
-  return getGeminiApiKey().length > 0;
+  return true;
 };
 
-export const setGeminiApiKey = (key: string): void => {
-  try {
-    localStorage.setItem('gemini_api_key', key.trim());
-    aiInstance = null;
-    currentKey = '';
-  } catch (e) {
-    console.warn('Failed to save Gemini API key:', e);
-  }
+export const setGeminiApiKey = (_key: string): void => {
+  // Client-side API key entry deprecated for enterprise security.
+  // AI is managed exclusively via server-side configuration.
 };
 
-export const getGeminiClient = (): GoogleGenAI | null => {
-  const key = getGeminiApiKey();
-  if (!key) return null;
-  if (!aiInstance || currentKey !== key) {
-    currentKey = key;
-    aiInstance = new GoogleGenAI({ apiKey: key });
-  }
-  return aiInstance;
+export const getGeminiClient = (): null => {
+  return null;
 };
 
 /**
- * Robust generate helper that cascades through recommended models
+ * Delegates content generation to server-side AI catalog chat endpoint.
  */
 export async function generateContentWithFallback(prompt: string): Promise<string> {
-  const client = getGeminiClient();
-  if (!client) {
-    throw new Error('Gemini API key is not configured.');
-  }
+  try {
+    const res = await fetch('/api/catalog/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      credentials: 'include',
+      body: JSON.stringify({ prompt })
+    });
 
-  const modelCandidates = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
-  let lastError: any = null;
-
-  for (const model of modelCandidates) {
-    try {
-      const response = await client.models.generateContent({
-        model,
-        contents: prompt
-      });
-      if (response && response.text) {
-        return response.text;
-      }
-    } catch (err: any) {
-      lastError = err;
-      console.warn(`Gemini generation failed on model ${model}, trying next model...`, err?.message || err);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Server AI endpoint error: ${res.status}`);
     }
-  }
 
-  throw lastError || new Error('Failed to generate content with Gemini');
+    const data = await res.json();
+    return data.reply || 'No response received from AI service.';
+  } catch (err: any) {
+    console.warn('[AI CLIENT] Server generation failed:', err.message);
+    throw err;
+  }
 }

@@ -48,7 +48,7 @@ export const BatchLabelPrinter: React.FC<BatchLabelPrinterProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/90 backdrop-blur-md flex flex-col items-center p-4 sm:p-6 print:p-0 print:bg-white print:static">
+    <div data-modal-overlay className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/90 backdrop-blur-md flex flex-col items-center p-4 sm:p-6 print:p-0 print:bg-white print:static">
       {/* Non-printable Control Toolbar */}
       <div className="w-full max-w-5xl bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-6 shadow-2xl flex items-center justify-between print:hidden">
         <div className="flex items-center gap-3">

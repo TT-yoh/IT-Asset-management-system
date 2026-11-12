@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ShieldCheck, Loader2 } from 'lucide-react';
 import { Navbar } from './components/Navbar';
 import { Sidebar, NavTab } from './components/Sidebar';
-import { Dashboard3D } from './components/Dashboard3D';
+const Dashboard3D = React.lazy(() => import('./components/Dashboard3D').then(m => ({ default: m.Dashboard3D })));
 import { AssetManager } from './components/AssetManager';
 import { CheckoutPanel } from './components/CheckoutPanel';
 import { MaintenancePanel } from './components/MaintenancePanel';
@@ -16,7 +16,9 @@ import { TiDBSyncModal } from './components/TiDBSyncModal';
 import { QuickScannerModal, resolveAssetFromScan } from './components/QuickScannerModal';
 import { AssetDetailModal } from './components/asset-manager/AssetDetailModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { CATEGORIES } from './mockData';
+import { FeedbackProvider } from './context/FeedbackContext';
+import { CATEGORIES } from './constants/categories';
+import { canAccessTab } from '../shared/permissions';
 import {
   AuthProvider,
   useAuth,
@@ -29,10 +31,14 @@ import { Asset } from './types';
 
 const VALID_TABS: NavTab[] = ['dashboard', 'assets', 'checkout', 'repair', 'branches', 'users', 'reports', 'budget', 'audit'];
 
-const getTabFromHash = (): NavTab => {
+const getTabFromHash = (role?: string | null): NavTab => {
   if (typeof window === 'undefined') return 'dashboard';
   const clean = window.location.hash.replace(/^#\/?/, '').trim();
-  return VALID_TABS.includes(clean as NavTab) ? (clean as NavTab) : 'dashboard';
+  const tab = VALID_TABS.includes(clean as NavTab) ? (clean as NavTab) : 'dashboard';
+  if (role && !canAccessTab(role, tab)) {
+    return 'dashboard';
+  }
+  return tab;
 };
 
 function AppShell() {
@@ -92,7 +98,8 @@ function AppShell() {
     showTiDBModal,
     setShowTiDBModal,
     tiDBSyncTime,
-    lastSyncedAt
+    lastSyncedAt,
+    isInitialDataLoading
   } = useAssets();
 
   const [activeTab, setActiveTabState] = useState<NavTab>(() => getTabFromHash());
@@ -173,14 +180,15 @@ function AppShell() {
 
   // Navigate between tabs with browser history tracking (popstate / back arrow support)
   const navigateToTab = (tab: NavTab, replace = false) => {
-    setActiveTabState(tab);
+    const target = canAccessTab(currentUser?.role, tab) ? tab : 'dashboard';
+    setActiveTabState(target);
     scrollToTop();
     if (typeof window !== 'undefined') {
-      const targetHash = `#/${tab}`;
+      const targetHash = `#/${target}`;
       if (replace) {
-        window.history.replaceState({ tab }, '', targetHash);
+        window.history.replaceState({ tab: target }, '', targetHash);
       } else if (window.location.hash !== targetHash) {
-        window.history.pushState({ tab }, '', targetHash);
+        window.history.pushState({ tab: target }, '', targetHash);
       }
     }
   };
@@ -191,7 +199,12 @@ function AppShell() {
       const cleanHash = window.location.hash.replace(/^#\/?/, '').trim().toLowerCase();
 
       if (VALID_TABS.includes(cleanHash as NavTab)) {
-        setActiveTabState(cleanHash as NavTab);
+        const candidate = cleanHash as NavTab;
+        if (canAccessTab(currentUser?.role, candidate)) {
+          setActiveTabState(candidate);
+        } else {
+          navigateToTab('dashboard', true);
+        }
       } else if (!cleanHash) {
         // If at root URL, stay on dashboard without forcing a destructive logout
         if (currentUser) {
@@ -213,17 +226,13 @@ function AppShell() {
     };
   }, [currentUser]);
 
-  // Ensure activeTab immediately resolves from 'login'/'activate' to a valid tab upon sign-in
+  // Ensure activeTab immediately resolves from 'login'/'activate' to a valid permitted tab upon sign-in
   useEffect(() => {
     if (currentUser) {
-      const currentHashTab = getTabFromHash();
-      if (currentHashTab && VALID_TABS.includes(currentHashTab)) {
-        setActiveTabState(currentHashTab);
-      } else {
-        setActiveTabState('dashboard');
-      }
+      const currentHashTab = getTabFromHash(currentUser.role);
+      setActiveTabState(currentHashTab);
     }
-  }, [currentUser?.id]);
+  }, [currentUser?.id, currentUser?.role]);
 
   // Display clean security verification splash while validating session cookie
   if (isSessionLoading) {
@@ -305,6 +314,7 @@ function AppShell() {
         onLogout={handleLogout}
         branches={currentOrgBranches}
         assets={filteredAssets}
+        departments={currentOrgDepartments}
         systemOrgs={systemOrgs}
         onSelectOrg={handleSelectOrg}
         onRefreshData={refreshAppData}
@@ -342,21 +352,29 @@ function AppShell() {
               onReset={() => navigateToTab('assets')}
             >
           {activeTab === 'dashboard' && (
-            <Dashboard3D
-              currentOrg={currentOrg}
-              assets={filteredAssets}
-              maintenances={filteredMaintenances}
-              budgets={filteredBudgets}
-              currentUser={currentUser}
-              onNavigateToAssets={(status) => {
-                setInitialAssetStatusFilter(status);
-                navigateToTab('assets');
-              }}
-            />
+            <React.Suspense fallback={
+              <div className="flex items-center justify-center p-16 text-slate-400">
+                <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
+              </div>
+            }>
+              <Dashboard3D
+                currentOrg={currentOrg}
+                assets={filteredAssets}
+                maintenances={filteredMaintenances}
+                budgets={filteredBudgets}
+                currentUser={currentUser}
+                onNavigateToAssets={(status) => {
+                  setInitialAssetStatusFilter(status);
+                  navigateToTab('assets');
+                }}
+              />
+            </React.Suspense>
           )}
 
           {activeTab === 'assets' && (
             <AssetManager
+              isLoading={isInitialDataLoading}
+              departments={currentOrgDepartments}
               currentOrg={currentOrg}
               branches={currentOrgBranches}
               categories={CATEGORIES}
@@ -599,13 +617,15 @@ function AppShell() {
 export default function App() {
   return (
     <ErrorBoundary fallbackTitle="Application Error" onReset={() => { window.location.hash = ''; window.location.reload(); }}>
-      <AuthProvider>
-        <NotificationProvider>
-          <AssetProvider>
-            <AppShell />
-          </AssetProvider>
-        </NotificationProvider>
-      </AuthProvider>
+      <FeedbackProvider>
+        <AuthProvider>
+          <NotificationProvider>
+            <AssetProvider>
+              <AppShell />
+            </AssetProvider>
+          </NotificationProvider>
+        </AuthProvider>
+      </FeedbackProvider>
     </ErrorBoundary>
   );
 }

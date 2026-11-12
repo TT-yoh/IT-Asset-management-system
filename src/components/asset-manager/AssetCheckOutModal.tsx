@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Asset, User, Branch, CheckoutRecord } from '../../types';
+import { useFeedback } from '../../context/FeedbackContext';
 import { X, ArrowRightLeft, UserCheck, Calendar, FileText, Check } from 'lucide-react';
 
 interface AssetCheckOutModalProps {
@@ -19,18 +20,28 @@ export const AssetCheckOutModal: React.FC<AssetCheckOutModalProps> = ({
   onClose,
   onCheckout
 }) => {
-  const [selectedUserId, setSelectedUserId] = useState(users[0]?.id || '');
+  const [selectedUserId, setSelectedUserId] = useState('');
   const [expectedReturn, setExpectedReturn] = useState(
     new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString().split('T')[0]
   );
   const [notes, setNotes] = useState('');
+  const { toast } = useFeedback();
 
   if (!isOpen || !asset) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    const targetUser = users.find(u => u.id === selectedUserId) || users[0] || currentUser;
+    if (!selectedUserId) {
+      toast('Please select an active staff member to assign custody.', 'error');
+      return;
+    }
+
+    const targetUser = users.find(u => u.id === selectedUserId);
+    if (!targetUser) {
+      toast('Selected custodian not found in active directory.', 'error');
+      return;
+    }
     const nowIso = new Date().toISOString().split('T')[0]!;
 
     const checkoutRecord: CheckoutRecord = {
@@ -61,7 +72,7 @@ export const AssetCheckOutModal: React.FC<AssetCheckOutModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div data-modal-overlay className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col">
         {/* Header */}
         <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-950/60 flex items-center justify-between">
@@ -94,10 +105,12 @@ export const AssetCheckOutModal: React.FC<AssetCheckOutModalProps> = ({
             </label>
             <select
               value={selectedUserId}
+              required
               onChange={(e) => setSelectedUserId(e.target.value)}
               className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
             >
-              {users.map((u) => (
+              <option value="" disabled>Select an active staff custodian...</option>
+              {users.filter(u => u.status === 'ACTIVE' || !u.status).map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.fullName} ({u.role} - {u.branchName || 'HQ'})
                 </option>

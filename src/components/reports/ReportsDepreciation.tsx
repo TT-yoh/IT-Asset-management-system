@@ -7,22 +7,33 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   LineChart, Line
 } from 'recharts';
-import { INITIAL_ASSETS, MINEAZY_BRANCHES } from '../../../mockData';
-import { calculateDepreciation } from '../../../lib/report-service';
-import { ReportExport } from '../../../components/ReportExport';
+import { Asset } from '../../types';
+import { calculateDepreciation } from '../../lib/report-service';
+import { ReportExport } from '../ReportExport';
 
 interface ReportsDepreciationProps {
   onBack: () => void;
-  assets?: typeof INITIAL_ASSETS;
+  assets?: Asset[];
+  branches?: Array<{ id: string; name: string }>;
 }
 
 export default function ReportsDepreciationPage({
   onBack,
-  assets = INITIAL_ASSETS
+  assets = [],
+  branches = []
 }: ReportsDepreciationProps) {
   const [selectedBranch, setSelectedBranch] = useState<string>('ALL');
   const [deprMethod, setDeprMethod] = useState<'STRAIGHT_LINE' | 'DOUBLE_DECLINING'>('STRAIGHT_LINE');
   const [fiscalYear, setFiscalYear] = useState<string>('2026');
+
+  const branchOptions = useMemo(() => {
+    if (branches && branches.length > 0) return branches;
+    const map = new Map<string, string>();
+    assets.forEach(a => {
+      if (a.branchId && a.branchName) map.set(a.branchId, a.branchName);
+    });
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [branches, assets]);
 
   // Toggle for category groups
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({
@@ -189,7 +200,7 @@ export default function ReportsDepreciationPage({
               className="w-full bg-slate-950 text-slate-300 text-xs font-medium border border-slate-800 focus:border-rose-500 focus:outline-none rounded-xl px-3 py-2.5"
             >
               <option value="ALL">All Branches</option>
-              {MINEAZY_BRANCHES.map(b => (
+              {branchOptions.map(b => (
                 <option key={b.id} value={b.id}>{b.name}</option>
               ))}
             </select>

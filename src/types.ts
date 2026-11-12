@@ -89,6 +89,18 @@ export interface Asset {
   purchasePrice?: number;
   warrantyExpiry: string;
   currentValue: number;
+  costSource?: 'MANUAL' | 'ESTIMATED';
+  manufacturer?: string;
+  supplier?: string;
+  invoiceNumber?: string;
+  /** Where the device sits inside its branch (room, desk, rack). */
+  locationDetail?: string;
+  departmentId?: string;
+  departmentName?: string;
+  ownershipType?: 'OWNED' | 'LEASED' | 'PERSONAL';
+  leaseEndDate?: string;
+  /** Device-kind specific details; allowed keys are defined in shared/asset-fields.ts. */
+  specs?: Record<string, string | number | boolean>;
   assignedToUserId?: string;
   assignedToUserName?: string;
   assignedToUserAvatar?: string;

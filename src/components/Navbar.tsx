@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Organization, User, SystemNotification, Branch, Asset } from '../types';
+import { Organization, User, SystemNotification, Branch, Asset, Department } from '../types';
 import { 
   Bell, 
   Search, 
@@ -21,6 +21,8 @@ import {
 } from 'lucide-react';
 import { subscribeOfflineStatus, OfflineSyncStatus } from '../lib/offline-sync';
 import { UserSettingsModal } from './UserSettingsModal';
+import { useFeedback } from '../context/FeedbackContext';
+import { ThemeToggle } from './ui/ThemeToggle';
 
 interface NavbarProps {
   currentOrg: Organization;
@@ -38,6 +40,7 @@ interface NavbarProps {
   branches?: Branch[];
   assets?: Asset[];
   systemOrgs?: Organization[];
+  departments?: Department[];
   onSelectOrg?: (org: Organization) => void;
   onRefreshData?: () => Promise<void>;
 }
@@ -57,10 +60,12 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLogout,
   branches = [],
   assets = [],
+  departments = [],
   systemOrgs = [],
   onSelectOrg,
   onRefreshData
 }) => {
+  const { toast } = useFeedback();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
   const [showOrgDropdown, setShowOrgDropdown] = useState(false);
@@ -176,10 +181,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                               if (onRefreshData) await onRefreshData();
                             } else {
                               const errData = await res.json().catch(() => null);
-                              alert(errData?.error || 'Failed to switch tenant context.');
+                              toast(errData?.error || 'Failed to switch organization.', 'error');
                             }
                           } catch {
-                            alert('Network error switching tenant context.');
+                            toast('Network error while switching organization.', 'error');
                           } finally {
                             setIsSwitchingOrg(false);
                             setShowOrgDropdown(false);
@@ -297,10 +302,15 @@ export const Navbar: React.FC<NavbarProps> = ({
             <Search className="w-4 h-4" />
           </button>
 
+          <ThemeToggle />
+
           {/* Notifications Dropdown */}
           <div className="relative">
             <button
               onClick={() => { setShowNotifMenu(!showNotifMenu); setShowUserMenu(false); }}
+              aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
+              aria-haspopup="true"
+              aria-expanded={showNotifMenu}
               className="relative p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors"
             >
               <Bell className="w-4 h-4" />
@@ -430,6 +440,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           currentOrg={currentOrg}
           branches={branches}
           assets={assets}
+          departments={departments}
           isOpen={showSettingsModal}
           onClose={() => setShowSettingsModal(false)}
           onUpdateUser={(updated) => {

@@ -190,9 +190,25 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
 
     return () => {
       cancelAnimationFrame(animationFrameId);
+      currentMount.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
+
+      // Clean up Three.js scene, geometries, and materials to prevent WebGL memory leaks
+      scene.traverse((object: any) => {
+        if (object.geometry) {
+          object.geometry.dispose();
+        }
+        if (object.material) {
+          if (Array.isArray(object.material)) {
+            object.material.forEach((mat: any) => mat?.dispose?.());
+          } else {
+            object.material.dispose?.();
+          }
+        }
+      });
+
       if (currentMount && renderer.domElement && currentMount.contains(renderer.domElement)) {
         currentMount.removeChild(renderer.domElement);
       }

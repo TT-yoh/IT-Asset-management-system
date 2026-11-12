@@ -3,8 +3,8 @@ import bcrypt from 'bcryptjs';
 import config from './config';
 import { query } from './db';
 
-export const BCRYPT_ROUNDS = 12;
-export const SESSION_TTL_SECONDS = 60 * 60; // 60 minutes
+export const BCRYPT_ROUNDS = config.BCRYPT_ROUNDS || 12;
+export const SESSION_TTL_SECONDS = config.SESSION_TTL_SECONDS || 3600;
 export const MAX_FAILED_ATTEMPTS = 5;
 
 // Precomputed cost-12 bcrypt hash used for timing equalization on non-existent users
@@ -63,11 +63,23 @@ export function verifySessionToken(token: string): SessionClaims | null {
   const [b64Payload, signature] = parts;
   if (!b64Payload || !signature) return null;
 
-  const expectedSignature = crypto.createHmac('sha256', config.SESSION_SECRET).update(b64Payload).digest('base64url');
   const sigBuf = Buffer.from(signature);
+  let isValid = false;
+
+  const expectedSignature = crypto.createHmac('sha256', config.SESSION_SECRET).update(b64Payload).digest('base64url');
   const expSigBuf = Buffer.from(expectedSignature);
 
-  if (sigBuf.length !== expSigBuf.length || !crypto.timingSafeEqual(sigBuf, expSigBuf)) {
+  if (sigBuf.length === expSigBuf.length && crypto.timingSafeEqual(sigBuf, expSigBuf)) {
+    isValid = true;
+  } else if (config.SESSION_SECRET_PREVIOUS) {
+    const prevExpected = crypto.createHmac('sha256', config.SESSION_SECRET_PREVIOUS).update(b64Payload).digest('base64url');
+    const prevSigBuf = Buffer.from(prevExpected);
+    if (sigBuf.length === prevSigBuf.length && crypto.timingSafeEqual(sigBuf, prevSigBuf)) {
+      isValid = true;
+    }
+  }
+
+  if (!isValid) {
     return null;
   }
 
@@ -116,10 +128,21 @@ export function verify2FAPendingToken(token: string): { userId: string } | null 
   const [b64, sig] = parts;
   if (!b64 || !sig) return null;
 
-  const expectedSig = crypto.createHmac('sha256', config.SESSION_SECRET).update(b64).digest('base64url');
   const sBuf = Buffer.from(sig);
+  let isValid = false;
+  const expectedSig = crypto.createHmac('sha256', config.SESSION_SECRET).update(b64).digest('base64url');
   const expBuf = Buffer.from(expectedSig);
-  if (sBuf.length !== expBuf.length || !crypto.timingSafeEqual(sBuf, expBuf)) {
+  if (sBuf.length === expBuf.length && crypto.timingSafeEqual(sBuf, expBuf)) {
+    isValid = true;
+  } else if (config.SESSION_SECRET_PREVIOUS) {
+    const prevExpected = crypto.createHmac('sha256', config.SESSION_SECRET_PREVIOUS).update(b64).digest('base64url');
+    const prevBuf = Buffer.from(prevExpected);
+    if (sBuf.length === prevBuf.length && crypto.timingSafeEqual(sBuf, prevBuf)) {
+      isValid = true;
+    }
+  }
+
+  if (!isValid) {
     return null;
   }
 
@@ -342,59 +365,11 @@ export function timingSafeTokenEqual(a: string, b: string): boolean {
 }
 
 // ============================================================================
-// Corporate Password Policy Validator
+// Corporate Password Policy Validator (delegates to shared module)
 // ============================================================================
 
-const COMMON_PASSWORDS = new Set([
-  'password1234',
-  'password123!',
-  'admin1234567',
-  'admin123456!',
-  'qwerty123456',
-  'welcome12345',
-  'welcome1234!',
-  'letmein12345',
-  'omniasset123',
-  'omniasset123!'
-]);
+export { COMMON_PASSWORDS, validatePasswordPolicy } from '../shared/password-policy';
 
-export function validatePasswordPolicy(
-  password: string,
-  user?: { email?: string; fullName?: string }
-): { valid: boolean; error?: string } {
-  if (!password || typeof password !== 'string') {
-    return { valid: false, error: 'Password is required.' };
-  }
-
-  if (password.length < 12) {
-    return { valid: false, error: 'Password must be at least 12 characters long.' };
-  }
-
-  const lower = password.toLowerCase();
-  if (COMMON_PASSWORDS.has(lower)) {
-    return { valid: false, error: 'Password is too common. Please choose a more complex passphrase.' };
-  }
-
-  if (user?.email) {
-    const emailLower = user.email.toLowerCase().trim();
-    const localPart = emailLower.split('@')[0] || '';
-    if (lower === emailLower || (localPart.length >= 3 && lower.includes(localPart))) {
-      return { valid: false, error: 'Password must not contain your email address.' };
-    }
-  }
-
-  if (user?.fullName) {
-    const nameLower = user.fullName.toLowerCase().trim();
-    const words = nameLower.split(/\s+/).filter(w => w.length >= 3);
-    for (const w of words) {
-      if (lower.includes(w)) {
-        return { valid: false, error: 'Password must not contain parts of your name.' };
-      }
-    }
-  }
-
-  return { valid: true };
-}
 
 // ============================================================================
 // Database-Backed Login Throttling & Account Lockout

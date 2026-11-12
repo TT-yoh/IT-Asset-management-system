@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CheckoutRecord, Asset, User, AssetCondition, Branch } from '../types';
 import { CheckoutForm } from './CheckoutForm';
+import { useFeedback } from '../context/FeedbackContext';
 import { CheckinForm } from './CheckinForm';
 import { CheckoutService } from '../lib/checkout-service';
 import { escapeCsvRow } from '../lib/csv-sanitizer';
@@ -53,6 +54,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
   onAssignCustody,
   onUnassignCustody
 }) => {
+  const { toast } = useFeedback();
   // Modals state
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [showCheckinModal, setShowCheckinModal] = useState(false);
@@ -60,35 +62,14 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
   const [showUnassignModal, setShowUnassignModal] = useState(false);
 
   // Selected Targets
-  const [targetAssetId, setTargetAssetId] = useState(assets[0]?.id || '');
-  const [targetUserId, setTargetUserId] = useState(users[0]?.id || '');
+  const [targetAssetId, setTargetAssetId] = useState('');
+  const [targetUserId, setTargetUserId] = useState('');
   const [targetCheckoutRecord, setTargetCheckoutRecord] = useState<CheckoutRecord | null>(null);
   const [unassignReason, setUnassignReason] = useState('Standard rotation cycle');
   const ledgerRef = React.useRef<HTMLDivElement>(null);
 
-  // Direct Assign Custom States
-  const [assignType, setAssignType] = useState<'REGISTERED' | 'CUSTOM'>('REGISTERED');
-  const [assignCustomName, setAssignCustomName] = useState('');
+  // Direct Assign States
   const [assignBranchId, setAssignBranchId] = useState(branches[0]?.id || '');
-
-  React.useEffect(() => {
-    if (targetAssetId && assets.length > 0) {
-      const selectedAsset = assets.find(a => a.id === targetAssetId);
-      const catName = selectedAsset?.categoryName?.toLowerCase() || '';
-      const isLaptopOrPhone = Boolean(
-        catName.includes('laptop') ||
-        catName.includes('phone') ||
-        catName.includes('mobile') ||
-        catName.includes('cell') ||
-        catName.includes('smartphone') ||
-        selectedAsset?.categoryId === 'cat-lap' ||
-        selectedAsset?.categoryId === 'cat-phone'
-      );
-      if (isLaptopOrPhone) {
-        setAssignType('CUSTOM');
-      }
-    }
-  }, [targetAssetId, assets]);
 
   // Filters state (File 7 requirement)
   const [filterAsset, setFilterAsset] = useState('ALL');
@@ -99,8 +80,15 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
   const isAdminOrSupport = currentUser.role === 'ADMIN' || currentUser.role === 'IT_SUPPORT';
   const isAdmin = currentUser.role === 'ADMIN';
 
-  // Available pools
-  const activeAssetsPool = assets.filter(a => a.status === 'ACTIVE' || a.status === 'REPAIR');
+  // Available pools: ACTIVE unassigned assets scoped to caller's branch
+  const activeAssetsPool = assets.filter(a => {
+    if (a.status !== 'ACTIVE') return false;
+    if (a.assignedToUserId) return false;
+    if (currentUser.role === 'BRANCH_MANAGER' || currentUser.role === 'USER') {
+      if (!currentUser.branchId || a.branchId !== currentUser.branchId) return false;
+    }
+    return true;
+  });
   const checkedOutAssetsPool = assets.filter(a => !!a.assignedToUserId);
 
   // Status helper
@@ -156,7 +144,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
 
     onNewCheckout(res.checkout, res.updatedAsset);
     setShowCheckoutModal(false);
-    alert(`Checkout executed! ${ast.assetCode} assigned to ${user.fullName}. Audit log entry written.`);
+    toast(`${ast.assetCode} checked out to ${user.fullName}.`);
   };
 
   // Handle Checkin Execution (File 2 & File 6)
@@ -171,30 +159,25 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
   const handleDirectAssignSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin) {
-      alert('RBAC Denial: Only organization ADMIN users can directly force custody assignment.');
+      toast('Only organization admins can directly assign custody.', 'error');
       return;
     }
 
     const ast = assets.find(a => a.id === targetAssetId);
-    if (!ast) return;
+    if (!ast) {
+      toast('Please select a valid hardware device.', 'error');
+      return;
+    }
 
-    let targetUser: User | { id: string; fullName: string; email?: string; avatar?: string; role?: string };
-    if (assignType === 'REGISTERED') {
-      const found = users.find(u => u.id === targetUserId);
-      if (!found) return;
-      targetUser = found;
-    } else {
-      if (!assignCustomName.trim()) {
-        alert('Please specify an assignee name.');
-        return;
-      }
-      targetUser = {
-        id: `custom-${encodeURIComponent(assignCustomName.trim())}`,
-        fullName: assignCustomName.trim(),
-        avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(assignCustomName.trim())}`,
-        email: 'Offline / External Custody',
-        role: 'USER'
-      };
+    if (!targetUserId) {
+      toast('Please select an active staff custodian.', 'error');
+      return;
+    }
+
+    const targetUser = users.find(u => u.id === targetUserId);
+    if (!targetUser) {
+      toast('Selected custodian not found in active directory.', 'error');
+      return;
     }
 
     const br = branches.find(b => b.id === assignBranchId) || branches[0];
@@ -211,19 +194,19 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
 
     onNewCheckout(res.checkout, res.updatedAsset);
     setShowAssignModal(false);
-    alert(`Direct custody assignment recorded. Device allocated to ${targetUser.fullName} at ${br?.name || 'registered branch'}.`);
+    toast(`Device assigned to ${targetUser.fullName} at ${br?.name || 'registered branch'}.`);
   };
 
   // Handle Unassign (File 4)
   const handleDirectUnassignSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin) {
-      alert('RBAC Denial: Only organization ADMIN users can revoke custody assignment.');
+      toast('Only organization admins can revoke custody assignment.', 'error');
       return;
     }
     if (onUnassignCustody) onUnassignCustody(targetAssetId, unassignReason);
     setShowUnassignModal(false);
-    alert('Asset unassigned and returned to general IT pool.');
+    toast('Asset unassigned and returned to the general IT pool.');
   };
 
   // Handle Export CSV (File 7 requirement)
@@ -491,7 +474,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
           MODAL A: HARDWARE CHECKOUT FORM (FILE 5 & FILE 8 REQUIREMENT)
          ==================================================================== */}
       {showCheckoutModal && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
+        <div data-modal-overlay className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
           {activeAssetsPool.length === 0 ? (
             <div className="max-w-md w-full relative bg-slate-900 border border-slate-700 rounded-3xl p-6 md:p-8 shadow-2xl text-xs text-center space-y-4">
               <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
@@ -545,7 +528,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
           MODAL B: RETURN CHECK-IN FORM (FILE 6 & FILE 9 REQUIREMENT)
          ==================================================================== */}
       {showCheckinModal && targetCheckoutRecord && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
+        <div data-modal-overlay className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
           <CheckinForm
             asset={assets.find(a => a.id === targetCheckoutRecord.assetId) || {
               id: targetCheckoutRecord.assetId,
@@ -580,7 +563,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
       {showAssignModal && (() => {
         if (assets.length === 0) {
           return (
-            <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
+            <div data-modal-overlay className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
               <div className="max-w-md w-full bg-slate-900 border border-slate-700 rounded-3xl p-6 md:p-8 shadow-2xl text-xs text-center space-y-4">
                 <div className="w-12 h-12 rounded-2xl bg-sky-500/10 border border-sky-500/20 text-sky-400 flex items-center justify-center mx-auto">
                   <UserCheck className="w-6 h-6" />
@@ -605,20 +588,8 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
           );
         }
 
-        const selectedAssetForAssign = assets.find(a => a.id === targetAssetId) || assets[0];
-        const catName = selectedAssetForAssign?.categoryName?.toLowerCase() || '';
-        const isSelectedAssetLaptopOrPhone = Boolean(
-          catName.includes('laptop') ||
-          catName.includes('phone') ||
-          catName.includes('mobile') ||
-          catName.includes('cell') ||
-          catName.includes('smartphone') ||
-          selectedAssetForAssign?.categoryId === 'cat-lap' ||
-          selectedAssetForAssign?.categoryId === 'cat-phone'
-        );
-
         return (
-          <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
+          <div data-modal-overlay className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
             <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-6 md:p-8 shadow-2xl relative text-xs">
               <button onClick={() => setShowAssignModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-white">✕</button>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
@@ -627,93 +598,41 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
               </h3>
               <p className="text-slate-400 mt-1">Directly assigns custody and allocates target site location.</p>
 
-              {isSelectedAssetLaptopOrPhone && (
-                <div className="p-3 bg-sky-500/10 border border-sky-500/20 rounded-2xl mt-3 text-sky-300">
-                  <p className="font-semibold text-slate-100 flex items-center gap-1">
-                    <UserPlus className="w-4 h-4 text-sky-400" />
-                    <span>Device Custody Assignment</span>
-                  </p>
-                  <p className="text-[11px] mt-0.5 text-slate-400">
-                    This is a portable Laptop/Cellphone. Please write the name of the person this device is given to.
-                  </p>
-                  {(selectedAssetForAssign?.phoneNumber || selectedAssetForAssign?.registeredEmail) && (
-                    <div className="mt-2 pt-2 border-t border-sky-500/20 flex flex-wrap gap-2 text-[10.5px] font-mono">
-                      {selectedAssetForAssign.phoneNumber && (
-                        <span className="flex items-center gap-1 text-emerald-400">
-                          <Phone className="w-3 h-3" />
-                          <span>{selectedAssetForAssign.phoneNumber}</span>
-                        </span>
-                      )}
-                      {selectedAssetForAssign.registeredEmail && (
-                        <span className="flex items-center gap-1 text-sky-300">
-                          <Mail className="w-3 h-3" />
-                          <span>{selectedAssetForAssign.registeredEmail}</span>
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
               <form onSubmit={handleDirectAssignSubmit} className="mt-5 space-y-4">
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Target Hardware</label>
-                  <select value={targetAssetId} onChange={e => setTargetAssetId(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white focus:outline-none focus:border-sky-500">
-                    {assets.map(a => <option key={a.id} value={a.id}>[{a.assetCode}] {a.name}</option>)}
+                  <label className="block text-slate-300 font-semibold mb-1">Target Hardware *</label>
+                  <select
+                    value={targetAssetId}
+                    onChange={e => setTargetAssetId(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white focus:outline-none focus:border-sky-500"
+                  >
+                    <option value="" disabled>Select an available asset...</option>
+                    {activeAssetsPool.map(a => <option key={a.id} value={a.id}>[{a.assetCode}] {a.name}</option>)}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Assignment Type</label>
-                  <div className="grid grid-cols-2 gap-2 mt-1">
-                    <button
-                      type="button"
-                      onClick={() => setAssignType('REGISTERED')}
-                      className={`py-2 px-3 rounded-lg border text-center transition ${
-                        assignType === 'REGISTERED' ? 'bg-sky-500/15 border-sky-500 text-sky-400 font-bold' : 'bg-slate-950/40 border-slate-800 text-slate-400'
-                      }`}
-                    >
-                      Staff Account
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setAssignType('CUSTOM')}
-                      className={`py-2 px-3 rounded-lg border text-center transition ${
-                        assignType === 'CUSTOM' ? 'bg-sky-500/15 border-sky-500 text-sky-400 font-bold' : 'bg-slate-950/40 border-slate-800 text-slate-400'
-                      }`}
-                    >
-                      No Account Needed
-                    </button>
-                  </div>
+                  <label className="block text-slate-300 font-semibold mb-1">Assign Employee Custody *</label>
+                  <select
+                    autoFocus
+                    value={targetUserId}
+                    onChange={e => setTargetUserId(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white focus:outline-none focus:border-sky-500"
+                  >
+                    <option value="" disabled>Select an active staff member...</option>
+                    {users.filter(u => u.status === 'ACTIVE' || !u.status).map(u => (
+                      <option key={u.id} value={u.id}>{u.fullName} ({u.role} - {u.branchName || 'HQ'})</option>
+                    ))}
+                  </select>
                 </div>
 
-                {assignType === 'REGISTERED' ? (
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Assign Employee Custody</label>
-                    <select autoFocus value={targetUserId} onChange={e => setTargetUserId(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white focus:outline-none focus:border-sky-500">
-                      {users.map(u => <option key={u.id} value={u.id}>{u.fullName} ({u.role})</option>)}
-                    </select>
-                  </div>
-                ) : (
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1">
-                      {isSelectedAssetLaptopOrPhone ? "Name of Person Given To *" : "Assignee Full Name"}
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      autoFocus
-                      value={assignCustomName}
-                      onChange={e => setAssignCustomName(e.target.value)}
-                      placeholder={isSelectedAssetLaptopOrPhone ? "Write the name of the person given to..." : "Type name here (No login account needed)..."}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white focus:outline-none focus:border-sky-500 font-semibold"
-                    />
-                  </div>
-                )}
-
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Target Registered Location / Branch</label>
-                  <select value={assignBranchId} onChange={e => setAssignBranchId(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white focus:outline-none focus:border-sky-500">
+                  <label className="block text-slate-300 font-semibold mb-1">Target Registered Location / Branch *</label>
+                  <select
+                    value={assignBranchId}
+                    onChange={e => setAssignBranchId(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white focus:outline-none focus:border-sky-500"
+                  >
                     {branches.map(b => <option key={b.id} value={b.id}>{b.name} ({b.city})</option>)}
                   </select>
                 </div>
@@ -732,7 +651,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
           MODAL D: ADMIN REVOKE / UNASSIGN (FILE 4 REQUIREMENT)
          ==================================================================== */}
       {showUnassignModal && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
+        <div data-modal-overlay className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
           <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-6 md:p-8 shadow-2xl relative text-xs">
             <button onClick={() => setShowUnassignModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer">✕</button>
             <h3 className="text-base font-bold text-white flex items-center gap-2">

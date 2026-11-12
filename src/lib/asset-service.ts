@@ -1,5 +1,5 @@
 import { Asset, User, UserRole, CheckoutRecord, MaintenanceRecord, AuditLogItem } from '../types';
-import { canAccessAsset } from './rbac';
+import { canAccessAsset } from '../../shared/permissions';
 import Papa from 'papaparse';
 
 export interface AssetFilters {

@@ -38,6 +38,12 @@ body {
 }
 
 /* Ensure any custom tiny font size specs in Tailwind elements are upgraded for supreme legibility */
+[class*="text-[8px]"],
+[class*="text-[9px]"] {
+  font-size: 11px !important;
+  font-weight: 500 !important;
+}
+
 [class*="text-[10px]"] {
   font-size: 11.5px !important;
   font-weight: 500 !important;
@@ -73,5 +79,98 @@ body {
 
 html {
   scroll-behavior: smooth;
+  color-scheme: dark;
+}
+
+/* Visible keyboard focus everywhere, without adding rings for mouse users. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-emerald-400);
+  outline-offset: 2px;
+}
+
+/* Respect the OS "reduce motion" setting: no decorative animation or smooth scrolling. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * Light theme (opt-in via the theme toggle; dark stays the default).
+ *
+ * The UI is written against the dark slate scale, so the light theme inverts
+ * that scale instead of restyling every component: slate-950 (page) becomes
+ * the lightest shade and slate-50 the darkest. Accent text shades are darkened
+ * so they keep their contrast on light surfaces.
+ */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --color-slate-950: #f1f5f9;
+  --color-slate-900: #ffffff;
+  --color-slate-800: #e2e8f0;
+  --color-slate-700: #cbd5e1;
+  --color-slate-600: #94a3b8;
+  --color-slate-500: #566377;
+  --color-slate-400: #475569;
+  --color-slate-300: #334155;
+  --color-slate-200: #1e293b;
+  --color-slate-100: #0f172a;
+  --color-slate-50: #020617;
+
+  --color-emerald-200: #065f46;
+  --color-emerald-300: #047857;
+  --color-emerald-400: #047857;
+  --color-emerald-500: #047857;
+  --color-rose-200: #9f1239;
+  --color-rose-300: #be123c;
+  --color-rose-400: #be123c;
+  --color-amber-200: #92400e;
+  --color-amber-300: #b45309;
+  --color-amber-400: #b45309;
+  --color-sky-200: #075985;
+  --color-sky-300: #0369a1;
+  --color-sky-400: #0369a1;
+  --color-cyan-300: #0e7490;
+  --color-cyan-400: #0e7490;
+  --color-indigo-300: #4338ca;
+  --color-indigo-400: #4338ca;
+  --color-teal-300: #0f766e;
+  --color-teal-400: #0f766e;
+  --color-purple-300: #7e22ce;
+  --color-purple-400: #7e22ce;
+  --color-violet-300: #6d28d9;
+  --color-violet-400: #6d28d9;
+  --color-orange-300: #c2410c;
+  --color-orange-400: #c2410c;
+  --color-yellow-300: #a16207;
+  --color-yellow-400: #a16207;
+}
+
+/* White text is a heading colour in the dark theme; keep it white only on solid coloured surfaces. */
+:root[data-theme="light"] .text-white:not([class*="bg-emerald-"]):not([class*="bg-rose-"]):not([class*="bg-sky-"]):not([class*="bg-indigo-"]):not([class*="bg-amber-"]):not([class*="bg-red-"]):not([class*="bg-blue-"]):not([class*="bg-cyan-"]):not([class*="bg-purple-"]):not([class*="bg-gradient"]):not([class*="from-"]),
+:root[data-theme="light"] .hover\:text-white:hover:not([class*="bg-emerald-"]):not([class*="bg-rose-"]):not([class*="bg-sky-"]):not([class*="bg-indigo-"]):not([class*="bg-amber-"]):not([class*="bg-gradient"]):not([class*="from-"]) {
+  color: #0f172a;
+}
+
+/* Solid accent buttons written as dark-on-accent keep readable light text. */
+:root[data-theme="light"] [class*="bg-emerald-5"][class*="text-slate-9"],
+:root[data-theme="light"] [class*="bg-emerald-4"][class*="text-slate-9"],
+:root[data-theme="light"] [class*="bg-amber-5"][class*="text-slate-9"],
+:root[data-theme="light"] [class*="bg-sky-5"][class*="text-slate-9"] {
+  color: #ffffff;
+}
+
+:root[data-theme="light"] ::placeholder {
+  color: #94a3b8;
 }
 

@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { User, Organization, Branch, Department, UserRole } from '../types';
-import { ORGANIZATIONS, INITIAL_BRANCHES, USERS, DEPARTMENTS } from '../mockData';
 import { 
   persistBranch, 
   deleteBranchFromStorage, 
@@ -16,23 +15,20 @@ import {
   STORAGE_KEYS
 } from '../lib/tidb-storage';
 import { clearOfflineStoreOnLogout, setActiveSessionContext } from '../lib/offline-sync';
+import { useFeedback } from './FeedbackContext';
 import { RegisterCompanyData } from '../components/RegisterCompanyModal';
+import { validatePasswordPolicy as sharedValidatePasswordPolicy } from '../../shared/password-policy';
 
-/**
- * Validates corporate password complexity:
- * Minimum 8 characters, at least one letter and at least one number.
- */
-export const validatePasswordPolicy = (pwd: string): { valid: boolean; message: string } => {
-  if (!pwd || typeof pwd !== 'string') {
-    return { valid: false, message: 'Password is required.' };
-  }
-  if (pwd.length < 12) {
-    return { valid: false, message: 'Password must be at least 12 characters long.' };
-  }
-  if (!/[a-zA-Z]/.test(pwd) || !/[0-9]/.test(pwd)) {
-    return { valid: false, message: 'Password must contain at least one letter and one number.' };
-  }
-  return { valid: true, message: '' };
+export const validatePasswordPolicy = (
+  pwd: string,
+  user?: { email?: string; fullName?: string }
+): { valid: boolean; message: string; error?: string } => {
+  const res = sharedValidatePasswordPolicy(pwd, user);
+  return {
+    valid: res.valid,
+    message: res.message || res.error || '',
+    error: res.error
+  };
 };
 
 interface AuthContextType {
@@ -53,7 +49,7 @@ interface AuthContextType {
   handleLoginSuccess: (user: User, org: Organization) => void;
   handleLogout: () => void;
   handleSelectOrg: (org: Organization) => void;
-  handleRegisterOrganization: (data: RegisterCompanyData) => void;
+  handleRegisterOrganization: (data: RegisterCompanyData) => Promise<{ success: boolean; error?: string }>;
   handleActivateUser: (inviteToken: string, newPassword: string, twoFactorEnabled: boolean) => Promise<{ success: boolean; user?: User; error?: string }>;
   handleInviteUser: (data: {
     fullName: string;
@@ -63,7 +59,7 @@ interface AuthContextType {
     departmentName?: string;
     branchId?: string;
     branchName?: string;
-  }) => Promise<{ success: boolean; inviteToken?: string; user?: User; error?: string }>;
+  }) => Promise<{ success: boolean; inviteToken?: string; emailDelivered?: boolean; user?: User; error?: string }>;
   handleRegisterUser: (newUser: User) => void;
   handleUpdateUser: (updatedUser: User) => void;
   handleDeleteUser: (userId: string) => Promise<{ success: boolean; error?: string }>;
@@ -80,20 +76,19 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [systemOrgs, setSystemOrgs] = useState<Organization[]>(ORGANIZATIONS);
-  const [systemUsers, setSystemUsers] = useState<User[]>(USERS);
-  const [systemBranches, setSystemBranches] = useState<Branch[]>(INITIAL_BRANCHES);
-  const [systemDepartments, setSystemDepartments] = useState<Department[]>(DEPARTMENTS);
+  const { confirm } = useFeedback();
+  const [systemOrgs, setSystemOrgs] = useState<Organization[]>([]);
+  const [systemUsers, setSystemUsers] = useState<User[]>([]);
+  const [systemBranches, setSystemBranches] = useState<Branch[]>([]);
+  const [systemDepartments, setSystemDepartments] = useState<Department[]>([]);
 
-  const [currentOrg, setCurrentOrg] = useState<Organization>(() => {
-    return ORGANIZATIONS[0] || {
-      id: 'org-omnitech',
-      name: 'OmniTech Enterprise Systems',
-      type: 'Enterprise',
-      brandingColor: '#0ea5e9',
-      branchesCount: 1
-    };
-  });
+  const [currentOrg, setCurrentOrg] = useState<Organization>(() => ({
+    id: 'org-omnitech',
+    name: 'OmniTech Enterprise Systems',
+    type: 'Enterprise',
+    brandingColor: '#0ea5e9',
+    branchesCount: 1
+  }));
 
   // Server session cookie is authoritative; client never trusts localStorage on boot
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -210,9 +205,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       const result = await clearOfflineStoreOnLogout(false);
       if (!result.cleared && result.pendingCount > 0) {
-        const confirmLogout = window.confirm(
-          `Warning: You have ${result.pendingCount} pending offline mutation(s) that have not synced to the cloud.\n\nLogging out will clear this device's offline store and permanently lose these changes. Do you want to proceed?`
-        );
+        const confirmLogout = await confirm({
+          title: 'Log out with unsynced changes?',
+          message: `You have ${result.pendingCount} offline change${result.pendingCount === 1 ? '' : 's'} that have not synced to the cloud.\n\nLogging out clears this device's offline store and permanently loses them.`,
+          confirmLabel: 'Log out anyway',
+          cancelLabel: 'Stay signed in',
+          tone: 'danger'
+        });
         if (!confirmLogout) {
           return;
         }
@@ -233,7 +232,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (typeof window !== 'undefined') {
       window.history.replaceState({ tab: 'login' }, '', '#/login');
     }
-  }, []);
+  }, [confirm]);
 
   /**
    * Narrow action to synchronize users from remote database/storage
@@ -271,83 +270,62 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setCurrentOrg(org);
   };
 
-  const handleRegisterOrganization = (data: RegisterCompanyData) => {
-    const adminPassword = data.adminPassword?.trim();
-    const policyCheck = validatePasswordPolicy(adminPassword || '');
+  /**
+   * Addendum 4 Section C: Transactional Server Registration
+   * Calls POST /api/auth/register-organization to create tenant, branches,
+   * departments, and admin user in the database.
+   */
+  const handleRegisterOrganization = async (data: RegisterCompanyData): Promise<{ success: boolean; error?: string }> => {
+    const adminPassword = data.adminPassword?.trim() || '';
+    const policyCheck = validatePasswordPolicy(adminPassword, {
+      email: data.adminEmail,
+      fullName: data.adminName
+    });
     if (!policyCheck.valid) {
-      throw new Error(`Admin password does not meet security requirements: ${policyCheck.message}`);
+      throw new Error(`Admin password does not meet security requirements: ${policyCheck.message || policyCheck.error}`);
     }
 
-    const orgId = `org-${Date.now()}`;
-    const branchCount = Math.max(1, data.branches?.length || 1);
-    const newOrg: Organization = {
-      id: orgId,
-      name: data.name,
-      type: data.type || 'Enterprise',
-      logo: data.logo || '🏢',
-      brandingColor: '#10b981',
-      branchesCount: branchCount
-    };
+    const res = await fetch('/api/auth/register-organization', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      credentials: 'include',
+      body: JSON.stringify({
+        name: data.name,
+        type: data.type,
+        logo: data.logo,
+        adminEmail: data.adminEmail,
+        adminName: data.adminName,
+        adminPassword: adminPassword,
+        branches: data.branches
+      })
+    });
 
-    const provisionedBranches: Branch[] = (data.branches && data.branches.length > 0)
-      ? data.branches.map((b, idx) => ({
-          id: `branch-${Date.now()}-${idx}`,
-          orgId: newOrg.id,
-          name: b.name,
-          code: b.code || `BR-${idx + 1}`,
-          city: b.city,
-          country: b.country || 'Australia',
-          location: b.location || 'Site Facility',
-          managerName: b.managerName || data.adminName || 'Facility Manager'
-        }))
-      : [{
-          id: `branch-${Date.now()}-0`,
-          orgId: newOrg.id,
-          name: `${data.name} Main Campus`,
-          code: `HQ-${data.name.slice(0, 3).toUpperCase()}`,
-          location: 'Central Campus',
-          city: 'Headquarters',
-          country: 'Global',
-          managerName: data.adminName?.trim() || 'Enterprise Admin'
-        }];
+    const result = await res.json();
+    if (!res.ok) {
+      throw new Error(result.error || 'Failed to register organization.');
+    }
 
-    const primaryBranch = provisionedBranches[0]!;
-    const cleanDomain = data.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'company';
-    const finalEmail = data.adminEmail?.trim() || `admin@${cleanDomain}.com`;
-    const finalName = data.adminName?.trim() || `${data.name} Global Admin`;
-
-    const newAdminUser: User = {
-      id: `usr-${Date.now()}`,
-      orgId: newOrg.id,
-      email: finalEmail,
-      fullName: finalName,
-      role: 'ADMIN',
-      status: 'ACTIVE',
-      departmentId: 'dept-it',
-      departmentName: 'IT Infrastructure & SecOps',
-      branchId: primaryBranch.id,
-      branchName: primaryBranch.name,
-      twoFactorEnabled: false,
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'
-    };
+    const newOrg: Organization = result.organization;
+    const newAdminUser: User = result.user;
+    const branches: Branch[] = result.branches || [];
 
     setSystemOrgs(prev => [...prev, newOrg]);
-
-    // Use functional updates to prevent stale closure and persist computed result
-    setSystemBranches(prevBranches => {
-      const updatedBranches = [...prevBranches, ...provisionedBranches];
-      provisionedBranches.forEach(b => persistBranch(b, updatedBranches));
-      return updatedBranches;
-    });
-
-    setSystemUsers(prevUsers => {
-      const updatedUsers = [...prevUsers, newAdminUser];
-      persistUser(newAdminUser, updatedUsers);
-      return updatedUsers;
-    });
+    setSystemBranches(prevBranches => [...prevBranches, ...branches]);
+    setSystemUsers(prevUsers => [...prevUsers, newAdminUser]);
 
     setCurrentOrg(newOrg);
     setCurrentUser(newAdminUser);
+    setStoredSession(newAdminUser, newOrg);
+    setActiveSessionContext({
+      userId: newAdminUser.id,
+      orgId: newOrg.id,
+      sessionEpoch: Date.now()
+    });
+
+    return { success: true };
   };
 
   /**
@@ -428,7 +406,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     departmentName?: string;
     branchId?: string;
     branchName?: string;
-  }): Promise<{ success: boolean; inviteToken?: string; user?: User; error?: string }> => {
+  }): Promise<{ success: boolean; inviteToken?: string; emailDelivered?: boolean; user?: User; error?: string }> => {
     try {
       const res = await fetch('/api/users/invite', {
         method: 'POST',
@@ -478,6 +456,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return {
         success: true,
         inviteToken: resData.inviteToken,
+        emailDelivered: resData.emailDelivered === true,
         user: invitedUser
       };
     } catch (err: any) {

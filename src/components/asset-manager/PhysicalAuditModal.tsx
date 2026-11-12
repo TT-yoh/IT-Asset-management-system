@@ -21,6 +21,7 @@ import {
   Plus
 } from 'lucide-react';
 import { exportToExcel } from '../../lib/report-service';
+import { sanitizeScanInput } from '../../lib/sanitize';
 
 interface PhysicalAuditModalProps {
   organization: Organization;
@@ -52,6 +53,7 @@ export const PhysicalAuditModal: React.FC<PhysicalAuditModalProps> = ({
   const [manualInput, setManualInput] = useState<string>('');
   const [isCameraActive, setIsCameraActive] = useState<boolean>(true);
   const [audioFeedback, setAudioFeedback] = useState<boolean>(true);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'VERIFIED' | 'DISPLACED' | 'MISSING' | 'UNREGISTERED'>('VERIFIED');
   const [recentScanBanner, setRecentScanBanner] = useState<{
     type: 'VERIFIED' | 'DISPLACED' | 'UNREGISTERED';
@@ -132,13 +134,16 @@ export const PhysicalAuditModal: React.FC<PhysicalAuditModalProps> = ({
 
   // Process a scanned code (assetCode or serialNumber or JSON payload)
   const processCode = (rawCode: string) => {
-    const clean = rawCode.trim();
+    const clean = sanitizeScanInput(rawCode);
     if (!clean) return;
 
     let targetCode = clean;
     try {
       const parsed = JSON.parse(clean);
-      if (parsed.code) targetCode = parsed.code;
+      if (parsed.code) targetCode = String(parsed.code).trim();
+      else if (parsed.assetCode) targetCode = String(parsed.assetCode).trim();
+      else if (parsed.sn) targetCode = String(parsed.sn).trim();
+      else if (parsed.serialNumber) targetCode = String(parsed.serialNumber).trim();
     } catch {}
 
     // Check match in all assets across all identifiers (Tag, S/N, IMEI, MAC)
@@ -175,9 +180,21 @@ export const PhysicalAuditModal: React.FC<PhysicalAuditModalProps> = ({
     }
   };
 
+  // Cleanup audio context on unmount
+  useEffect(() => {
+    return () => {
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close().catch(() => {});
+      }
+    };
+  }, []);
+
   // Start HTML5 Camera Scanner
   useEffect(() => {
-    if (!isCameraActive) return;
+    if (!isCameraActive) {
+      setCameraError(null);
+      return;
+    }
 
     let isSubscribed = true;
     const scannerId = 'audit-camera-viewport';
@@ -197,8 +214,17 @@ export const PhysicalAuditModal: React.FC<PhysicalAuditModalProps> = ({
           },
           () => {}
         );
-      } catch (err) {
+        if (isSubscribed) setCameraError(null);
+      } catch (err: any) {
         console.warn('Camera audit scanner error:', err);
+        if (isSubscribed) {
+          const isPermission = err?.name === 'NotAllowedError' || String(err).includes('NotAllowedError') || String(err).includes('Permission');
+          setCameraError(
+            isPermission
+              ? 'Camera permission denied. Use manual entry or barcode gun.'
+              : 'Camera unavailable. Please enter code manually.'
+          );
+        }
       }
     };
 
@@ -211,7 +237,10 @@ export const PhysicalAuditModal: React.FC<PhysicalAuditModalProps> = ({
         qrInstanceRef.current.stop().then(() => {
           qrInstanceRef.current?.clear();
           qrInstanceRef.current = null;
-        }).catch(() => {});
+        }).catch(() => {
+          qrInstanceRef.current?.clear();
+          qrInstanceRef.current = null;
+        });
       }
     };
   }, [isCameraActive, activeBranch.id]);
@@ -289,7 +318,7 @@ export const PhysicalAuditModal: React.FC<PhysicalAuditModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/90 backdrop-blur-md flex flex-col items-center p-3 sm:p-6 animate-in fade-in duration-200">
+    <div data-modal-overlay className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/90 backdrop-blur-md flex flex-col items-center p-3 sm:p-6 animate-in fade-in duration-200">
       <div className="w-full max-w-5xl bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-2xl flex flex-col gap-6 my-4 sm:my-8">
         
         {/* Header */}
@@ -408,6 +437,12 @@ export const PhysicalAuditModal: React.FC<PhysicalAuditModalProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Scanner Viewport (1 Col) */}
           <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center relative min-h-[240px]">
+            {cameraError && (
+              <div className="mb-3 p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-start gap-2 text-amber-300 text-xs w-full max-w-[240px] animate-in fade-in">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                <span className="leading-snug">{cameraError}</span>
+              </div>
+            )}
             {isCameraActive ? (
               <div className="w-full flex flex-col items-center">
                 <div 

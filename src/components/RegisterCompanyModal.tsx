@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Building2, X, Plus, Sparkles, MapPin, Briefcase, Mail, Lock, User, Trash2, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Building2, X, Plus, Sparkles, MapPin, Briefcase, Mail, Lock, User, Trash2, ArrowRight, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { OrgType } from '../types';
+import { validatePasswordPolicy } from '../../shared/password-policy';
 
 export interface InitialBranchInput {
   id?: string;
@@ -25,7 +26,7 @@ export interface RegisterCompanyData {
 interface RegisterCompanyModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onRegister: (data: RegisterCompanyData) => void;
+  onRegister: (data: RegisterCompanyData) => Promise<any> | void;
 }
 
 const INDUSTRY_OPTIONS: OrgType[] = [
@@ -75,6 +76,14 @@ export const RegisterCompanyModal: React.FC<RegisterCompanyModalProps> = ({
   const [adminEmail, setAdminEmail] = useState('');
   const [adminName, setAdminName] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Password Policy check
+  const passwordCheck = validatePasswordPolicy(adminPassword, {
+    email: adminEmail,
+    fullName: adminName
+  });
 
   // Step 3: Operating Branches / Facilities (Supports Primary HQ + Multiple Regional Branches)
   const [primaryBranchName, setPrimaryBranchName] = useState('');
@@ -119,14 +128,17 @@ export const RegisterCompanyModal: React.FC<RegisterCompanyModalProps> = ({
     setAdditionalBranches(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage('');
+
     if (!name.trim()) {
       setActiveStep(1);
       return;
     }
-    if (!adminEmail.trim() || !adminPassword.trim() || adminPassword.length < 8 || !/[a-zA-Z]/.test(adminPassword) || !/[0-9]/.test(adminPassword)) {
+    if (!adminEmail.trim() || !adminPassword.trim() || !passwordCheck.valid) {
       setActiveStep(2);
+      setErrorMessage(passwordCheck.error || passwordCheck.message || 'Password must meet corporate security policy.');
       return;
     }
 
@@ -144,31 +156,38 @@ export const RegisterCompanyModal: React.FC<RegisterCompanyModalProps> = ({
 
     const allBranches = [primaryHqBranch, ...additionalBranches];
 
-    onRegister({
-      name: name.trim(),
-      type,
-      logo,
-      adminEmail: finalEmail,
-      adminName: adminName.trim() || `${name.trim()} Admin`,
-      adminPassword: adminPassword.trim() || 'Admin123!',
-      branches: allBranches
-    });
+    setIsSubmitting(true);
+    try {
+      await onRegister({
+        name: name.trim(),
+        type,
+        logo,
+        adminEmail: finalEmail,
+        adminName: adminName.trim() || `${name.trim()} Admin`,
+        adminPassword: adminPassword.trim(),
+        branches: allBranches
+      });
 
-    // Reset
-    setName('');
-    setAdminEmail('');
-    setAdminName('');
-    setAdminPassword('');
-    setPrimaryBranchName('');
-    setPrimaryBranchCity('');
-    setPrimaryBranchLocation('');
-    setAdditionalBranches([]);
-    setActiveStep(1);
-    onClose();
+      // Reset
+      setName('');
+      setAdminEmail('');
+      setAdminName('');
+      setAdminPassword('');
+      setPrimaryBranchName('');
+      setPrimaryBranchCity('');
+      setPrimaryBranchLocation('');
+      setAdditionalBranches([]);
+      setActiveStep(1);
+      onClose();
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to register company. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
+    <div data-modal-overlay className="fixed inset-0 z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
       <div 
         className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden relative max-h-[92vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
@@ -248,6 +267,12 @@ export const RegisterCompanyModal: React.FC<RegisterCompanyModalProps> = ({
 
         {/* Form Body - Scrollable */}
         <form ref={formBodyRef} onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto flex-1">
+          {errorMessage && (
+            <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-400 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
           {/* STEP 1: COMPANY PROFILE */}
           {activeStep === 1 && (
             <div className="space-y-4 animate-in fade-in duration-150">
@@ -371,12 +396,17 @@ export const RegisterCompanyModal: React.FC<RegisterCompanyModalProps> = ({
                     type="password"
                     required
                     value={adminPassword}
-                    onChange={(e) => setAdminPassword(e.target.value)}
+                    onChange={(e) => {
+                      setAdminPassword(e.target.value);
+                      if (errorMessage) setErrorMessage('');
+                    }}
                     placeholder="••••••••••••"
                     className="w-full px-3.5 py-2.5 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 font-mono"
                   />
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    Must be at least 8 characters with at least one letter and one number.
+                  <p className={`text-[10px] mt-1 ${adminPassword && !passwordCheck.valid ? 'text-amber-400 font-medium' : 'text-slate-400'}`}>
+                    {adminPassword && !passwordCheck.valid
+                      ? (passwordCheck.error || passwordCheck.message)
+                      : 'Min 12 characters, including letters and numbers/symbols. Cannot contain email or name parts.'}
                   </p>
                 </div>
               </div>
@@ -391,8 +421,11 @@ export const RegisterCompanyModal: React.FC<RegisterCompanyModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  disabled={!adminEmail.trim() || adminPassword.length < 8 || !/[a-zA-Z]/.test(adminPassword) || !/[0-9]/.test(adminPassword)}
-                  onClick={() => setActiveStep(3)}
+                  disabled={!adminEmail.trim() || !adminPassword.trim() || !passwordCheck.valid}
+                  onClick={() => {
+                    setErrorMessage('');
+                    setActiveStep(3);
+                  }}
                   className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 transition shadow-lg shadow-emerald-500/20 cursor-pointer"
                 >
                   <span>Configure Operating Branches</span>
@@ -611,10 +644,20 @@ export const RegisterCompanyModal: React.FC<RegisterCompanyModalProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs flex items-center gap-2 transition shadow-xl shadow-emerald-500/20 cursor-pointer"
+                  disabled={isSubmitting}
+                  className="px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-60 text-slate-950 font-black rounded-xl text-xs flex items-center gap-2 transition shadow-xl shadow-emerald-500/20 cursor-pointer"
                 >
-                  <CheckCircle2 className="w-4 h-4 text-slate-950" />
-                  <span>Complete Registration &amp; Launch Workspace</span>
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 text-slate-950 animate-spin" />
+                      <span>Provisioning Workspace...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-slate-950" />
+                      <span>Complete Registration &amp; Launch Workspace</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>

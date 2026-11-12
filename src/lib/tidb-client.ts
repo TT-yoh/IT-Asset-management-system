@@ -103,25 +103,34 @@ export interface TiDBTestResult {
 }
 
 /**
- * Verifies backend database health and latency via /api/health
+ * Verifies backend database health and latency via /api/ready
  */
 export const testTiDBConnection = async (): Promise<TiDBTestResult> => {
   const startTime = performance.now();
   try {
-    const res = await fetch('/api/health');
+    const res = await fetch('/api/ready');
     const latencyMs = Math.round(performance.now() - startTime);
     if (res.ok) {
       const data = await res.json().catch(() => null);
-      const isConnected = Boolean(data?.database?.connected);
+      const isConnected = data?.database === 'connected' || data?.status === 'ready';
       return {
         tested: true,
         connected: isConnected,
         latencyMs,
         clusterVersion: isConnected ? 'PingCAP TiDB Cloud (Server-Managed Connection Pool)' : 'Database Offline',
-        tiflashReplicasActive: isConnected ? 5 : 0,
+        tiflashReplicasActive: isConnected ? 1 : 0,
         message: isConnected
           ? `Server connection pool verified healthy. Ping roundtrip: ${latencyMs}ms.`
           : 'Backend server reachable, but database connection pool reported degraded or offline.'
+      };
+    } else {
+      return {
+        tested: true,
+        connected: false,
+        latencyMs,
+        clusterVersion: 'Database Unavailable',
+        tiflashReplicasActive: 0,
+        message: `Database readiness probe returned HTTP ${res.status}.`
       };
     }
   } catch (err: any) {

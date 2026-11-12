@@ -275,7 +275,7 @@ export const PrintLabelsModal: React.FC<PrintLabelsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/90 backdrop-blur-md flex flex-col items-center p-3 sm:p-6 print:p-0 print:bg-white print:static">
+    <div data-modal-overlay className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/90 backdrop-blur-md flex flex-col items-center p-3 sm:p-6 print:p-0 print:bg-white print:static">
       {/* Dynamic Print Stylesheet for exact label sheet geometry */}
       <style>{`
         @media print {

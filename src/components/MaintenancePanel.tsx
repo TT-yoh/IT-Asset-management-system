@@ -437,7 +437,7 @@ export const MaintenancePanel: React.FC<MaintenancePanelProps> = ({
 
       {/* CREATE TICKET MODAL */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
+        <div data-modal-overlay className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
           <div ref={createModalBodyRef} className="bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <button onClick={() => setShowCreateModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white p-1">✕</button>
             <h3 className="text-base font-bold text-white flex items-center gap-2 mb-4 pb-3 border-b border-slate-800">
@@ -448,6 +448,7 @@ export const MaintenancePanel: React.FC<MaintenancePanelProps> = ({
             <MaintenanceForm
               assets={assets}
               technicians={users.filter(u => u.role === 'IT_SUPPORT' || u.role === 'ADMIN') || []}
+              currentUser={currentUser}
               onSubmit={handleFormSubmit}
               onCancel={() => setShowCreateModal(false)}
             />

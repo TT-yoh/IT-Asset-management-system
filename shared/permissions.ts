@@ -23,6 +23,8 @@ export type PermissionAction =
   | 'assets:delete'
   | 'assets:writeoff'
   | 'assets:valuation'
+  | 'assets:export'
+  | 'reports:read'
   | 'checkouts:read'
   | 'checkouts:create'
   | 'checkouts:return'
@@ -50,6 +52,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly PermissionAction[]> = {
     'assets:delete',
     'assets:writeoff',
     'assets:valuation',
+    'assets:export',
+    'reports:read',
     'checkouts:read',
     'checkouts:create',
     'checkouts:return',
@@ -71,6 +75,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly PermissionAction[]> = {
   ],
   DIRECTOR: [
     'assets:read',
+    'assets:export',
+    'reports:read',
     'checkouts:read',
     'maintenance:read',
     'budgets:read',
@@ -83,11 +89,14 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly PermissionAction[]> = {
     'assets:read',
     'assets:create',
     'assets:update',
+    'assets:export',
+    'reports:read',
     'checkouts:read',
     'checkouts:create',
     'checkouts:return',
     'maintenance:read',
     'maintenance:create',
+    'budgets:read',
     'users:read',
     'branches:read',
     'departments:read'
@@ -97,6 +106,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly PermissionAction[]> = {
     'assets:create',
     'assets:update',
     'assets:writeoff',
+    'assets:export',
     'checkouts:read',
     'checkouts:create',
     'checkouts:return',
@@ -113,6 +123,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, readonly PermissionAction[]> = {
     'assets:read',
     'assets:writeoff',
     'assets:valuation',
+    'assets:export',
+    'reports:read',
     'checkouts:read',
     'maintenance:read',
     'budgets:read',
@@ -147,6 +159,27 @@ export const ROLE_HIERARCHY: Record<UserRole, number> = {
   IT_SUPPORT: 40,
   USER: 10
 };
+
+export type NavTab = 'dashboard' | 'assets' | 'checkout' | 'repair' | 'users' | 'branches' | 'reports' | 'budget' | 'audit';
+
+export const TAB_PERMISSIONS: Record<NavTab, PermissionAction | null> = {
+  dashboard: null,
+  assets: 'assets:read',
+  checkout: 'checkouts:read',
+  repair: 'maintenance:read',
+  users: 'users:read',
+  branches: 'branches:read',
+  reports: 'reports:read',
+  budget: 'budgets:read',
+  audit: 'audit:read'
+};
+
+export function canAccessTab(role: UserRole | string | undefined | null, tab: NavTab): boolean {
+  if (tab === 'dashboard') return true;
+  const required = TAB_PERMISSIONS[tab];
+  if (!required) return true;
+  return hasPermission(role, required);
+}
 
 /**
  * Validates role assignment to prevent privilege escalation:
@@ -238,3 +271,40 @@ export function canCertifyDamagedReturn(
 
   return false;
 }
+
+/**
+ * Authoritative check for whether a user can access a specific asset based on tenant & branch scoping rules.
+ * Matches SQL-level tenant isolation:
+ * - ADMIN, DIRECTOR, IT_SUPPORT, FINANCE: organization-wide access.
+ * - BRANCH_MANAGER: branch-scoped (fail-closed if branchId is not set).
+ * - USER: branch-scoped catalog or assigned custody (fail-closed if branchId is not set).
+ */
+export function canAccessAsset(
+  user: { id?: string; orgId: string; role: UserRole | string; branchId?: string | null; isSuperAdmin?: boolean },
+  asset: { orgId: string; branchId?: string | null; assignedToUserId?: string | null }
+): boolean {
+  if (!user || !asset) return false;
+  if (user.isSuperAdmin) return true;
+  if (user.orgId !== asset.orgId) return false;
+
+  const role = user.role as UserRole;
+  if (role === 'ADMIN' || role === 'DIRECTOR' || role === 'IT_SUPPORT' || role === 'FINANCE') {
+    return true;
+  }
+
+  // Branch Manager and standard User fail closed if they have no branchId assigned
+  if (!user.branchId) {
+    return false;
+  }
+
+  if (role === 'BRANCH_MANAGER') {
+    return asset.branchId === user.branchId;
+  }
+
+  if (role === 'USER') {
+    return asset.branchId === user.branchId || (Boolean(user.id) && asset.assignedToUserId === user.id);
+  }
+
+  return false;
+}
+

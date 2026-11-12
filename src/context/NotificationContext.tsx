@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { SystemNotification, Asset, CheckoutRecord, MaintenanceRecord } from '../types';
-import { INITIAL_NOTIFICATIONS } from '../mockData';
 import { persistNotification } from '../lib/tidb-storage';
 
 interface NotificationContextType {
@@ -17,7 +16,7 @@ interface NotificationContextType {
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
 export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [notifications, setNotifications] = useState<SystemNotification[]>(INITIAL_NOTIFICATIONS);
+  const [notifications, setNotifications] = useState<SystemNotification[]>([]);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 

@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { User, Organization, Branch, Asset } from '../types';
-import { DEPARTMENTS } from '../mockData';
+import { User, Organization, Branch, Asset, Department } from '../types';
 import {
   User as UserIcon,
   Shield,
@@ -20,14 +19,22 @@ import {
   Smartphone,
   RefreshCw,
   ExternalLink,
-  Sparkles
+  Sparkles,
+  QrCode,
+  Copy,
+  Check,
+  AlertTriangle
 } from 'lucide-react';
+import { generateQrDataUrl } from '../lib/qr-generator';
+import { validatePasswordPolicy } from '../../shared/password-policy';
+
 
 interface UserSettingsModalProps {
   currentUser: User;
   currentOrg: Organization;
   branches: Branch[];
   assets: Asset[];
+  departments?: Department[];
   isOpen: boolean;
   onClose: () => void;
   onUpdateUser: (updatedUser: User) => void;
@@ -47,6 +54,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   currentOrg,
   branches,
   assets,
+  departments = [],
   isOpen,
   onClose,
   onUpdateUser,
@@ -88,9 +96,20 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   const [pwSuccessMsg, setPwSuccessMsg] = useState('');
   const [pwErrorMsg, setPwErrorMsg] = useState('');
 
-  // 2FA State
-  const [twoFactorEnabled, setTwoFactorEnabled] = useState(currentUser.twoFactorEnabled);
-  const [twoFactorMsg, setTwoFactorMsg] = useState('');
+  // 2FA State (Addendum 4 Section A: Real End-to-End TOTP)
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(Boolean(currentUser.twoFactorEnabled));
+  const [step2FA, setStep2FA] = useState<'idle' | 'enrolling' | 'recovery' | 'disabling'>('idle');
+  const [enrolSecret, setEnrolSecret] = useState('');
+  const [enrolQrDataUrl, setEnrolQrDataUrl] = useState('');
+  const [enrolCode, setEnrolCode] = useState('');
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+  const [copiedCodes, setCopiedCodes] = useState(false);
+  const [disablePassword, setDisablePassword] = useState('');
+  const [disableCode, setDisableCode] = useState('');
+  const [disableRecoveryCode, setDisableRecoveryCode] = useState('');
+  const [twoFactorLoading, setTwoFactorLoading] = useState(false);
+  const [twoFactorError, setTwoFactorError] = useState('');
+  const [twoFactorSuccess, setTwoFactorSuccess] = useState('');
 
   if (!isOpen) return null;
 
@@ -100,7 +119,17 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
          (a.assignedToUserName && a.assignedToUserName.toLowerCase() === currentUser.fullName.toLowerCase())
   );
 
-  const selectedDept = DEPARTMENTS.find(d => d.id === departmentId) || {
+  const deptList = departments.length > 0 ? departments : [
+    {
+      id: currentUser.departmentId || 'dept-ops',
+      name: currentUser.departmentName || 'Operations',
+      orgId: currentOrg.id,
+      headCount: 1,
+      budgetAllocated: 0
+    }
+  ];
+
+  const selectedDept = deptList.find(d => d.id === departmentId) || {
     id: departmentId,
     name: currentUser.departmentName || 'Operations',
     orgId: currentOrg.id,
@@ -108,6 +137,10 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
     budgetAllocated: 0
   };
 
+  /**
+   * Addendum 4 Section A2: Self-Service Profile Update
+   * Calls PUT /api/auth/profile directly, displays server validation error on failure.
+   */
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setProfileSuccessMsg('');
@@ -121,6 +154,25 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
     setIsSavingProfile(true);
     try {
       const finalAvatar = customAvatarUrl.trim() || avatar;
+      const res = await fetch('/api/auth/profile', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          fullName: fullName.trim(),
+          avatar: finalAvatar,
+          departmentId: selectedDept.id
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to update profile.');
+      }
+
       const updatedUser: User = {
         ...currentUser,
         fullName: fullName.trim(),
@@ -139,6 +191,9 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
     }
   };
 
+  /**
+   * Addendum 4 Section A3: Shared Corporate Password Policy
+   */
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPwSuccessMsg('');
@@ -149,13 +204,12 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
       return;
     }
 
-    if (newPassword.length < 12) {
-      setPwErrorMsg('New password must be at least 12 characters long.');
-      return;
-    }
-
-    if (!/[a-zA-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
-      setPwErrorMsg('New password must contain at least one letter and one number.');
+    const policy = validatePasswordPolicy(newPassword, {
+      email: currentUser.email,
+      fullName: currentUser.fullName
+    });
+    if (!policy.valid) {
+      setPwErrorMsg(policy.error || policy.message || 'New password does not meet corporate security policy.');
       return;
     }
 
@@ -168,7 +222,10 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
     try {
       const res = await fetch('/api/auth/change-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
         credentials: 'include',
         body: JSON.stringify({ currentPassword, newPassword })
       });
@@ -190,25 +247,132 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
     }
   };
 
-  const handleToggle2FA = async () => {
-    setTwoFactorMsg('');
+  /**
+   * Addendum 4 Section A1: Real 2FA Enrolment & Verification
+   */
+  const handleStart2FA = async () => {
+    setTwoFactorError('');
+    setTwoFactorSuccess('');
+    setTwoFactorLoading(true);
+
     try {
-      const newStatus = !twoFactorEnabled;
-      setTwoFactorEnabled(newStatus);
-      const updatedUser: User = {
-        ...currentUser,
-        twoFactorEnabled: newStatus
-      };
-      onUpdateUser(updatedUser);
-      setTwoFactorMsg(`Two-factor authentication is now ${newStatus ? 'enabled' : 'disabled'}.`);
-      setTimeout(() => setTwoFactorMsg(''), 4000);
+      const res = await fetch('/api/auth/2fa/setup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        credentials: 'include'
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to initiate 2FA setup.');
+      }
+
+      const qrUrl = await generateQrDataUrl(data.otpAuthUri);
+      setEnrolSecret(data.secret);
+      setEnrolQrDataUrl(qrUrl);
+      setStep2FA('enrolling');
     } catch (err: any) {
-      setTwoFactorMsg('Failed to update 2FA status.');
+      setTwoFactorError(err.message || 'Could not reach authorization server for 2FA setup.');
+    } finally {
+      setTwoFactorLoading(false);
+    }
+  };
+
+  const handleVerify2FA = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTwoFactorError('');
+    setTwoFactorLoading(true);
+
+    if (!enrolCode.trim() || enrolCode.trim().length !== 6) {
+      setTwoFactorError('Please enter a valid 6-digit code from your authenticator app.');
+      setTwoFactorLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/auth/2fa/verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        credentials: 'include',
+        body: JSON.stringify({ code: enrolCode.trim() })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Verification code failed. Please check your app and try again.');
+      }
+
+      setRecoveryCodes(data.recoveryCodes || []);
+      setTwoFactorEnabled(true);
+      onUpdateUser({ ...currentUser, twoFactorEnabled: true });
+      setStep2FA('recovery');
+      setTwoFactorSuccess('Two-factor authentication successfully activated!');
+    } catch (err: any) {
+      setTwoFactorError(err.message || 'Invalid 2FA code.');
+    } finally {
+      setTwoFactorLoading(false);
+    }
+  };
+
+  const handleDisable2FA = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTwoFactorError('');
+    setTwoFactorLoading(true);
+
+    if (!disablePassword) {
+      setTwoFactorError('Current password is required to disable 2FA.');
+      setTwoFactorLoading(false);
+      return;
+    }
+    if (!disableCode.trim() && !disableRecoveryCode.trim()) {
+      setTwoFactorError('Please provide either an active authenticator code or a backup recovery code.');
+      setTwoFactorLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/auth/2fa/disable', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          password: disablePassword,
+          code: disableCode.trim() || undefined,
+          recoveryCode: disableRecoveryCode.trim() || undefined
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to disable two-factor authentication.');
+      }
+
+      setTwoFactorEnabled(false);
+      onUpdateUser({ ...currentUser, twoFactorEnabled: false });
+      setStep2FA('idle');
+      setDisablePassword('');
+      setDisableCode('');
+      setDisableRecoveryCode('');
+      setTwoFactorSuccess('Two-factor authentication has been disabled.');
+      setTimeout(() => setTwoFactorSuccess(''), 4000);
+    } catch (err: any) {
+      setTwoFactorError(err.message || 'Failed to disable 2FA.');
+    } finally {
+      setTwoFactorLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
+    <div data-modal-overlay className="fixed inset-0 z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
       <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/90">
@@ -382,7 +546,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                     onChange={(e) => setDepartmentId(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer"
                   >
-                    {DEPARTMENTS.map(dept => (
+                    {deptList.map(dept => (
                       <option key={dept.id} value={dept.id}>
                         {dept.name}
                       </option>
@@ -570,34 +734,275 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                 </form>
               </div>
 
-              {/* Two-Factor Authentication Card */}
-              <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-3">
+              {/* Two-Factor Authentication Card (Addendum 4 Section A1) */}
+              <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Shield className="w-4 h-4 text-emerald-400" />
                     <div>
-                      <div className="text-xs font-bold text-white">Two-Factor Authentication (2FA)</div>
-                      <div className="text-[11px] text-slate-400">
-                        Require an authenticator app code during sign-in.
+                      <div className="text-xs font-bold text-white flex items-center gap-2">
+                        <span>Two-Factor Authentication (2FA)</span>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                          twoFactorEnabled
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-slate-800 text-slate-400 border border-slate-700'
+                        }`}>
+                          {twoFactorEnabled ? 'PROTECTED' : 'DISABLED'}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        Industry standard RFC 6238 TOTP authenticator protection.
                       </div>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleToggle2FA}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border ${
-                      twoFactorEnabled
-                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30'
-                        : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white'
-                    }`}
-                  >
-                    {twoFactorEnabled ? '2FA Enabled' : 'Enable 2FA'}
-                  </button>
+
+                  {step2FA === 'idle' && (
+                    twoFactorEnabled ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTwoFactorError('');
+                          setTwoFactorSuccess('');
+                          setStep2FA('disabling');
+                        }}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20"
+                      >
+                        Disable 2FA
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleStart2FA}
+                        disabled={twoFactorLoading}
+                        className="px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        {twoFactorLoading ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Generating Secret...</span>
+                          </>
+                        ) : (
+                          <>
+                            <QrCode className="w-3.5 h-3.5" />
+                            <span>Configure 2FA</span>
+                          </>
+                        )}
+                      </button>
+                    )
+                  )}
                 </div>
-                {twoFactorMsg && (
-                  <div className="text-[11px] text-emerald-400 font-mono">
-                    {twoFactorMsg}
+
+                {twoFactorSuccess && (
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-400 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>{twoFactorSuccess}</span>
                   </div>
+                )}
+
+                {twoFactorError && (
+                  <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-400 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{twoFactorError}</span>
+                  </div>
+                )}
+
+                {/* STEP 2FA: ENROLLING */}
+                {step2FA === 'enrolling' && (
+                  <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-4 animate-in fade-in duration-200">
+                    <div className="text-xs font-semibold text-slate-200">
+                      Step 1: Scan QR Code with Authenticator App
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      Open Google Authenticator, Authy, or 1Password, and scan the QR code below.
+                    </p>
+
+                    <div className="flex flex-col sm:flex-row items-center gap-4 bg-slate-950 p-4 rounded-xl border border-slate-800">
+                      {enrolQrDataUrl ? (
+                        <div className="p-2 bg-white rounded-lg shadow shrink-0">
+                          <img src={enrolQrDataUrl} alt="2FA QR Code" className="w-32 h-32" />
+                        </div>
+                      ) : (
+                        <div className="w-32 h-32 bg-slate-800 animate-pulse rounded-lg flex items-center justify-center text-slate-500 text-xs">
+                          Generating QR...
+                        </div>
+                      )}
+
+                      <div className="space-y-2 flex-1 w-full text-left">
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                          Manual Setup Key
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <code className="text-xs font-mono text-emerald-400 bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-800 select-all break-all">
+                            {enrolSecret}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(enrolSecret);
+                              setCopiedCodes(true);
+                              setTimeout(() => setCopiedCodes(false), 2000);
+                            }}
+                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+                            title="Copy Secret"
+                          >
+                            {copiedCodes ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <form onSubmit={handleVerify2FA} className="space-y-3 pt-2">
+                      <div className="text-xs font-semibold text-slate-200">
+                        Step 2: Enter 6-digit Code to Confirm
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={6}
+                          required
+                          value={enrolCode}
+                          onChange={(e) => setEnrolCode(e.target.value.replace(/\D/g, ''))}
+                          placeholder="123456"
+                          className="w-36 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm font-mono tracking-widest text-center text-emerald-400 focus:outline-none focus:border-emerald-500"
+                        />
+                        <button
+                          type="submit"
+                          disabled={twoFactorLoading || enrolCode.length !== 6}
+                          className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer"
+                        >
+                          {twoFactorLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                          <span>Verify &amp; Activate</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setStep2FA('idle');
+                            setTwoFactorError('');
+                          }}
+                          className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
+
+                {/* STEP 2FA: RECOVERY CODES */}
+                {step2FA === 'recovery' && (
+                  <div className="p-4 bg-slate-900 border border-amber-500/30 rounded-xl space-y-4 animate-in fade-in duration-200">
+                    <div className="flex items-center gap-2 text-amber-400">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <div className="text-xs font-bold">Important: Save Your One-Time Backup Recovery Codes</div>
+                    </div>
+                    <p className="text-[11px] text-slate-300">
+                      If you lose access to your authenticator device, you can use these 8 one-time codes to regain account access.
+                      These codes will not be shown again.
+                    </p>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-950 p-3 rounded-xl border border-slate-800">
+                      {recoveryCodes.map((rc, idx) => (
+                        <div key={idx} className="font-mono text-xs text-center py-1.5 px-2 bg-slate-900 rounded border border-slate-800 text-emerald-400 select-all">
+                          {rc}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(recoveryCodes.join('\n'));
+                          setCopiedCodes(true);
+                          setTimeout(() => setCopiedCodes(false), 2000);
+                        }}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+                      >
+                        {copiedCodes ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{copiedCodes ? 'Copied Codes!' : 'Copy All Codes'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setStep2FA('idle')}
+                        className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition"
+                      >
+                        I Have Saved These Codes
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* STEP 2FA: DISABLING */}
+                {step2FA === 'disabling' && (
+                  <form onSubmit={handleDisable2FA} className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-3 animate-in fade-in duration-200">
+                    <div className="text-xs font-bold text-rose-400">
+                      Security Verification: Disable 2FA
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      Disabling 2FA lowers account security. Please confirm your current password and supply a verification code or recovery code.
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                          Current Account Password *
+                        </label>
+                        <input
+                          type="password"
+                          required
+                          value={disablePassword}
+                          onChange={(e) => setDisablePassword(e.target.value)}
+                          placeholder="Current password"
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-rose-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                          6-Digit Code or Recovery Code *
+                        </label>
+                        <input
+                          type="text"
+                          value={disableCode || disableRecoveryCode}
+                          onChange={(e) => {
+                            const val = e.target.value.trim();
+                            if (val.length <= 6 && /^\d*$/.test(val)) {
+                              setDisableCode(val);
+                              setDisableRecoveryCode('');
+                            } else {
+                              setDisableRecoveryCode(val);
+                              setDisableCode('');
+                            }
+                          }}
+                          placeholder="e.g. 123456 or a1b2c3d4"
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-white focus:outline-none focus:border-rose-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStep2FA('idle');
+                          setTwoFactorError('');
+                        }}
+                        className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold hover:bg-slate-700 transition"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={twoFactorLoading || !disablePassword}
+                        className="px-4 py-1.5 bg-rose-500 hover:bg-rose-400 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5"
+                      >
+                        {twoFactorLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                        <span>Confirm Disable 2FA</span>
+                      </button>
+                    </div>
+                  </form>
                 )}
               </div>
 

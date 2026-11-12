@@ -42,6 +42,7 @@ interface TiDBSyncModalProps {
   branches: Branch[];
   lastSyncedAt?: string;
   isLiveConnected?: boolean;
+  currentUser?: User;
   onDataRefresh?: () => void;
   onDataImported?: () => void;
 }
@@ -58,6 +59,7 @@ export const TiDBSyncModal: React.FC<TiDBSyncModalProps> = ({
   branches,
   lastSyncedAt = 'Local Cache',
   isLiveConnected = true,
+  currentUser,
   onDataRefresh
 }) => {
   const [activeTab, setActiveTab] = useState<'status' | 'tiflash' | 'architecture'>('status');
@@ -70,7 +72,7 @@ export const TiDBSyncModal: React.FC<TiDBSyncModalProps> = ({
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  if (!isOpen || (currentUser && currentUser.role !== 'ADMIN')) return null;
 
   const handleTestConnection = async () => {
     setIsTesting(true);
@@ -84,7 +86,7 @@ export const TiDBSyncModal: React.FC<TiDBSyncModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
+    <div data-modal-overlay className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
       <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
         {/* Modal Header */}
         <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-950/40">
@@ -255,12 +257,12 @@ export const TiDBSyncModal: React.FC<TiDBSyncModalProps> = ({
               <div className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/25 space-y-2">
                 <div className="font-bold text-indigo-300 flex items-center gap-2">
                   <Zap className="w-4 h-4 text-indigo-400" />
-                  <span>Real-Time Hybrid Transactional / Analytical Processing (HTAP)</span>
+                  <span>Database Infrastructure &amp; Analytical Rollups</span>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  OmniAsset leverages PingCAP TiDB's Raft-synchronized TiFlash columnar replica pool.
-                  Transactional asset updates and checkout events write instantaneously to row storage (TiKV)
-                  while analytical queries, multi-branch depreciation rollups, and replacement forecasts execute in parallel on columnar replicas with zero write lock contention.
+                  Enterprise connection pool managed securely by the backend server.
+                  Inventory mutations and custody events execute transactionally in the database cluster,
+                  while analytical fleet valuations and depreciation rollups are computed without client credential exposure.
                 </p>
               </div>
 

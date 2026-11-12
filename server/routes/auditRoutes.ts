@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
-import { authenticate, requirePermission } from '../middleware';
+import { authenticate, requirePermission, asyncHandler } from '../middleware';
 import { verifyAuditChain } from '../audit';
 
 export const auditRouter = Router();
@@ -11,7 +11,7 @@ auditRouter.use(authenticate);
  * Only ADMIN, DIRECTOR, and FINANCE can read immutable audit logs.
  * Strictly scopes by session tenant ID with explicit column projection.
  */
-auditRouter.get('/', requirePermission('audit:read'), async (req: Request, res: Response) => {
+auditRouter.get('/', requirePermission('audit:read'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId } = req.auth!;
 
   const rows = await query(`
@@ -24,7 +24,7 @@ auditRouter.get('/', requirePermission('audit:read'), async (req: Request, res: 
   `, [orgId]);
 
   res.json({ auditLogs: rows });
-});
+}));
 
 /**
  * GET /api/audit-logs/verify
@@ -32,7 +32,7 @@ auditRouter.get('/', requirePermission('audit:read'), async (req: Request, res: 
  * Cursor-based streaming verification in batches of 1000.
  * Default verifies last 10,000 rows (O(1) memory); ?full=1 restricted to ADMIN.
  */
-auditRouter.get('/verify', requirePermission('audit:read'), async (req: Request, res: Response) => {
+auditRouter.get('/verify', requirePermission('audit:read'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, role } = req.auth!;
   const isFullRequested = req.query.full === '1' || req.query.full === 'true';
 
@@ -62,4 +62,4 @@ auditRouter.get('/verify', requirePermission('audit:read'), async (req: Request,
     console.error(`[AUDIT VERIFY ERROR] orgId=${orgId}:`, err?.message || err);
     res.status(500).json({ error: 'Audit chain verification error' });
   }
-});
+}));

@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { asyncHandler } from './asyncHandler';
 import config from '../config';
 import { verifySessionToken, createSessionToken, SESSION_TTL_SECONDS } from '../auth';
 import { AuthContextPayload, UserRole, PermissionAction, hasPermission } from '../permissions';
@@ -140,7 +141,7 @@ export function csrfProtection(req: Request, res: Response, next: NextFunction) 
  * Authorization strictly uses freshly loaded role/org/branch, NOT token claims.
  * Performs sliding session refresh when less than 30 minutes remain of TTL.
  */
-export async function authenticate(req: Request, res: Response, next: NextFunction) {
+export const authenticate = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   const cookieToken = (req as any).cookies?.session_token;
   const headerToken = req.headers.authorization?.startsWith('Bearer ')
     ? req.headers.authorization.slice(7)
@@ -228,7 +229,7 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
   }
 
   next();
-}
+});
 
 /**
  * Role authorization guard

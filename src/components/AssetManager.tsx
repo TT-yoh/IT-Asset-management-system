@@ -1,6 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Organization, Branch, AssetCategory, Asset, User, AssetStatus } from '../types';
+import React, { useState, useEffect, useRef, useMemo, useDeferredValue } from 'react';
+import { Organization, Branch, AssetCategory, Asset, User, AssetStatus, Department } from '../types';
 import { AssetFilter } from './AssetFilter';
+import { useFeedback } from '../context/FeedbackContext';
+import { Pagination } from './ui/Pagination';
+import { EmptyState, ListSkeleton } from './ui/EmptyState';
+import type { AssetSortKey } from './asset-manager/AssetTable';
 import { 
   AssetTable, 
   AssetGrid, 
@@ -14,6 +18,7 @@ import {
 } from './asset-manager';
 import { exportToExcel } from '../lib/report-service';
 import { AssetService } from '../lib/asset-service';
+import { hasPermission } from '../../shared/permissions';
 import {
   Plus,
   Upload,
@@ -30,7 +35,8 @@ import {
   Layers,
   X,
   FileSpreadsheet,
-  ShieldCheck
+  ShieldCheck,
+  Laptop
 } from 'lucide-react';
 import { QuickScannerModal } from './QuickScannerModal';
 
@@ -102,12 +108,16 @@ export interface AssetManagerProps {
   onUpdateAsset?: (updatedAsset: Asset) => void;
   onDeleteAsset?: (assetId: string) => void;
   onBulkAddAssets?: (newAssets: Asset[]) => void;
-  onBatchUpdateStatus?: (assetIds: string[], status: AssetStatus) => void;
+  onBatchUpdateStatus?: (assetIds: string[], status: AssetStatus, reason?: string) => void;
   onBatchTransferBranch?: (assetIds: string[], branchId: string, branchName: string) => void;
   onBatchDelete?: (assetIds: string[]) => void;
   searchQuery: string;
   initialStatusFilter?: string;
   onReportIssue?: (asset: Asset) => void;
+  /** True while the first server data load is in flight. */
+  isLoading?: boolean;
+  /** Departments of the current organization, for the asset's owning department. */
+  departments?: Department[];
 }
 
 export const AssetManager: React.FC<AssetManagerProps> = ({
@@ -125,18 +135,22 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
   onBatchDelete,
   searchQuery,
   initialStatusFilter = 'ALL',
-  onReportIssue
+  onReportIssue,
+  isLoading = false,
+  departments = []
 }) => {
+  const { confirm } = useFeedback();
   const [viewMode, setViewMode] = useState<'TABLE' | 'GRID'>('TABLE');
   const [statusFilter, setStatusFilter] = useState<string>(initialStatusFilter);
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [branchFilter, setBranchFilter] = useState<string>('ALL');
 
-  // Role-Based Access Control (RBAC): IT team (ADMIN and IT_SUPPORT) has full access
+  // Role-Based Access Control (RBAC) & SoD checks
   const isITTeam = currentUser.role === 'ADMIN' || currentUser.role === 'IT_SUPPORT';
   const canAddAsset = isITTeam || currentUser.role === 'BRANCH_MANAGER';
   const canEditAsset = isITTeam || currentUser.role === 'BRANCH_MANAGER';
   const canDeleteAsset = isITTeam;
+  const canWriteOff = hasPermission(currentUser.role, 'assets:writeoff');
   const canImportAssets = isITTeam;
   const isBranchRestricted = currentUser.role === 'BRANCH_MANAGER' || currentUser.role === 'USER';
 
@@ -163,23 +177,73 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
     }
   }, [initialStatusFilter]);
 
+  // Sorting & pagination state
+  const [sortKey, setSortKey] = useState<AssetSortKey | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
+  // Typing stays responsive: the list re-filters at lower priority than the keystroke.
+  const deferredSearch = useDeferredValue(searchQuery);
+
   // Filter pipeline
-  const filteredAssets = assets.filter((asset) => {
-    if (statusFilter !== 'ALL' && asset.status !== statusFilter) return false;
-    if (categoryFilter !== 'ALL' && asset.categoryId !== categoryFilter) return false;
-    if (branchFilter !== 'ALL' && asset.branchId !== branchFilter) return false;
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      return (
-        (asset.name || '').toLowerCase().includes(q) ||
-        (asset.assetCode || '').toLowerCase().includes(q) ||
-        (asset.serialNumber || '').toLowerCase().includes(q) ||
-        (asset.model && asset.model.toLowerCase().includes(q)) ||
-        (asset.assignedToUserName && asset.assignedToUserName.toLowerCase().includes(q))
-      );
+  const filteredAssets = useMemo(() => {
+    const q = deferredSearch.trim().toLowerCase();
+    return assets.filter((asset) => {
+      if (statusFilter !== 'ALL' && asset.status !== statusFilter) return false;
+      if (categoryFilter !== 'ALL' && asset.categoryId !== categoryFilter) return false;
+      if (branchFilter !== 'ALL' && asset.branchId !== branchFilter) return false;
+      if (q) {
+        return (
+          (asset.name || '').toLowerCase().includes(q) ||
+          (asset.assetCode || '').toLowerCase().includes(q) ||
+          (asset.serialNumber || '').toLowerCase().includes(q) ||
+          (asset.model || '').toLowerCase().includes(q) ||
+          (asset.assignedToUserName || '').toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [assets, statusFilter, categoryFilter, branchFilter, deferredSearch]);
+
+  const sortedAssets = useMemo(() => {
+    if (!sortKey) return filteredAssets;
+    const direction = sortDir === 'asc' ? 1 : -1;
+    const valueOf = (asset: Asset): string | number => {
+      if (sortKey === 'currentValue') return Number(asset.currentValue ?? asset.purchaseCost ?? 0);
+      return String(asset[sortKey] ?? '').toLowerCase();
+    };
+    return [...filteredAssets].sort((a, b) => {
+      const av = valueOf(a);
+      const bv = valueOf(b);
+      // Blank text values always sort last, whichever direction is active.
+      if (av === '' && bv !== '') return 1;
+      if (bv === '' && av !== '') return -1;
+      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * direction;
+      return String(av).localeCompare(String(bv), undefined, { numeric: true }) * direction;
+    });
+  }, [filteredAssets, sortKey, sortDir]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedAssets.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pagedAssets = useMemo(
+    () => sortedAssets.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [sortedAssets, currentPage, pageSize]
+  );
+  const allFilteredSelected = filteredAssets.length > 0 && filteredAssets.every((a) => selectedAssetIds.has(a.id));
+
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter, categoryFilter, branchFilter, deferredSearch, pageSize, sortKey, sortDir]);
+
+  const handleSort = (key: AssetSortKey) => {
+    if (sortKey === key) {
+      setSortDir((dir) => (dir === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
     }
-    return true;
-  });
+  };
 
   // Multi-select handlers
   const handleToggleSelect = (id: string) => {
@@ -203,12 +267,15 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
   };
 
   // Batch action executions
-  const handleBatchStatusChange = (status: AssetStatus) => {
+  const handleBatchStatusChange = (status: AssetStatus, reason?: string) => {
     const ids = Array.from(selectedAssetIds);
     if (onBatchUpdateStatus) {
-      onBatchUpdateStatus(ids, status);
+      onBatchUpdateStatus(ids, status, reason);
     } else if (onUpdateAsset) {
-      assets.filter((a) => selectedAssetIds.has(a.id)).forEach((a) => onUpdateAsset({ ...a, status }));
+      assets.filter((a) => selectedAssetIds.has(a.id)).forEach((a) => {
+        const updatedNotes = reason ? (a.notes ? `${a.notes} | Write-off reason: ${reason}` : `Write-off reason: ${reason}`) : a.notes;
+        onUpdateAsset({ ...a, status, notes: updatedNotes });
+      });
     }
     setSelectedAssetIds(new Set());
   };
@@ -223,9 +290,29 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
     setSelectedAssetIds(new Set());
   };
 
-  const handleBatchDeleteAction = () => {
+  const confirmDeleteAsset = async (id: string) => {
+    if (!onDeleteAsset) return;
+    const target = assets.find((a) => a.id === id);
+    const ok = await confirm({
+      title: 'Delete this asset?',
+      message: target
+        ? `${target.name} (${target.assetCode}) will be permanently removed from the ledger. This cannot be undone.`
+        : 'This asset will be permanently removed from the ledger. This cannot be undone.',
+      confirmLabel: 'Delete asset',
+      tone: 'danger'
+    });
+    if (ok) onDeleteAsset(id);
+  };
+
+  const handleBatchDeleteAction = async () => {
     const ids = Array.from(selectedAssetIds);
-    if (window.confirm(`Are you sure you want to permanently delete ${ids.length} assets?`)) {
+    const ok = await confirm({
+      title: `Delete ${ids.length} asset${ids.length === 1 ? '' : 's'}?`,
+      message: `${ids.length === 1 ? 'The selected asset' : `All ${ids.length} selected assets`} will be permanently removed from the ledger. This cannot be undone.`,
+      confirmLabel: `Delete ${ids.length} asset${ids.length === 1 ? '' : 's'}`,
+      tone: 'danger'
+    });
+    if (ok) {
       if (onBatchDelete) {
         onBatchDelete(ids);
       } else if (onDeleteAsset) {
@@ -440,8 +527,8 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
         </div>
       </div>
 
-      {/* Getting Started / Empty State Quick Actions */}
-      {assets.length === 0 && (
+      {/* Getting Started / Empty State Quick Actions (not while the first load is still in flight) */}
+      {assets.length === 0 && !isLoading && (
         <div className="bg-gradient-to-r from-emerald-500/10 via-slate-900 to-slate-900 border border-emerald-500/30 rounded-2xl p-5 shadow-xl">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="space-y-1">
@@ -549,27 +636,65 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
       </div>
 
       {/* Main Viewport */}
-      {viewMode === 'TABLE' ? (
+      {isLoading && assets.length === 0 ? (
+        <ListSkeleton label="Loading assets" />
+      ) : filteredAssets.length === 0 ? (
+        assets.length === 0 ? (
+          <EmptyState
+            icon={<Laptop className="w-6 h-6" />}
+            title="No assets yet"
+            description="Enroll a device by hand, or use the CSV import above to add many at once."
+            actions={
+              canAddAsset
+                ? [{ label: 'Enroll your first asset', onClick: () => { setEditingAsset(null); setIsUpsertOpen(true); } }]
+                : []
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={<Search className="w-6 h-6" />}
+            title="No assets match"
+            description={
+              deferredSearch.trim()
+                ? `Nothing matches "${deferredSearch.trim()}" with the current filters. Try a different search or clear the filters.`
+                : 'No assets match the current filters.'
+            }
+            actions={
+              statusFilter !== 'ALL' || categoryFilter !== 'ALL' || branchFilter !== 'ALL'
+                ? [{
+                    label: 'Clear filters',
+                    onClick: () => {
+                      setStatusFilter('ALL');
+                      setCategoryFilter('ALL');
+                      setBranchFilter('ALL');
+                    }
+                  }]
+                : []
+            }
+          />
+        )
+      ) : viewMode === 'TABLE' ? (
         <AssetTable
-          assets={filteredAssets}
+          assets={pagedAssets}
           selectedIds={selectedAssetIds}
           onToggleSelect={handleToggleSelect}
           onSelectAll={handleSelectAll}
+          allSelected={allFilteredSelected}
+          totalCount={filteredAssets.length}
+          sortKey={sortKey}
+          sortDir={sortDir}
+          onSort={handleSort}
           onViewDetails={(ast) => setSelectedAssetForDetails(ast)}
           onEditAsset={canEditAsset ? (ast) => {
             setEditingAsset(ast);
             setIsUpsertOpen(true);
           } : undefined}
-          onDeleteAsset={canDeleteAsset ? (id) => {
-            if (onDeleteAsset && window.confirm('Delete this asset from ledger?')) {
-              onDeleteAsset(id);
-            }
-          } : undefined}
+          onDeleteAsset={canDeleteAsset ? confirmDeleteAsset : undefined}
           onShowQR={(ast) => setSelectedAssetForDetails(ast)}
         />
       ) : (
         <AssetGrid
-          assets={filteredAssets}
+          assets={pagedAssets}
           selectedIds={selectedAssetIds}
           onToggleSelect={handleToggleSelect}
           onViewDetails={(ast) => setSelectedAssetForDetails(ast)}
@@ -577,14 +702,19 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
             setEditingAsset(ast);
             setIsUpsertOpen(true);
           } : undefined}
-          onDeleteAsset={canDeleteAsset ? (id) => {
-            if (onDeleteAsset && window.confirm('Delete this asset from ledger?')) {
-              onDeleteAsset(id);
-            }
-          } : undefined}
+          onDeleteAsset={canDeleteAsset ? confirmDeleteAsset : undefined}
           onShowQR={(ast) => setSelectedAssetForDetails(ast)}
         />
       )}
+
+      <Pagination
+        page={currentPage}
+        pageSize={pageSize}
+        totalItems={sortedAssets.length}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        itemLabel="assets"
+      />
 
       {/* Sticky Batch Actions Toolbar */}
       <BatchActionToolbar
@@ -592,6 +722,7 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
         branches={branches}
         canEdit={canEditAsset}
         canDelete={canDeleteAsset}
+        canWriteOff={canWriteOff}
         onBatchStatusChange={handleBatchStatusChange}
         onBatchTransferBranch={handleBatchTransfer}
         onBatchDelete={handleBatchDeleteAction}
@@ -625,6 +756,7 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
         existingAssets={assets}
         branches={branches}
         categories={categories}
+        departments={departments}
         currentOrg={currentOrg}
         currentUser={currentUser}
         onClose={() => {

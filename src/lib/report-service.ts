@@ -1,17 +1,20 @@
 import { jsPDF } from 'jspdf';
 import ExcelJS from 'exceljs';
 import { Asset, MaintenanceRecord, BudgetAllocation } from '../types';
-import { 
-  INITIAL_ASSETS, 
-  INITIAL_MAINTENANCE, 
-  INITIAL_BUDGETS, 
-  INITIAL_BRANCHES
-} from '../mockData';
+import pkg from '../../package.json';
+import {
+  calculateStraightLineDepreciation,
+  calculateAgeMonths,
+  normalizeCondition,
+  AssetCondition
+} from '../../shared/finance';
+
+export const APP_VERSION = pkg.version || '1.0.0';
 
 /**
  * Filter assets by branch and org_id
  */
-export function getAssetsByBranch(branch_id?: string, org_id?: string, assetList: Asset[] = INITIAL_ASSETS): Asset[] {
+export function getAssetsByBranch(branch_id?: string, org_id?: string, assetList: Asset[] = []): Asset[] {
   return assetList.filter(asset => {
     const matchOrg = org_id ? asset.orgId === org_id : true;
     const matchBranch = branch_id ? asset.branchId === branch_id : true;
@@ -20,32 +23,40 @@ export function getAssetsByBranch(branch_id?: string, org_id?: string, assetList
 }
 
 /**
- * Calculate total value of assets in organization/branch
+ * Calculate total value of active assets in organization/branch.
+ * Excludes DISPOSED, SOLD, and DEPRECATED assets by default (D4).
  */
-export function calculateTotalAssetValue(org_id?: string, branch_id?: string, assetList: Asset[] = INITIAL_ASSETS): number {
+export function calculateTotalAssetValue(
+  org_id?: string,
+  branch_id?: string,
+  assetList: Asset[] = [],
+  includeDisposed = false
+): number {
   const filtered = getAssetsByBranch(branch_id, org_id, assetList);
-  return filtered.reduce((sum, asset) => sum + (asset.currentValue ?? asset.purchaseCost ?? 0), 0);
+  return filtered
+    .filter(asset => includeDisposed || !['DISPOSED', 'SOLD', 'DEPRECATED'].includes(String(asset.status || '').toUpperCase()))
+    .reduce((sum, asset) => sum + (asset.currentValue ?? asset.purchaseCost ?? 0), 0);
 }
 
 /**
- * Group assets by condition
+ * Group assets by condition using canonical enum: NEW, GOOD, FAIR, POOR (D5)
  */
-export function getAssetsByCondition(org_id?: string, assetList: Asset[] = INITIAL_ASSETS): Record<string, number> {
+export function getAssetsByCondition(org_id?: string, assetList: Asset[] = []): Record<AssetCondition, number> {
   const filtered = assetList.filter(a => !org_id || a.orgId === org_id);
-  const result: Record<string, number> = { EXCELLENT: 0, GOOD: 0, FAIR: 0, POOR: 0 };
-  
+  const result: Record<AssetCondition, number> = { NEW: 0, GOOD: 0, FAIR: 0, POOR: 0 };
+
   filtered.forEach(asset => {
-    const cond = asset.condition || 'GOOD';
+    const cond = normalizeCondition(asset.condition);
     result[cond] = (result[cond] || 0) + 1;
   });
-  
+
   return result;
 }
 
 /**
- * Analyze assets by age group
+ * Analyze assets by age group using exact month calculations
  */
-export function getAssetsByAge(org_id?: string, assetList: Asset[] = INITIAL_ASSETS): Record<string, number> {
+export function getAssetsByAge(org_id?: string, assetList: Asset[] = []): Record<string, number> {
   const filtered = assetList.filter(a => !org_id || a.orgId === org_id);
   const result = {
     '0-1 Year': 0,
@@ -54,14 +65,13 @@ export function getAssetsByAge(org_id?: string, assetList: Asset[] = INITIAL_ASS
     '5+ Years': 0
   };
 
-  const currentYear = new Date().getFullYear();
-
+  const now = new Date();
   filtered.forEach(asset => {
-    const pDate = new Date(asset.purchaseDate);
-    const age = currentYear - pDate.getFullYear();
-    if (age <= 1) result['0-1 Year']++;
-    else if (age <= 3) result['1-3 Years']++;
-    else if (age <= 5) result['3-5 Years']++;
+    const ageMonths = calculateAgeMonths(asset.purchaseDate, now);
+    const ageYears = ageMonths / 12;
+    if (ageYears <= 1) result['0-1 Year']++;
+    else if (ageYears <= 3) result['1-3 Years']++;
+    else if (ageYears <= 5) result['3-5 Years']++;
     else result['5+ Years']++;
   });
 
@@ -69,8 +79,7 @@ export function getAssetsByAge(org_id?: string, assetList: Asset[] = INITIAL_ASS
 }
 
 /**
- * Calculate depreciation details for a single asset.
- * Methods: STRAIGHT_LINE, DOUBLE_DECLINING
+ * Calculate depreciation details for a single asset using shared straight-line module
  */
 export function calculateDepreciation(
   asset: Asset,
@@ -78,67 +87,45 @@ export function calculateDepreciation(
   usefulLifeYears = 5,
   salvageValueFactor = 0.1
 ) {
-  const cost = asset.purchaseCost || 0;
-  const salvageValue = cost * salvageValueFactor;
-  const purchaseYear = new Date(asset.purchaseDate).getFullYear();
-  const currentYear = new Date().getFullYear();
-  const ageYears = Math.max(0, currentYear - purchaseYear);
+  const usefulLifeMonths = usefulLifeYears * 12;
+  const dep = calculateStraightLineDepreciation(asset.purchaseCost || 0, asset.purchaseDate, {
+    usefulLifeMonths,
+    salvageFactor: salvageValueFactor
+  });
 
-  let annualDepreciation = 0;
-  let accumulatedDepreciation = 0;
-  let bookValue = cost;
-
-  if (method === 'STRAIGHT_LINE') {
-    annualDepreciation = usefulLifeYears > 0 ? (cost - salvageValue) / usefulLifeYears : 0;
-    accumulatedDepreciation = Math.min(cost - salvageValue, annualDepreciation * ageYears);
-    bookValue = Math.max(salvageValue, cost - accumulatedDepreciation);
-  } else {
-    // Double Declining Balance
-    const rate = usefulLifeYears > 0 ? (2 / usefulLifeYears) : 0;
-    let tempBookValue = cost;
-    for (let i = 0; i < ageYears; i++) {
-      const depAmt = tempBookValue * rate;
-      if (tempBookValue - depAmt < salvageValue) {
-        accumulatedDepreciation += (tempBookValue - salvageValue);
-        tempBookValue = salvageValue;
-        break;
-      } else {
-        accumulatedDepreciation += depAmt;
-        tempBookValue -= depAmt;
-      }
-    }
-    bookValue = tempBookValue;
-    annualDepreciation = bookValue * rate;
-  }
+  const annualDep = usefulLifeYears > 0 ? dep.depreciableBase / usefulLifeYears : 0;
 
   return {
-    annualDepreciation: Math.round(annualDepreciation),
-    accumulatedDepreciation: Math.round(accumulatedDepreciation),
-    bookValue: Math.round(bookValue)
+    annualDepreciation: Math.round(annualDep),
+    accumulatedDepreciation: Math.round(dep.accumulatedDepreciation),
+    bookValue: Math.round(dep.bookValue)
   };
 }
 
 /**
- * Analyze maintenance cost breakdown
+ * Analyze maintenance cost breakdown derived strictly from actual records.
+ * Zero fabricated numbers or fixed percentage multipliers (D2).
  */
 export function getMaintenanceCostAnalysis(
   org_id?: string,
   date_range?: string,
-  maintenanceList: MaintenanceRecord[] = INITIAL_MAINTENANCE,
-  assetList: Asset[] = INITIAL_ASSETS
+  maintenanceList: MaintenanceRecord[] = [],
+  assetList: Asset[] = []
 ) {
   const filteredRecords = maintenanceList.filter(rec => {
     const asset = assetList.find(a => a.id === rec.assetId);
     if (!asset) return false;
     if (org_id && asset.orgId !== org_id) return false;
-    // Simple filter for date range (e.g. 2026, 2025, or all)
     if (date_range && date_range !== 'ALL') {
-      return rec.startDate.includes(date_range) || rec.expectedCompletion.includes(date_range);
+      return (rec.startDate && rec.startDate.includes(date_range)) ||
+             (rec.expectedCompletion && rec.expectedCompletion.includes(date_range));
     }
     return true;
   });
 
   const costByCategory: Record<string, number> = {};
+  const monthlyCostMap = new Map<string, number>();
+
   let totalCost = 0;
   let preventiveCount = 0;
   let reactiveCount = 0;
@@ -150,7 +137,7 @@ export function getMaintenanceCostAnalysis(
   filteredRecords.forEach(rec => {
     const asset = assetList.find(a => a.id === rec.assetId);
     const category = asset?.categoryName || 'General';
-    const cost = rec.cost || 0;
+    const cost = Number(rec.cost) || 0;
 
     costByCategory[category] = (costByCategory[category] || 0) + cost;
     totalCost += cost;
@@ -163,53 +150,62 @@ export function getMaintenanceCostAnalysis(
       reactiveCost += cost;
     }
 
-    if (rec.status === 'COMPLETED') {
-      completedCount++;
-      // Mock average repair time in hours
-      totalRepairTime += rec.priority === 'HIGH' ? 8 : 16;
+    // Real repair time calculation based on actual start and completion dates
+    if (rec.status === 'COMPLETED' && rec.startDate && rec.actualCompletion) {
+      const s = new Date(rec.startDate).getTime();
+      const e = new Date(rec.actualCompletion).getTime();
+      if (!isNaN(s) && !isNaN(e) && e >= s) {
+        const hours = Math.round((e - s) / (1000 * 3600));
+        totalRepairTime += hours;
+        completedCount++;
+      }
+    }
+
+    // Group real monthly costs
+    const dateStr = rec.actualCompletion || rec.startDate || '';
+    if (dateStr) {
+      const d = new Date(dateStr);
+      if (!isNaN(d.getTime())) {
+        const monthKey = d.toLocaleString('en-US', { month: 'short' });
+        monthlyCostMap.set(monthKey, (monthlyCostMap.get(monthKey) || 0) + cost);
+      }
     }
   });
 
-  const averageRepairTime = completedCount > 0 ? Math.round(totalRepairTime / completedCount) : 12;
+  const averageRepairTime = completedCount > 0 ? Math.round(totalRepairTime / completedCount) : null;
 
-  // Predict future costs with a simple linear regression / seasonal factor
-  const monthlyTrend = [
-    { name: 'Jan', cost: Math.round(totalCost * 0.07) },
-    { name: 'Feb', cost: Math.round(totalCost * 0.08) },
-    { name: 'Mar', cost: Math.round(totalCost * 0.11) },
-    { name: 'Apr', cost: Math.round(totalCost * 0.09) },
-    { name: 'May', cost: Math.round(totalCost * 0.12) },
-    { name: 'Jun', cost: Math.round(totalCost * 0.15) },
-  ];
-
-  const forecast = [
-    { name: 'Jul (Forecast)', cost: Math.round((totalCost / 6) * 1.1) },
-    { name: 'Aug (Forecast)', cost: Math.round((totalCost / 6) * 1.05) },
-    { name: 'Sep (Forecast)', cost: Math.round((totalCost / 6) * 1.15) }
-  ];
+  // Real monthly trend from recorded transactions
+  const monthOrder = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monthlyTrend = monthOrder
+    .filter(m => monthlyCostMap.has(m))
+    .map(name => ({
+      name,
+      cost: Math.round(monthlyCostMap.get(name) || 0)
+    }));
 
   return {
-    totalCost,
+    totalCost: Math.round(totalCost * 100) / 100,
     costByCategory,
     averageRepairTime,
     preventiveCount,
     reactiveCount,
-    preventiveCost,
-    reactiveCost,
+    preventiveCost: Math.round(preventiveCost * 100) / 100,
+    reactiveCost: Math.round(reactiveCost * 100) / 100,
     monthlyTrend,
-    forecast
+    forecast: [] as { name: string; cost: number }[]
   };
 }
 
 /**
- * Budget Utilization report
+ * Budget Utilization report derived from active allocations.
+ * Burn rate computed from actual elapsed calendar months (D2).
  */
 export function getBudgetUtilization(
   org_id?: string,
   fiscal_year?: string,
-  budgetList: BudgetAllocation[] = INITIAL_BUDGETS,
-  maintenanceList: MaintenanceRecord[] = INITIAL_MAINTENANCE,
-  assetList: Asset[] = INITIAL_ASSETS
+  budgetList: BudgetAllocation[] = [],
+  _maintenanceList?: MaintenanceRecord[],
+  _assetList?: Asset[]
 ) {
   const filteredBudgets = budgetList.filter(b => {
     const matchOrg = !org_id || b.orgId === org_id;
@@ -217,11 +213,10 @@ export function getBudgetUtilization(
     return matchOrg && matchYr;
   });
 
-  const allocated = filteredBudgets.reduce((sum, b) => sum + b.allocated, 0);
-  const spent = filteredBudgets.reduce((sum, b) => sum + b.spent, 0);
-  const remaining = allocated - spent;
+  const allocated = filteredBudgets.reduce((sum, b) => sum + (Number(b.allocated) || 0), 0);
+  const spent = filteredBudgets.reduce((sum, b) => sum + (Number(b.spent) || 0), 0);
+  const remaining = Math.max(0, allocated - spent);
 
-  // Group budget utilization by category
   const utilizationByCategory = filteredBudgets.map(b => ({
     category: b.departmentName,
     allocated: b.allocated,
@@ -230,44 +225,18 @@ export function getBudgetUtilization(
     percentage: b.allocated > 0 ? Math.round((b.spent / b.allocated) * 100) : 0
   }));
 
-  // Burn rate calculation (spent / months elapsed, assuming 6 months elapsed for mock year)
-  const burnRateMonthly = Math.round(spent / 6);
+  // Real elapsed months in current calendar year (1-12)
+  const currentElapsedMonths = Math.max(1, new Date().getMonth() + 1);
+  const burnRateMonthly = Math.round((spent / currentElapsedMonths) * 100) / 100;
 
   return {
-    allocated,
-    spent,
-    remaining,
+    allocated: Math.round(allocated * 100) / 100,
+    spent: Math.round(spent * 100) / 100,
+    remaining: Math.round(remaining * 100) / 100,
     utilizationByCategory,
     burnRateMonthly,
-    forecastSpent: Math.round(burnRateMonthly * 12)
+    forecastSpent: Math.round(burnRateMonthly * 12 * 100) / 100
   };
-}
-
-/**
- * Generate generic Report Chart Data
- */
-export function generateReport(report_type: string, filters: any, assetList: Asset[] = INITIAL_ASSETS) {
-  const branch_id = filters?.branch_id;
-  const filtered = getAssetsByBranch(branch_id, undefined, assetList);
-
-  if (report_type === 'assets_by_branch') {
-    const counts: Record<string, number> = {};
-    filtered.forEach(a => {
-      counts[a.branchName] = (counts[a.branchName] || 0) + 1;
-    });
-    return Object.entries(counts).map(([name, value]) => ({ name, value }));
-  }
-
-  if (report_type === 'assets_by_category') {
-    const counts: Record<string, number> = {};
-    filtered.forEach(a => {
-      const cat = a.categoryName || 'General';
-      counts[cat] = (counts[cat] || 0) + 1;
-    });
-    return Object.entries(counts).map(([name, value]) => ({ name, value }));
-  }
-
-  return [];
 }
 
 /**
@@ -294,8 +263,11 @@ export function sanitizeForFormulaInjection(val: any): any {
   return val;
 }
 
+export const escapeCsvField = (val: any) => sanitizeForFormulaInjection(val);
+
 /**
  * Export data to Microsoft Excel with Formula Injection Protection (ExcelJS)
+ * Neutralizes double .xlsx extension bug (D7).
  */
 export async function exportToExcel(data: any[], filename: string) {
   const sanitized = Array.isArray(data) ? data.map(item => sanitizeForFormulaInjection(item)) : [];
@@ -313,7 +285,11 @@ export async function exportToExcel(data: any[], filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
+
+  // Prevent double .xlsx extension
+  const cleanName = filename.replace(/(\.xlsx)+$/i, '');
+  a.download = `${cleanName}.xlsx`;
+
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -322,10 +298,11 @@ export async function exportToExcel(data: any[], filename: string) {
 
 /**
  * Export data to PDF using jsPDF
+ * Neutralizes double .pdf extension bug and embeds real app version from package.json (D7, D9).
  */
 export function exportToPDF(data: any[], filename: string, title = 'REPORTS AND ANALYTICS') {
   const doc = new jsPDF();
-  
+
   // Header
   doc.setFont('Helvetica', 'bold');
   doc.setFontSize(18);
@@ -336,7 +313,7 @@ export function exportToPDF(data: any[], filename: string, title = 'REPORTS AND 
   doc.setTextColor(100);
   doc.setFont('Helvetica', 'normal');
   doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 28);
-  doc.text(`Asset Management System v1.4`, 14, 33);
+  doc.text(`Asset Management System v${APP_VERSION}`, 14, 33);
 
   // Line separator
   doc.setDrawColor(226, 232, 240);
@@ -363,7 +340,7 @@ export function exportToPDF(data: any[], filename: string, title = 'REPORTS AND 
     // Table rows
     doc.setFont('Helvetica', 'normal');
     doc.setTextColor(71, 85, 105);
-    
+
     data.forEach(row => {
       if (y > 270) {
         doc.addPage();
@@ -382,5 +359,7 @@ export function exportToPDF(data: any[], filename: string, title = 'REPORTS AND 
     doc.text('No matching record found.', 14, y);
   }
 
-  doc.save(`${filename}.pdf`);
+  // Prevent double .pdf extension
+  const cleanName = filename.replace(/(\.pdf)+$/i, '');
+  doc.save(`${cleanName}.pdf`);
 }

@@ -66,7 +66,8 @@ export const ReportExport: React.FC<ReportExportProps> = ({
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `${filename}.csv`);
+    const cleanName = filename.replace(/(\.csv)+$/i, '');
+    link.setAttribute('download', `${cleanName}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -169,7 +170,7 @@ export const ReportExport: React.FC<ReportExportProps> = ({
 
       {/* 1. Executive Financial Briefing Modal */}
       {showExecutiveModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+        <div data-modal-overlay className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden p-6 space-y-6">
             <div className="flex items-start justify-between border-b border-slate-800 pb-4">
               <div>
@@ -267,7 +268,7 @@ export const ReportExport: React.FC<ReportExportProps> = ({
 
       {/* 2. ISO/ITIL Compliance Audit Modal */}
       {showComplianceModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+        <div data-modal-overlay className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden p-6 space-y-5">
             <div className="flex items-start justify-between border-b border-slate-800 pb-4">
               <div className="flex items-center gap-3">

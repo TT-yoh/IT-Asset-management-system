@@ -200,7 +200,8 @@ async function runSchemaDriftTests() {
     'audit_chain_heads',
     'notifications',
     'idempotency_keys',
-    'idempotency_keys_v2'
+    'idempotency_keys_v2',
+    'asset_tag_counters'
   ];
 
   for (const table of requiredTables) {
@@ -208,7 +209,7 @@ async function runSchemaDriftTests() {
       throw new Error(`Schema drift failure: Required table "${table}" is missing from migrations.`);
     }
   }
-  console.log('✓ All 16 required core tables are defined in migrations.');
+  console.log('✓ All 17 required core tables are defined in migrations.');
 
   // 2. Verify hardened columns in key tables
   console.log('\n🔒 Step 2: Verifying hardened security columns across schema...');
@@ -227,7 +228,7 @@ async function runSchemaDriftTests() {
   console.log('✓ users table contains all required authentication and security columns.');
 
   const assetsCols = schema.tables.get('assets')!;
-  const expectedAssetCols = ['id', 'org_id', 'branch_id', 'asset_code', 'serial_number', 'version', 'clean_serial', 'clean_mac', 'clean_imei'];
+  const expectedAssetCols = ['id', 'org_id', 'branch_id', 'asset_code', 'serial_number', 'version', 'clean_serial', 'clean_mac', 'clean_imei', 'cost_source'];
   for (const col of expectedAssetCols) {
     if (!assetsCols.has(col)) {
       throw new Error(`Schema drift failure: assets table missing required column: ${col}`);

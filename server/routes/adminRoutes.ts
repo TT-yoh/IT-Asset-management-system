@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { query, withTransaction } from '../db';
-import { authenticate, requireSuperAdmin, invalidateUserCache } from '../middleware';
+import { authenticate, requireSuperAdmin, invalidateUserCache, asyncHandler } from '../middleware';
 import { recordAuditEvent } from '../audit';
 import { validateRequest } from '../middleware/validate';
 
@@ -22,7 +22,7 @@ const switchOrgSchema = z.object({
 adminRouter.post(
   '/switch-org',
   validateRequest({ body: switchOrgSchema }),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const { orgId: targetOrgId } = req.body;
     const actor = req.auth!;
     const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -76,17 +76,17 @@ adminRouter.post(
       message: `Switched active organization to ${targetOrg.name}`,
       activeOrg: targetOrg
     });
-  }
+  })
 );
 
 /**
  * GET /api/admin/organizations
  * Returns all system organizations for super admins.
  */
-adminRouter.get('/organizations', async (_req: Request, res: Response) => {
+adminRouter.get('/organizations', asyncHandler(async (_req: Request, res: Response) => {
   const orgs = await query<any>(
     'SELECT `id`, `name`, `type`, `logo`, `branding_color`, `branches_count` FROM `organizations` ORDER BY `name` ASC;'
   );
   res.json({ organizations: orgs });
-});
+}));
 

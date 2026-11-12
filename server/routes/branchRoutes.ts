@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { query, withTransaction } from '../db';
-import { authenticate, requirePermission } from '../middleware';
+import { authenticate, requirePermission, asyncHandler } from '../middleware';
 import { recordAuditEvent } from '../audit';
 
 export const branchRouter = Router();
@@ -37,7 +37,7 @@ const UpdateBranchSchema = z.object({
  * GET /api/branches
  * Scoped strictly by tenant org_id with explicit columns
  */
-branchRouter.get('/', requirePermission('branches:read'), async (req: Request, res: Response) => {
+branchRouter.get('/', requirePermission('branches:read'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId } = req.auth!;
 
   const rows = await query(
@@ -46,13 +46,13 @@ branchRouter.get('/', requirePermission('branches:read'), async (req: Request, r
   );
 
   res.json({ branches: rows });
-});
+}));
 
 /**
  * POST /api/branches
  * Ignores client-supplied id; generates UUID; plain INSERT; fails on duplicate code.
  */
-branchRouter.post('/', requirePermission('branches:manage'), async (req: Request, res: Response) => {
+branchRouter.post('/', requirePermission('branches:manage'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
@@ -117,13 +117,13 @@ branchRouter.post('/', requirePermission('branches:manage'), async (req: Request
     }
     res.status(500).json({ error: 'Branch creation transaction failed.' });
   }
-});
+}));
 
 /**
  * PUT /api/branches/:id
  * Enforces OCC via baseVersion and updates version.
  */
-branchRouter.put('/:id', requirePermission('branches:manage'), async (req: Request, res: Response) => {
+branchRouter.put('/:id', requirePermission('branches:manage'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const branchId = req.params.id;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -200,13 +200,13 @@ branchRouter.put('/:id', requirePermission('branches:manage'), async (req: Reque
     }
     res.status(500).json({ error: 'Branch update transaction failed.' });
   }
-});
+}));
 
 /**
  * DELETE /api/branches/:id
  * Refuses inside one transaction when ANY of assets, users, checkouts, budgets reference it.
  */
-branchRouter.delete('/:id', requirePermission('branches:manage'), async (req: Request, res: Response) => {
+branchRouter.delete('/:id', requirePermission('branches:manage'), asyncHandler(async (req: Request, res: Response) => {
   const { orgId, userId: actorId, fullName: actorName, role } = req.auth!;
   const branchId = req.params.id;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -304,4 +304,4 @@ branchRouter.delete('/:id', requirePermission('branches:manage'), async (req: Re
       res.status(500).json({ error: 'Branch deletion transaction failed.' });
     }
   }
-});
+}));

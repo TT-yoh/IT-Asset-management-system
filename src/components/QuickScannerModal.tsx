@@ -30,6 +30,8 @@ import {
   Laptop
 } from 'lucide-react';
 import { generateSketchGraph } from './AssetManager';
+import { sanitizeScanInput } from '../lib/sanitize';
+export { sanitizeScanInput };
 
 export interface QuickScannerModalProps {
   isOpen: boolean;
@@ -44,13 +46,15 @@ export interface QuickScannerModalProps {
   onViewAssetDetails?: (asset: Asset) => void;
 }
 
+
 /**
  * Universal Decoder: Resolves deep-link URLs, JSON payloads, Serial Numbers, 
  * IMEIs, MAC addresses, or raw Asset Codes from physical or camera scans.
  */
 export function resolveAssetFromScan(rawScan: string, assets: Asset[]): { asset: Asset | null; extractedCode: string } {
   if (!rawScan || !rawScan.trim()) return { asset: null, extractedCode: '' };
-  const trimmed = rawScan.trim();
+  const trimmed = sanitizeScanInput(rawScan);
+  if (!trimmed) return { asset: null, extractedCode: '' };
   let candidateCode = trimmed;
 
   // 1. Deep check if payload is a URL (e.g. physical printed QR sticker or browser URL)
@@ -134,6 +138,7 @@ export const QuickScannerModal: React.FC<QuickScannerModalProps> = ({
   const [isScanning, setIsScanning] = useState<boolean>(true);
   const [manualInput, setManualInput] = useState<string>('');
   const [copiedTag, setCopiedTag] = useState<boolean>(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const qrInstanceRef = useRef<Html5Qrcode | null>(null);
 
   // Pleasant audio synthesizer confirmation chime
@@ -163,10 +168,12 @@ export const QuickScannerModal: React.FC<QuickScannerModalProps> = ({
   };
 
   const handleScanResult = (decodedText: string) => {
+    const clean = sanitizeScanInput(decodedText);
+    if (!clean) return;
     playBeep();
     setIsScanning(false);
-    const { asset: found, extractedCode } = resolveAssetFromScan(decodedText, assets);
-    setScannedCode(extractedCode || decodedText);
+    const { asset: found, extractedCode } = resolveAssetFromScan(clean, assets);
+    setScannedCode(extractedCode || clean);
     setMatchedAsset(found);
   };
 
@@ -183,6 +190,7 @@ export const QuickScannerModal: React.FC<QuickScannerModalProps> = ({
       setIsScanning(true);
       setManualInput('');
       setCopiedTag(false);
+      setCameraError(null);
       return;
     }
 
@@ -197,8 +205,16 @@ export const QuickScannerModal: React.FC<QuickScannerModalProps> = ({
           handleScanResult(decodedText);
         },
         () => {}
-      ).catch((err) => {
+      ).then(() => {
+        setCameraError(null);
+      }).catch((err: any) => {
         console.warn('Camera initiation notice:', err);
+        const isPermission = err?.name === 'NotAllowedError' || String(err).includes('NotAllowedError') || String(err).includes('Permission');
+        setCameraError(
+          isPermission
+            ? 'Camera access was denied. Please allow camera permissions or enter the asset code manually below.'
+            : 'Unable to start camera stream. Please use manual entry below.'
+        );
       });
     }, 150);
 
@@ -219,6 +235,7 @@ export const QuickScannerModal: React.FC<QuickScannerModalProps> = ({
     setIsScanning(true);
     setManualInput('');
     setCopiedTag(false);
+    setCameraError(null);
 
     if (qrInstanceRef.current) {
       qrInstanceRef.current.start(
@@ -228,19 +245,27 @@ export const QuickScannerModal: React.FC<QuickScannerModalProps> = ({
           handleScanResult(decodedText);
         },
         () => {}
-      ).catch(() => {});
+      ).catch((err: any) => {
+        const isPermission = err?.name === 'NotAllowedError' || String(err).includes('NotAllowedError');
+        setCameraError(
+          isPermission
+            ? 'Camera access was denied. Please use manual entry below.'
+            : 'Unable to start camera stream. Please use manual entry below.'
+        );
+      });
     }
   };
 
   const handleManualSearch = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!manualInput.trim()) return;
+    const clean = sanitizeScanInput(manualInput);
+    if (!clean) return;
 
     if (qrInstanceRef.current && isScanning) {
       qrInstanceRef.current.stop().catch(() => {});
     }
 
-    handleScanResult(manualInput.trim());
+    handleScanResult(clean);
   };
 
   const copyTagToClipboard = (tag: string) => {
@@ -301,7 +326,7 @@ export const QuickScannerModal: React.FC<QuickScannerModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/90 backdrop-blur-md flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4">
+    <div data-modal-overlay className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/90 backdrop-blur-md flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4">
       <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh] animate-in fade-in zoom-in-95 duration-200">
         
         {/* Header */}
@@ -328,6 +353,16 @@ export const QuickScannerModal: React.FC<QuickScannerModalProps> = ({
         <div className="p-5 overflow-y-auto space-y-4 flex-1">
           {isScanning ? (
             <div className="space-y-4">
+              {cameraError && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-start gap-2.5 text-amber-300 text-xs animate-in fade-in">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <p className="font-semibold text-amber-200">Camera Unavailable</p>
+                    <p className="text-amber-300/80 leading-relaxed">{cameraError}</p>
+                  </div>
+                </div>
+              )}
+
               {/* Camera Frame */}
               <div className="relative overflow-hidden rounded-2xl border-2 border-emerald-500/40 bg-black aspect-square max-w-[320px] mx-auto shadow-inner">
                 <div id="quick-scanner-viewport" className="w-full h-full"></div>

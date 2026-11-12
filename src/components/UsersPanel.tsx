@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { User, Organization, Branch, Asset, AuditLogItem, Department } from '../types';
+import { useFeedback } from '../context/FeedbackContext';
+import { Pagination } from './ui/Pagination';
 import { 
   Users, 
   UserPlus, 
@@ -31,7 +33,6 @@ import {
   RefreshCw,
   Loader2
 } from 'lucide-react';
-import { DEPARTMENTS } from '../mockData';
 
 interface UsersPanelProps {
   currentOrg: Organization;
@@ -50,7 +51,7 @@ interface UsersPanelProps {
     departmentName?: string;
     branchId?: string;
     branchName?: string;
-  }) => Promise<{ success: boolean; inviteToken?: string; user?: User; error?: string }>;
+  }) => Promise<{ success: boolean; inviteToken?: string; emailDelivered?: boolean; user?: User; error?: string }>;
   onUpdateUser?: (updatedUser: User) => void;
   onDeleteUser?: (userId: string) => Promise<{ success: boolean; error?: string }>;
   onUpdateAsset?: (asset: Asset) => void;
@@ -74,13 +75,16 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
   onClearDummyUsers,
   onNavigateToDepartments
 }) => {
-  const activeDepts = departments && departments.length > 0 ? departments : DEPARTMENTS;
+  const activeDepts = departments || [];
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [userPage, setUserPage] = useState(1);
+  const [userPageSize, setUserPageSize] = useState(25);
   const [roleFilter, setRoleFilter] = useState<string>('ALL');
   const [branchFilter, setBranchFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
 
+  const { confirm } = useFeedback();
   // Feedback Toast state
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
 
@@ -196,6 +200,10 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
     }
     return true;
   });
+
+  const userTotalPages = Math.max(1, Math.ceil(filteredUsers.length / userPageSize));
+  const currentUserPage = Math.min(userPage, userTotalPages);
+  const pagedUsers = filteredUsers.slice((currentUserPage - 1) * userPageSize, currentUserPage * userPageSize);
 
   // Calculate statistics
   const activeCount = orgUsers.filter(u => (u.status || 'ACTIVE') === 'ACTIVE').length;
@@ -338,11 +346,12 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
 
   const handleInviteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isInviting) return;
     if (!newFullName.trim() || !newEmail.trim()) return;
 
     const branch = branches.find(b => b.id === selectedBranchId) || branches[0];
     if (!branch) {
-      showToast('Please create at least one branch before inviting users.');
+      showToast('Please create at least one branch before inviting users.', 'error');
       return;
     }
     const dept = activeDepts.find(d => d.id === selectedDeptId) || activeDepts[0];
@@ -370,8 +379,22 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
           setNewRole('USER');
           showToast(`Verified invitation token created for ${res.user?.fullName || newFullName}.`);
           return;
+        } else if (res.success) {
+          // The server never returns the token: the invitation goes to the invitee by email.
+          const invitedName = res.user?.fullName || newFullName.trim();
+          const invitedEmail = res.user?.email || newEmail.trim().toLowerCase();
+          setShowInviteModal(false);
+          setNewFullName('');
+          setNewEmail('');
+          setNewRole('USER');
+          if (res.emailDelivered) {
+            showToast(`Invitation emailed to ${invitedName} (${invitedEmail}).`);
+          } else {
+            showToast(`${invitedName} was added, but the invitation email could not be sent. Check the server mail settings, then use Resend.`, 'error');
+          }
+          return;
         } else {
-          showToast(res.error || 'Failed to create user invitation.');
+          showToast(res.error || 'Failed to create user invitation.', 'error');
           return;
         }
       }
@@ -394,7 +417,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
 
       const resData = await res.json();
       if (!res.ok) {
-        showToast(resData.error || 'Failed to invite user.');
+        showToast(resData.error || 'Failed to invite user.', 'error');
         return;
       }
 
@@ -426,7 +449,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
       setNewRole('USER');
       showToast(`Invitation created for ${newUser.fullName}.`);
     } catch (err: any) {
-      showToast(err.message || 'Error creating user invitation.');
+      showToast(err.message || 'Error creating user invitation.', 'error');
     } finally {
       setIsInviting(false);
     }
@@ -446,11 +469,19 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
         if (onUpdateUser) onUpdateUser(updated);
         copyInviteLink(data.inviteToken);
         showToast(`Fresh invitation generated & link copied for ${targetUser.fullName}!`);
+      } else if (res.ok) {
+        const updated = { ...targetUser, invitedAt: data.invitedAt || targetUser.invitedAt };
+        if (onUpdateUser) onUpdateUser(updated);
+        if (data.emailDelivered) {
+          showToast(`A fresh invitation was emailed to ${targetUser.fullName}.`);
+        } else {
+          showToast(`A fresh invitation was issued for ${targetUser.fullName}, but the email could not be sent. Check the server mail settings.`, 'error');
+        }
       } else {
-        showToast(data.error || 'Failed to regenerate invitation link.');
+        showToast(data.error || 'Failed to regenerate invitation link.', 'error');
       }
     } catch {
-      showToast('Network error while requesting fresh invite.');
+      showToast('Network error while requesting fresh invite.', 'error');
     } finally {
       setReinvitingId(null);
     }
@@ -514,8 +545,14 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
           <div className="flex items-center gap-2">
             {isAdmin && onClearDummyUsers && (
               <button
-                onClick={() => {
-                  if (window.confirm("Purge demo staff accounts for this organization?")) {
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: 'Purge demo staff accounts?',
+                    message: 'All demo staff accounts for this organization will be removed. This cannot be undone.',
+                    confirmLabel: 'Purge accounts',
+                    tone: 'danger'
+                  });
+                  if (ok) {
                     onClearDummyUsers();
                     showToast('Demo accounts cleared.');
                   }
@@ -692,7 +729,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredUsers.map(user => {
+                pagedUsers.map(user => {
                   const userAssets = getUserAssets(user.id);
                   const isInvited = user.status === 'INVITED';
                   const isSuspended = user.status === 'SUSPENDED';
@@ -867,13 +904,26 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
             </tbody>
           </table>
         </div>
+        <div className="p-3 border-t border-slate-800">
+          <Pagination
+            page={currentUserPage}
+            pageSize={userPageSize}
+            totalItems={filteredUsers.length}
+            onPageChange={setUserPage}
+            onPageSizeChange={(size) => {
+              setUserPageSize(size);
+              setUserPage(1);
+            }}
+            itemLabel="staff members"
+          />
+        </div>
       </div>
 
       {/* Edit Staff Modal */}
       {editingUser && (
         <div
           ref={editModalContainerRef}
-          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 overflow-y-auto flex justify-center items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150"
+          data-modal-overlay className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 overflow-y-auto flex justify-center items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150"
         >
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between pb-4 border-b border-slate-800">
@@ -1049,7 +1099,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
           onKeyDown={(e) => {
             if (e.key === 'Escape') setUserToDelete(null);
           }}
-          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 overflow-y-auto flex justify-center items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150"
+          data-modal-overlay className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 overflow-y-auto flex justify-center items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150"
         >
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-150 space-y-4">
             <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 mx-auto">
@@ -1120,7 +1170,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
           onKeyDown={(e) => {
             if (e.key === 'Escape') setShowInviteModal(false);
           }}
-          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 overflow-y-auto flex justify-center items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150"
+          data-modal-overlay className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 overflow-y-auto flex justify-center items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150"
         >
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between pb-4 border-b border-slate-800">
@@ -1235,9 +1285,11 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 cursor-pointer"
+                  disabled={isInviting}
+                  aria-busy={isInviting}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  Generate Invitation
+                  {isInviting ? 'Generating…' : 'Generate Invitation'}
                 </button>
               </div>
             </form>
@@ -1251,7 +1303,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
           onKeyDown={(e) => {
             if (e.key === 'Escape') setShowInviteSuccessModal(false);
           }}
-          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 overflow-y-auto flex justify-center items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150"
+          data-modal-overlay className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 overflow-y-auto flex justify-center items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150"
         >
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-150 space-y-4">
             <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mx-auto">

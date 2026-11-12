@@ -325,13 +325,14 @@ test('12. Branch Facility Management (POST, PUT & DELETE /api/branches)', async 
     })
   });
   if (!resCreate.ok) throw new Error(`Branch creation failed: ${await resCreate.text()}`);
+  const createBranchData = await resCreate.json();
+  const branchId = createBranchData.branch?.id || createBranchData.id;
 
-  // 12b. Upsert Branch without duplicate key error
-  const resUpsert = await fetch(`${BASE_URL}/api/branches`, {
+  // 12b. Duplicate branch code is rejected with HTTP 409 DUPLICATE
+  const resDup = await fetch(`${BASE_URL}/api/branches`, {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify({
-      id: testBranchId,
       name: 'Silicon Valley Innovation Lab (Expanded)',
       code: branchCode,
       city: 'San Jose',
@@ -340,10 +341,10 @@ test('12. Branch Facility Management (POST, PUT & DELETE /api/branches)', async 
       manager_name: 'David Kim'
     })
   });
-  if (!resUpsert.ok) throw new Error(`Branch upsert failed: ${await resUpsert.text()}`);
+  if (resDup.status !== 409) throw new Error(`Expected HTTP 409 for duplicate branch code, got ${resDup.status}`);
 
   // 12c. Update Branch via PUT
-  const resUpdate = await fetch(`${BASE_URL}/api/branches/${testBranchId}`, {
+  const resUpdate = await fetch(`${BASE_URL}/api/branches/${branchId}`, {
     method: 'PUT',
     headers: headers(),
     body: JSON.stringify({
@@ -353,7 +354,7 @@ test('12. Branch Facility Management (POST, PUT & DELETE /api/branches)', async 
   if (!resUpdate.ok) throw new Error(`Branch update failed: ${await resUpdate.text()}`);
 
   // 12d. Delete Branch via DELETE
-  const resDelete = await fetch(`${BASE_URL}/api/branches/${testBranchId}`, {
+  const resDelete = await fetch(`${BASE_URL}/api/branches/${branchId}`, {
     method: 'DELETE',
     headers: headers()
   });
@@ -362,13 +363,11 @@ test('12. Branch Facility Management (POST, PUT & DELETE /api/branches)', async 
 
 // 13. Departmental Budget Allocations (Upsert & Update)
 test('13. Department Budget Allocation (POST & PUT /api/budgets)', async () => {
-  testBudgetId = `e2e-bg-${Date.now()}`;
   // 13a. Create Budget
   const resCreate = await fetch(`${BASE_URL}/api/budgets`, {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify({
-      id: testBudgetId,
       departmentName: 'Cybersecurity Operations',
       branchName: 'Main Campus',
       fiscalYear: 2026,
@@ -377,13 +376,14 @@ test('13. Department Budget Allocation (POST & PUT /api/budgets)', async () => {
     })
   });
   if (!resCreate.ok) throw new Error(`Budget creation failed: ${await resCreate.text()}`);
+  const createBudgetData = await resCreate.json();
+  const budgetId = createBudgetData.budget?.id || createBudgetData.id;
 
-  // 13b. Upsert Budget without duplicate key error
-  const resUpsert = await fetch(`${BASE_URL}/api/budgets`, {
+  // 13b. Duplicate budget allocation for same department/branch/year rejected with HTTP 409 DUPLICATE
+  const resDup = await fetch(`${BASE_URL}/api/budgets`, {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify({
-      id: testBudgetId,
       departmentName: 'Cybersecurity Operations',
       branchName: 'Main Campus',
       fiscalYear: 2026,
@@ -391,14 +391,16 @@ test('13. Department Budget Allocation (POST & PUT /api/budgets)', async () => {
       spent: 15000
     })
   });
-  if (!resUpsert.ok) throw new Error(`Budget upsert failed: ${await resUpsert.text()}`);
+  if (resDup.status !== 409) throw new Error(`Expected HTTP 409 for duplicate budget, got ${resDup.status}`);
 
   // 13c. Update Budget via PUT
-  const resUpdate = await fetch(`${BASE_URL}/api/budgets/${testBudgetId}`, {
+  const resUpdate = await fetch(`${BASE_URL}/api/budgets/${budgetId}`, {
     method: 'PUT',
     headers: headers(),
     body: JSON.stringify({
-      allocated: 150000
+      allocated: 150000,
+      spent: 15000,
+      reason: 'Fiscal year Q1 operational expenditure reconciliation'
     })
   });
   if (!resUpdate.ok) throw new Error(`Budget update failed: ${await resUpdate.text()}`);

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import ReportsLandingPage from '../app/reports/page';
-import ReportsDashboardPage from '../app/reports/dashboard/page';
-import ReportsInventoryPage from '../app/reports/inventory/page';
-import ReportsDepreciationPage from '../app/reports/depreciation/page';
+import ReportsLandingPage from './reports/ReportsLanding';
+import ReportsDashboardPage from './reports/ReportsDashboard';
+import ReportsInventoryPage from './reports/ReportsInventory';
+import ReportsDepreciationPage from './reports/ReportsDepreciation';
 
 import { 
   Wrench, PieChart, Clock, ShieldCheck, ArrowLeftRight, 
@@ -13,13 +13,6 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   LineChart, Line, AreaChart, Area, Cell, PieChart as ReChartsPie, Pie
 } from 'recharts';
-import { 
-  INITIAL_ASSETS, 
-  INITIAL_MAINTENANCE, 
-  INITIAL_BUDGETS, 
-  DEPARTMENTS,
-  INITIAL_BRANCHES
-} from '../mockData';
 import { Organization, Branch, Asset, MaintenanceRecord, BudgetAllocation } from '../types';
 import { getMaintenanceCostAnalysis, getBudgetUtilization, getAssetsByAge } from '../lib/report-service';
 import { runTiFlashDepreciationAnalytics } from '../lib/tidb-storage';
@@ -35,10 +28,10 @@ interface ReportsPanelProps {
 
 export const ReportsPanel: React.FC<ReportsPanelProps> = ({
   currentOrg,
-  assets = INITIAL_ASSETS,
-  maintenances = INITIAL_MAINTENANCE,
-  budgets = INITIAL_BUDGETS,
-  branches = INITIAL_BRANCHES
+  assets = [],
+  maintenances = [],
+  budgets = [],
+  branches = []
 }) => {
   const [activeReport, setActiveReport] = useState<string>('landing');
   const orgIdToUse = currentOrg?.id || assets[0]?.orgId || 'org-global';
@@ -339,20 +332,30 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80">
             <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-4 flex items-center">
-              <Sparkles className="w-4 h-4 text-amber-400 mr-2" />
-              Machine-Learning Maintenance Cost Forecasting (Next Quarter)
+              <TrendingUp className="w-4 h-4 text-amber-400 mr-2" />
+              Maintenance Cost Trend &amp; Projections
             </h3>
-            <div className="h-60">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={[...analysis.monthlyTrend, ...analysis.forecast]}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                  <XAxis dataKey="name" stroke="#64748b" fontSize={10} tickLine={false} />
-                  <YAxis stroke="#64748b" fontSize={10} tickLine={false} />
-                  <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155' }} />
-                  <Area type="monotone" dataKey="cost" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.15} strokeWidth={2.5} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
+            {analysis.monthlyTrend.length >= 6 ? (
+              <div className="h-60">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={[...analysis.monthlyTrend, ...analysis.forecast]}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                    <XAxis dataKey="name" stroke="#64748b" fontSize={10} tickLine={false} />
+                    <YAxis stroke="#64748b" fontSize={10} tickLine={false} />
+                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155' }} />
+                    <Area type="monotone" dataKey="cost" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.15} strokeWidth={2.5} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-60 flex flex-col items-center justify-center text-center p-6 bg-slate-950/40 rounded-xl border border-slate-800/60 text-slate-400 text-xs">
+                <Info className="w-6 h-6 text-slate-500 mb-2" />
+                <span className="font-semibold text-slate-300">Insufficient Historical Data for Quarterly Forecast</span>
+                <span className="text-[11px] text-slate-500 mt-1 max-w-xs">
+                  Projections require at least 6 consecutive months of recorded maintenance history ({analysis.monthlyTrend.length} months logged).
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80">
@@ -478,7 +481,7 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
             <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-4">Budget Utilization by Department</h3>
             <div className="h-60">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={DEPARTMENTS.slice(0, 5).map(d => ({ name: d.name.substring(0, 15), Allocated: d.budgetAllocated, Spent: Math.round(d.budgetAllocated * 0.68) }))}>
+                <BarChart data={analysis.utilizationByCategory.slice(0, 5).map(u => ({ name: (u.category || 'General').substring(0, 15), Allocated: u.allocated, Spent: u.spent }))}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                   <XAxis dataKey="name" stroke="#64748b" fontSize={9} />
                   <YAxis stroke="#64748b" fontSize={10} />

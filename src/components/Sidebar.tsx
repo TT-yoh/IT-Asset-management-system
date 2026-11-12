@@ -1,8 +1,9 @@
 import React from 'react';
 import { Box, Layers, ArrowLeftRight, Wrench, PieChart, ShieldAlert, BarChart3, X, Menu, MoreHorizontal, Users, Building2 } from 'lucide-react';
 import { User } from '../types';
+import { canAccessTab, NavTab } from '../../shared/permissions';
 
-export type NavTab = 'dashboard' | 'assets' | 'checkout' | 'repair' | 'users' | 'branches' | 'reports' | 'budget' | 'audit';
+export type { NavTab };
 
 interface SidebarProps {
   activeTab: NavTab;
@@ -41,22 +42,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'audit', label: 'Audit & Access', icon: <ShieldAlert className="w-4 h-4" /> }
   ];
 
-  let filteredItems = navItems;
-  if (currentUser) {
-    if (currentUser.role === 'ADMIN') {
-      filteredItems = navItems;
-    } else if (currentUser.role === 'DIRECTOR') {
-      filteredItems = navItems.filter(item => ['dashboard', 'assets', 'users', 'branches', 'reports', 'budget', 'audit'].includes(item.id));
-    } else if (currentUser.role === 'FINANCE') {
-      filteredItems = navItems.filter(item => ['dashboard', 'assets', 'reports', 'budget'].includes(item.id));
-    } else if (currentUser.role === 'IT_SUPPORT') {
-      filteredItems = navItems.filter(item => ['dashboard', 'assets', 'checkout', 'repair', 'users', 'branches', 'audit'].includes(item.id));
-    } else if (currentUser.role === 'BRANCH_MANAGER') {
-      filteredItems = navItems.filter(item => ['dashboard', 'assets', 'checkout', 'repair', 'users', 'branches', 'budget'].includes(item.id));
-    } else if (currentUser.role === 'USER') {
-      filteredItems = navItems.filter(item => ['dashboard', 'assets', 'checkout', 'repair'].includes(item.id));
-    }
-  }
+  // Dynamically filter navigation items based on the shared permissions matrix
+  const filteredItems = navItems.filter(item => canAccessTab(currentUser?.role, item.id));
 
   const handleSelectTab = (tab: NavTab) => {
     onSelectTab(tab);

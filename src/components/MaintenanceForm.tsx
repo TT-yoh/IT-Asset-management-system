@@ -6,6 +6,7 @@ interface MaintenanceFormProps {
   initialData?: MaintenanceRecord;
   assets: Asset[];
   technicians: User[];
+  currentUser?: User;
   onSubmit: (formData: any) => void;
   onCancel: () => void;
 }
@@ -14,9 +15,12 @@ export const MaintenanceForm: React.FC<MaintenanceFormProps> = ({
   initialData,
   assets,
   technicians,
+  currentUser,
   onSubmit,
   onCancel
 }) => {
+  const isITSupportOrAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'IT_SUPPORT';
+
   const [assetId, setAssetId] = useState(initialData?.assetId || assets[0]?.id || '');
   const [type, setType] = useState<MaintenanceType>(initialData?.type || 'REPAIR');
   const [priority, setPriority] = useState<'HIGH' | 'MEDIUM' | 'LOW'>(initialData?.priority || 'MEDIUM');
@@ -26,7 +30,7 @@ export const MaintenanceForm: React.FC<MaintenanceFormProps> = ({
     initialData?.expectedCompletion || new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0]!
   );
   const [assignedTechnician, setAssignedTechnician] = useState(initialData?.assignedTechnician || technicians[0]?.fullName || 'IT Repair Pool');
-  const [cost, setCost] = useState(initialData?.cost !== undefined ? initialData.cost.toString() : '150');
+  const [cost, setCost] = useState(initialData?.cost !== undefined ? initialData.cost.toString() : '0');
   const [partsReplaced, setPartsReplaced] = useState(initialData?.partsReplaced || '');
   const [notes, setNotes] = useState(initialData?.notes || '');
   const [error, setError] = useState('');
@@ -59,12 +63,12 @@ export const MaintenanceForm: React.FC<MaintenanceFormProps> = ({
       assetCode: ast.assetCode,
       assetName: ast.name,
       type,
-      priority,
+      priority: isITSupportOrAdmin ? priority : 'MEDIUM',
       description: description.trim(),
       startDate,
       expectedCompletion,
-      assignedTechnician,
-      cost: parseFloat(cost) || 0,
+      assignedTechnician: isITSupportOrAdmin ? assignedTechnician : 'IT Repair Pool',
+      cost: isITSupportOrAdmin ? (parseFloat(cost) || 0) : 0,
       partsReplaced: partsReplaced.trim(),
       notes: notes.trim()
     };
@@ -121,14 +125,17 @@ export const MaintenanceForm: React.FC<MaintenanceFormProps> = ({
       {/* Grid Row 2: Priority & Assigned Tech */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label className="block text-slate-300 font-semibold mb-1">Task Priority Level *</label>
+          <label className="block text-slate-300 font-semibold mb-1">
+            Task Priority Level {!isITSupportOrAdmin ? '(Set by IT Support)' : '*'}
+          </label>
           <div className="grid grid-cols-3 gap-2">
             {(['HIGH', 'MEDIUM', 'LOW'] as const).map(p => (
               <button
                 type="button"
                 key={p}
+                disabled={!isITSupportOrAdmin}
                 onClick={() => setPriority(p)}
-                className={`py-2 rounded-xl border text-center font-bold transition-all ${
+                className={`py-2 rounded-xl border text-center font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                   priority === p ?
                   p === 'HIGH' ? 'bg-rose-500/20 border-rose-500 text-rose-300 shadow-lg shadow-rose-500/10' :
                   p === 'MEDIUM' ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-lg shadow-amber-500/10' :
@@ -145,12 +152,13 @@ export const MaintenanceForm: React.FC<MaintenanceFormProps> = ({
         <div>
           <label className="block text-slate-300 font-semibold mb-1 flex items-center gap-1.5">
             <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Assign Technician / Team</span>
+            <span>Assign Technician / Team {!isITSupportOrAdmin ? '(Triage Pool)' : ''}</span>
           </label>
           <select
-            value={assignedTechnician}
+            disabled={!isITSupportOrAdmin}
+            value={isITSupportOrAdmin ? assignedTechnician : 'IT Repair Pool'}
             onChange={e => setAssignedTechnician(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white focus:border-rose-500 focus:outline-none"
+            className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white focus:border-rose-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <option value="IT Repair Pool">🏢 General IT Repair Pool (Unassigned)</option>
             {technicians.map(t => (
@@ -223,15 +231,16 @@ export const MaintenanceForm: React.FC<MaintenanceFormProps> = ({
         <div>
           <label className="block text-slate-300 font-semibold mb-1 flex items-center gap-1">
             <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Repair / Lab Cost Est. ($)</span>
+            <span>Repair / Lab Cost Est. ($) {!isITSupportOrAdmin ? '(Support Authorized Only)' : ''}</span>
           </label>
           <input
             type="number"
             step="0.01"
             min="0"
-            value={cost}
+            disabled={!isITSupportOrAdmin}
+            value={isITSupportOrAdmin ? cost : '0'}
             onChange={e => setCost(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white font-mono font-bold"
+            className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white font-mono font-bold disabled:opacity-50 disabled:cursor-not-allowed"
           />
         </div>
       </div>

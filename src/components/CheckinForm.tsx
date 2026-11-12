@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Asset, CheckoutRecord, AssetCondition } from '../types';
+import { useFeedback } from '../context/FeedbackContext';
 import { CheckCircle2, AlertTriangle, Wrench, ShieldAlert, ArrowRight, Laptop, FileText } from 'lucide-react';
 
 interface CheckinFormProps {
@@ -15,6 +16,7 @@ export const CheckinForm: React.FC<CheckinFormProps> = ({
   onSubmitCheckin,
   onCancel
 }) => {
+  const { confirm } = useFeedback();
   const [condition, setCondition] = useState<AssetCondition>('GOOD');
   const [damageReported, setDamageReported] = useState(false);
   const [damageDesc, setDamageDesc] = useState('');
@@ -27,7 +29,7 @@ export const CheckinForm: React.FC<CheckinFormProps> = ({
     { id: 'POOR', label: 'POOR', desc: 'Damaged screen, faulty ports, or hardware failure', color: 'border-rose-500/50 bg-rose-500/10 text-rose-300' }
   ];
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -36,7 +38,12 @@ export const CheckinForm: React.FC<CheckinFormProps> = ({
       return;
     }
 
-    if (confirm(`Confirm return check-in of ${asset?.name || 'Device'} (${asset?.assetCode || 'N/A'})? Checked in condition: ${condition}${damageReported ? ' [DAMAGE REPORTED]' : ''}.`)) {
+    const ok = await confirm({
+      title: 'Confirm return check-in?',
+      message: `${asset?.name || 'Device'} (${asset?.assetCode || 'N/A'}) will be checked in with condition ${condition}${damageReported ? ' and a damage report' : ''}.`,
+      confirmLabel: 'Check in'
+    });
+    if (ok) {
       onSubmitCheckin(condition, damageReported, damageDesc.trim(), notes.trim());
     }
   };

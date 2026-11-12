@@ -35,7 +35,7 @@ export interface MaintenanceFilters {
 
 export interface RepairSummaryStats {
   totalUnderRepair: number;
-  avgRepairDays: number;
+  avgRepairDays: number | null;
   totalCostThisMonth: number;
   totalCostYear: number;
   mostRepairedTypes: Array<{ type: string; count: number; totalCost: number }>;
@@ -207,29 +207,60 @@ export const MaintenanceService = {
     const active = records.filter(r => r.status === 'IN_PROGRESS' || r.status === 'PENDING');
     const completed = records.filter(r => r.status === 'COMPLETED');
 
-    // Average repair days
+    // Average repair days: real completed calculation, or null if no completed records
     let totalDays = 0;
     let counted = 0;
     completed.forEach(c => {
       if (c.startDate && (c.actualCompletion || c.expectedCompletion)) {
         const d1 = new Date(c.startDate).getTime();
         const d2 = new Date(c.actualCompletion || c.expectedCompletion).getTime();
-        const diffDays = Math.max(1, Math.round((d2 - d1) / 86400000));
-        totalDays += diffDays;
-        counted++;
+        if (!isNaN(d1) && !isNaN(d2) && d2 >= d1) {
+          const diffDays = Math.max(1, Math.round((d2 - d1) / 86400000));
+          totalDays += diffDays;
+          counted++;
+        }
       }
     });
-    const avgRepairDays = counted > 0 ? Math.round((totalDays / counted) * 10) / 10 : 3.5;
+    const avgRepairDays = counted > 0 ? Math.round((totalDays / counted) * 10) / 10 : null;
 
-    // Costs
-    const totalCostThisMonth = records.reduce((acc, r) => acc + (r.cost || 0), 0);
-    const totalCostYear = totalCostThisMonth * 3.2; // Simulating annualized total
+    // Real cost calculations by month and year (zero fabricated multipliers)
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+
+    let totalCostThisMonth = 0;
+    let totalCostYear = 0;
+
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const trendMap = new Map<string, number>();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${monthNames[d.getMonth()]} ${d.getFullYear().toString().slice(2)}`;
+      trendMap.set(key, 0);
+    }
+
+    records.forEach(r => {
+      const cost = Number(r.cost || 0);
+      const rDate = r.startDate ? new Date(r.startDate) : null;
+      if (rDate && !isNaN(rDate.getTime())) {
+        if (rDate.getFullYear() === currentYear) {
+          totalCostYear += cost;
+          if (rDate.getMonth() === currentMonth) {
+            totalCostThisMonth += cost;
+          }
+        }
+        const trendKey = `${monthNames[rDate.getMonth()]} ${rDate.getFullYear().toString().slice(2)}`;
+        if (trendMap.has(trendKey)) {
+          trendMap.set(trendKey, (trendMap.get(trendKey) || 0) + cost);
+        }
+      }
+    });
 
     // Most repaired asset types
     const typeMap = new Map<string, { count: number; cost: number }>();
     records.forEach(r => {
       const ast = assets.find(a => a.id === r.assetId);
-      const cat = ast?.category || 'Hardware';
+      const cat = ast?.categoryName || ast?.category || 'Hardware';
       const existing = typeMap.get(cat) || { count: 0, cost: 0 };
       typeMap.set(cat, { count: existing.count + 1, cost: existing.cost + (r.cost || 0) });
     });
@@ -254,15 +285,7 @@ export const MaintenanceService = {
       completedTickets: val.completed
     }));
 
-    // Trend
-    const costTrend = [
-      { month: 'Jan', cost: 420 },
-      { month: 'Feb', cost: 890 },
-      { month: 'Mar', cost: 310 },
-      { month: 'Apr', cost: 1250 },
-      { month: 'May', cost: 650 },
-      { month: 'Jun', cost: totalCostThisMonth || 835 }
-    ];
+    const costTrend = Array.from(trendMap.entries()).map(([month, cost]) => ({ month, cost }));
 
     return {
       totalUnderRepair: active.length,
@@ -273,5 +296,20 @@ export const MaintenanceService = {
       technicianWorkload,
       costTrend
     };
+  },
+
+  /**
+   * Fetches authoritative repair analytics from the server API, falling back to local calculation if offline.
+   */
+  async fetchRepairsSummary(fallbackRecords?: MaintenanceRecord[], fallbackAssets?: Asset[]): Promise<RepairSummaryStats> {
+    try {
+      const res = await fetch('/api/maintenance/summary', { credentials: 'include' });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch {
+      // Fall through to client calculation
+    }
+    return this.getRepairsSummary(fallbackRecords || [], fallbackAssets || []);
   }
 };

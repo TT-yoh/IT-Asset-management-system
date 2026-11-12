@@ -15,17 +15,17 @@ import {
   Activity,
   Zap
 } from 'lucide-react';
-import { INITIAL_ASSETS } from '../../mockData';
+import { Asset } from '../../types';
 import { exportToExcel, exportToPDF } from '../../lib/report-service';
 
 interface ReportsLandingProps {
   onSelectReport: (reportId: string) => void;
-  assets?: typeof INITIAL_ASSETS;
+  assets?: Asset[];
 }
 
 export default function ReportsLandingPage({
   onSelectReport,
-  assets = INITIAL_ASSETS
+  assets = []
 }: ReportsLandingProps) {
   const reportCards = [
     {

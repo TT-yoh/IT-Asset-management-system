@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AuditLogItem, Organization, User, Branch } from '../types';
+import { Pagination } from './ui/Pagination';
 import { 
   ShieldAlert, 
   Terminal, 
@@ -35,6 +36,11 @@ export const AuditPanel: React.FC<AuditPanelProps> = ({
   onNavigateToUsers
 }) => {
   const orgLogs = auditLogs.filter(a => a.orgId === currentOrg.id);
+  const [logPage, setLogPage] = useState(1);
+  const [logPageSize, setLogPageSize] = useState(25);
+  const logTotalPages = Math.max(1, Math.ceil(orgLogs.length / logPageSize));
+  const currentLogPage = Math.min(logPage, logTotalPages);
+  const pagedLogs = orgLogs.slice((currentLogPage - 1) * logPageSize, currentLogPage * logPageSize);
 
   const isAdmin = currentUser?.role === 'ADMIN';
 
@@ -220,7 +226,7 @@ export const AuditPanel: React.FC<AuditPanelProps> = ({
                 No transaction events recorded yet for this organization.
               </div>
             ) : (
-              orgLogs.map(log => (
+              pagedLogs.map(log => (
                 <div key={log.id} className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800/80 hover:border-slate-700 transition-colors">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-2">
@@ -251,6 +257,19 @@ export const AuditPanel: React.FC<AuditPanelProps> = ({
                 </div>
               ))
             )}
+          </div>
+          <div className="mt-3">
+            <Pagination
+              page={currentLogPage}
+              pageSize={logPageSize}
+              totalItems={orgLogs.length}
+              onPageChange={setLogPage}
+              onPageSizeChange={(size) => {
+                setLogPageSize(size);
+                setLogPage(1);
+              }}
+              itemLabel="audit events"
+            />
           </div>
         </div>
 
@@ -402,7 +421,7 @@ export const AuditPanel: React.FC<AuditPanelProps> = ({
           MODAL: BRANCH REGISTRATION FOR COMPANY ADMINS
          ==================================================================== */}
       {showCreateBranchModal && isAdmin && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
+        <div data-modal-overlay className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
           <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <button onClick={() => setShowCreateBranchModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white text-lg">✕</button>
             
@@ -513,7 +532,7 @@ export const AuditPanel: React.FC<AuditPanelProps> = ({
           MODAL 4: BRANCH EDIT MODAL
          ==================================================================== */}
       {editingBranch && isAdmin && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150 font-sans">
+        <div data-modal-overlay className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150 font-sans">
           <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <button onClick={() => setEditingBranch(null)} className="absolute top-4 right-4 text-slate-400 hover:text-white text-lg">✕</button>
             

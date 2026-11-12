@@ -29,6 +29,8 @@ User roles, tenant IDs (`orgId`), or branch IDs (`branchId`) supplied in request
 | **`assets:delete`** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | Hard purge of unused assets with 0 linked checkouts/repairs. |
 | **`assets:writeoff`** | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ | Retire, dispose, or write off equipment (subject to SoD). |
 | **`assets:valuation`** | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ | Edit asset purchase cost and real-time current market value. |
+| **`assets:export`** | ✅ | ✅ | Own Branch | ✅ | ✅ | ❌ | Export asset datasets with role-specific valuation masking. |
+| **`reports:read`** | ✅ | ✅ | Own Branch | ❌ | ✅ | ❌ | View executive analytics, fleet depreciation, and financial summaries. |
 | **`checkouts:read`** | ✅ | ✅ | Own Branch | ✅ | ✅ | Assigned | View active and historical equipment checkouts. |
 | **`checkouts:create`** | ✅ | ❌ | Own Branch | ✅ | ❌ | Self Only | Check out equipment to verified corporate personnel. |
 | **`checkouts:return`** | ✅ | ❌ | Own Branch | ✅ | ❌ | ❌ | Process equipment check-ins and inspect hardware condition. |
@@ -36,7 +38,7 @@ User roles, tenant IDs (`orgId`), or branch IDs (`branchId`) supplied in request
 | **`maintenance:read`** | ✅ | ✅ | Own Branch | ✅ | ✅ | Reported | View work orders and maintenance records. |
 | **`maintenance:create`** | ✅ | ❌ | Own Branch | ✅ | ❌ | Report Only | Log repair work orders (USER forced to PENDING / MEDIUM). |
 | **`maintenance:update`** | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ | Update triage status, replace parts, and complete repair tickets. |
-| **`budgets:read`** | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | View department allocations and real-time spend. |
+| **`budgets:read`** | ✅ | ✅ | Own Branch | ❌ | ✅ | ❌ | View department allocations and real-time spend. |
 | **`budgets:manage`** | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ | Allocate and adjust departmental budget thresholds. |
 | **`users:read`** | ✅ | ✅ | Own Branch | ✅ | ✅ | ❌ | View staff roster and contact information. |
 | **`users:invite`** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | Invite new staff members and issue onboarding tokens. |

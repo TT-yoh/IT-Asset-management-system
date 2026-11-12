@@ -680,7 +680,7 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
           MODAL: ADD / EDIT BRANCH FACILITY
          ==================================================================== */}
       {showBranchModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
+        <div data-modal-overlay className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
           <div ref={branchModalBodyRef} className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 md:p-8 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <button
               type="button"
@@ -829,7 +829,7 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
           MODAL: ADD / EDIT DEPARTMENT
          ==================================================================== */}
       {showDeptModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
+        <div data-modal-overlay className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl relative">
             <button
               type="button"
@@ -909,7 +909,7 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
           MODAL: CONFIRM DELETE BRANCH
          ==================================================================== */}
       {branchToDelete && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
+        <div data-modal-overlay className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
           <div className="bg-slate-900 border border-rose-500/30 rounded-3xl max-w-md w-full p-6 shadow-2xl relative">
             <div className="flex items-center gap-3 text-rose-400 mb-3">
               <div className="w-10 h-10 rounded-2xl bg-rose-500/10 flex items-center justify-center">
@@ -957,7 +957,7 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
           MODAL: CONFIRM DELETE DEPARTMENT
          ==================================================================== */}
       {deptToDelete && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
+        <div data-modal-overlay className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 overflow-y-auto flex justify-center items-start sm:items-center py-6 sm:py-10 px-3 sm:px-4 animate-in fade-in duration-150">
           <div className="bg-slate-900 border border-rose-500/30 rounded-3xl max-w-md w-full p-6 shadow-2xl relative">
             <div className="flex items-center gap-3 text-rose-400 mb-3">
               <div className="w-10 h-10 rounded-2xl bg-rose-500/10 flex items-center justify-center">

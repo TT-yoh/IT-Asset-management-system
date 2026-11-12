@@ -18,6 +18,7 @@ import {
   Building2
 } from 'lucide-react';
 import { RegisterCompanyModal, RegisterCompanyData } from '../RegisterCompanyModal';
+import { PasswordResetPanel } from './PasswordResetPanel';
 
 interface LoginPortalProps {
   organizations: Organization[];
@@ -36,6 +37,8 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
 }) => {
   // Mode: 'SIGNIN' | 'ACTIVATE'
   const [authMode, setAuthMode] = useState<'SIGNIN' | 'ACTIVATE'>('SIGNIN');
+  // Password reset view: null when hidden, otherwise the token from a #/reset?token= link (may be empty).
+  const [resetToken, setResetToken] = useState<string | null>(null);
   const [showRegisterCompanyModal, setShowRegisterCompanyModal] = useState(false);
 
   // Standard Sign-In Form State (User must input their own credentials)
@@ -63,6 +66,16 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
     try {
       let fragmentToken: string | null = null;
       const hash = window.location.hash;
+
+      // Password reset links: #/reset?token=... (token is stripped from the URL immediately)
+      if (/^#\/?reset\b/i.test(hash)) {
+        const queryStart = hash.indexOf('?');
+        const params = new URLSearchParams(queryStart !== -1 ? hash.substring(queryStart + 1) : '');
+        setResetToken(params.get('token') || '');
+        setAuthMode('SIGNIN');
+        window.history.replaceState({ mode: 'login' }, '', '#/login');
+        return;
+      }
       if (hash && hash.includes('token=')) {
         const queryStart = hash.indexOf('?');
         if (queryStart !== -1) {
@@ -124,6 +137,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
 
   const handleSwitchAuthMode = (mode: 'SIGNIN' | 'ACTIVATE') => {
     setAuthMode(mode);
+    setResetToken(null);
     setError(null);
     if (typeof window !== 'undefined') {
       const targetHash = mode === 'ACTIVATE' ? '#/activate' : '#/login';
@@ -423,7 +437,16 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
           {/* VIEW 1: ENTERPRISE SIGN-IN */}
           {authMode === 'SIGNIN' && (
             <div className="animate-in fade-in duration-150">
-              {challengeToken ? (
+              {resetToken !== null ? (
+                <PasswordResetPanel
+                  initialToken={resetToken}
+                  initialEmail={email}
+                  onBackToSignIn={() => {
+                    setResetToken(null);
+                    setError(null);
+                  }}
+                />
+              ) : challengeToken ? (
                 <div>
                   <div className="mb-6 flex items-center justify-between">
                     <div>
@@ -525,12 +548,25 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
 
                     {/* Password */}
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                        Password
-                      </label>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label htmlFor="signin-password" className="block text-[10px] font-bold text-slate-300 uppercase tracking-wider">
+                          Password
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setError(null);
+                            setResetToken('');
+                          }}
+                          className="text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 cursor-pointer transition"
+                        >
+                          Forgot password?
+                        </button>
+                      </div>
                       <div className="relative">
                         <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                         <input
+                          id="signin-password"
                           type={showPassword ? 'text' : 'password'}
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
@@ -541,6 +577,8 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
                         <button
                           type="button"
                           onClick={() => setShowPassword(!showPassword)}
+                          aria-label={showPassword ? 'Hide password' : 'Show password'}
+                          aria-pressed={showPassword}
                           className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
                         >
                           {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
