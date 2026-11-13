@@ -12,7 +12,9 @@ import {
   clearStoredSession,
   wipeUserAndOrgCaches,
   saveToStorage,
-  STORAGE_KEYS
+  STORAGE_KEYS,
+  setSaveFailureReporter,
+  RESYNC_EVENT
 } from '../lib/tidb-storage';
 import { clearOfflineStoreOnLogout, setActiveSessionContext } from '../lib/offline-sync';
 import { useFeedback } from './FeedbackContext';
@@ -45,6 +47,7 @@ interface AuthContextType {
   setCurrentOrg: (org: Organization) => void;
   handleSyncUsers: (users: User[]) => void;
   handleSyncBranches: (branches: Branch[]) => void;
+  handleSyncDepartments: (departments: Department[]) => void;
   handleSyncOrganizations: (orgs: Organization[]) => void;
   handleLoginSuccess: (user: User, org: Organization) => void;
   handleLogout: () => void;
@@ -62,6 +65,8 @@ interface AuthContextType {
   }) => Promise<{ success: boolean; inviteToken?: string; emailDelivered?: boolean; user?: User; error?: string }>;
   handleRegisterUser: (newUser: User) => void;
   handleUpdateUser: (updatedUser: User) => void;
+  /** Show changes that another route has already saved on the server (no second save). */
+  handleApplySavedUser: (updatedUser: User) => void;
   handleDeleteUser: (userId: string) => Promise<{ success: boolean; error?: string }>;
   handleRegisterBranch: (newBranch: Branch) => void;
   handleUpdateBranch: (branchId: string, updatedFields: Partial<Branch>) => void;
@@ -76,7 +81,13 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { confirm } = useFeedback();
+  const { confirm, toast } = useFeedback();
+
+  // Saves that the server refuses, or that never reach it, are shown to the user.
+  useEffect(() => {
+    setSaveFailureReporter((message) => toast(message, 'error'));
+    return () => setSaveFailureReporter(null);
+  }, [toast]);
   const [systemOrgs, setSystemOrgs] = useState<Organization[]>([]);
   const [systemUsers, setSystemUsers] = useState<User[]>([]);
   const [systemBranches, setSystemBranches] = useState<Branch[]>([]);
@@ -97,16 +108,41 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Server session verification against backend /api/auth/me cookie
   useEffect(() => {
     let isCancelled = false;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    let controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    // A slow answer is not a "no": only an explicit 401/403 means signed out. Each attempt
+    // gets a generous limit and transient failures are retried, so a slow database does not
+    // bounce a signed-in user to the sign-in screen on page load.
+    const SESSION_CHECK_TIMEOUT_MS = 10000;
+    const SESSION_CHECK_ATTEMPTS = 3;
+
+    const fetchSessionWithRetry = async (): Promise<Response> => {
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= SESSION_CHECK_ATTEMPTS; attempt++) {
+        if (isCancelled) break;
+        controller = new AbortController();
+        timeoutId = setTimeout(() => controller.abort(), SESSION_CHECK_TIMEOUT_MS);
+        try {
+          const response = await fetch('/api/auth/me', { credentials: 'include', signal: controller.signal });
+          clearTimeout(timeoutId);
+          // Retry server-side hiccups (5xx / gateway errors); accept everything else.
+          if (response.status < 500 || attempt === SESSION_CHECK_ATTEMPTS) return response;
+          lastError = new Error(`Session check returned ${response.status}`);
+        } catch (err) {
+          clearTimeout(timeoutId);
+          lastError = err;
+        }
+        if (attempt < SESSION_CHECK_ATTEMPTS && !isCancelled) {
+          await new Promise((resolve) => setTimeout(resolve, 600 * attempt));
+        }
+      }
+      throw lastError ?? new Error('Session check cancelled');
+    };
 
     const verifyServerSession = async () => {
       try {
-        const res = await fetch('/api/auth/me', { 
-          credentials: 'include',
-          signal: controller.signal 
-        });
-        clearTimeout(timeoutId);
+        const res = await fetchSessionWithRetry();
 
         if (res.ok) {
           const data = await res.json().catch(() => null);
@@ -171,7 +207,28 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [systemOrgs]);
+    // Verify the session once per page load. This effect used to depend on `systemOrgs`,
+    // which gets a new array on every background refresh, so the app called /api/auth/me
+    // every 30 seconds and exhausted the sign-in rate limit within minutes of normal use.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep the active organization's details (name, branding) in step with data refreshes.
+  // Only details of the organization already selected are updated; identity never changes here.
+  useEffect(() => {
+    if (!currentUser) return;
+    setCurrentOrg(prev => {
+      const matched = systemOrgs.find(o => o.id === prev.id);
+      if (!matched) return prev;
+      const unchanged =
+        matched.name === prev.name &&
+        matched.type === prev.type &&
+        matched.logo === prev.logo &&
+        matched.brandingColor === prev.brandingColor &&
+        matched.branchesCount === prev.branchesCount;
+      return unchanged ? prev : matched;
+    });
+  }, [systemOrgs, currentUser]);
 
   const isBranchRestricted = Boolean(
     currentUser && (currentUser.role === 'BRANCH_MANAGER' || currentUser.role === 'USER')
@@ -246,6 +303,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
    */
   const handleSyncBranches = (branches: Branch[]) => {
     setSystemBranches(branches);
+  };
+
+  /**
+   * Narrow action to synchronize departments from remote database/storage
+   */
+  const handleSyncDepartments = (departments: Department[]) => {
+    setSystemDepartments(departments);
   };
 
   /**
@@ -441,6 +505,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         twoFactorEnabled: false,
         avatar: `https://images.unsplash.com/photo-${1534528741775 + (systemUsers.length % 10)}?w=100&auto=format&fit=crop&q=80`,
         status: 'INVITED',
+        // A newly created account starts at version 1; edits must send the version they are based on.
+        version: 1,
         invitedAt: resData.invitedAt || new Date().toISOString()
       };
 
@@ -473,14 +539,29 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const handleUpdateUser = (updatedUser: User) => {
-    setSystemUsers(prevUsers => {
-      const updatedUsers = prevUsers.map(u => u.id === updatedUser.id ? updatedUser : u);
-      persistUser(updatedUser, updatedUsers);
-      return updatedUsers;
-    });
+    setSystemUsers(prevUsers => prevUsers.map(u => u.id === updatedUser.id ? updatedUser : u));
     if (currentUser?.id === updatedUser.id) {
       setCurrentUser(updatedUser);
     }
+
+    // Save outside the state updater (updaters may run twice). On success the server has
+    // advanced the record version, so advance the local copy too: the next edit must be based
+    // on the new version or the server rejects it as a conflict.
+    persistUser(updatedUser, undefined, true).then(saved => {
+      if (!saved) return;
+      const nextVersion = (updatedUser.version || 1) + 1;
+      setSystemUsers(prevUsers => prevUsers.map(u => (u.id === updatedUser.id ? { ...u, version: nextVersion } : u)));
+      setCurrentUser(prev => (prev && prev.id === updatedUser.id ? { ...prev, version: nextVersion } : prev));
+    });
+  };
+
+  const handleApplySavedUser = (updatedUser: User) => {
+    setSystemUsers(prevUsers => prevUsers.map(u => (u.id === updatedUser.id ? { ...u, ...updatedUser, version: u.version } : u)));
+    if (currentUser?.id === updatedUser.id) {
+      setCurrentUser(prev => (prev ? { ...prev, ...updatedUser } : updatedUser));
+    }
+    // The server advanced the record version; reload so the next edit is based on it.
+    window.dispatchEvent(new Event(RESYNC_EVENT));
   };
 
   const handleDeleteUser = async (userId: string): Promise<{ success: boolean; error?: string }> => {
@@ -514,7 +595,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return b;
       });
       if (targetUpdatedBranch) {
-        persistBranch(targetUpdatedBranch, updatedBranches);
+        persistBranch(targetUpdatedBranch, updatedBranches, true);
       }
       return updatedBranches;
     });
@@ -573,7 +654,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return d;
       });
       if (targetUpdatedDept) {
-        persistDepartment(targetUpdatedDept, updated);
+        persistDepartment(targetUpdatedDept, updated, true);
       }
       return updated;
     });
@@ -641,6 +722,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setCurrentOrg,
         handleSyncUsers,
         handleSyncBranches,
+        handleSyncDepartments,
         handleSyncOrganizations,
         handleLoginSuccess,
         handleLogout,
@@ -650,6 +732,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         handleInviteUser,
         handleRegisterUser,
         handleUpdateUser,
+        handleApplySavedUser,
         handleDeleteUser,
         handleRegisterBranch,
         handleUpdateBranch,

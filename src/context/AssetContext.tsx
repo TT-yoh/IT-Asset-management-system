@@ -12,7 +12,12 @@ import {
   persistMaintenance,
   mapAssetToTiDBRow,
   mapCheckoutToTiDBRow,
-  mapMaintenanceToTiDBRow
+  mapMaintenanceToTiDBRow,
+  ServerRejectedError,
+  RESYNC_EVENT,
+  persistBudget,
+  deleteBudgetFromDb,
+  BudgetInput
 } from '../lib/tidb-storage';
 import {
   isTiDBConfigured,
@@ -21,6 +26,7 @@ import {
 import { queueOfflineMutation, registerReplayExecutor } from '../lib/offline-sync';
 import { useAuth } from './AuthContext';
 import { useNotifications } from './NotificationContext';
+import { useFeedback } from './FeedbackContext';
 
 interface AssetContextType {
   assets: Asset[];
@@ -46,12 +52,21 @@ interface AssetContextType {
   handleAddAsset: (newAst: Asset) => Promise<void>;
   handleUpdateAsset: (updatedAst: Asset) => Promise<void>;
   handleDeleteAsset: (astId: string) => Promise<void>;
+  /** Create (no existing) or update a budget. Resolves true when the server saved it. */
+  handleSaveBudget: (input: BudgetInput, existing?: BudgetAllocation) => Promise<boolean>;
+  handleDeleteBudget: (budget: BudgetAllocation) => Promise<boolean>;
   handleBulkAddAssets: (newAssets: Asset[]) => Promise<void>;
   handleBatchUpdateStatus: (assetIds: string[], newStatus: AssetStatus, reason?: string) => Promise<void>;
   handleBatchTransferBranch: (assetIds: string[], targetBranchId: string, targetBranchName: string) => Promise<void>;
   handleBatchDeleteAssets: (assetIds: string[]) => Promise<void>;
   handleNewCheckout: (chk: CheckoutRecord, updatedAsset?: Asset) => Promise<void>;
-  handleReturnAsset: (chkId: string, returnCondition: string, notes?: string) => Promise<void>;
+  handleReturnAsset: (
+    chkId: string,
+    returnCondition: string,
+    damageReported?: boolean,
+    damageDescription?: string,
+    notes?: string
+  ) => Promise<void>;
   handleReportIssue: (mnt: MaintenanceRecord) => Promise<void>;
   handleCompleteRepair: (mntId: string) => Promise<void>;
   handleUpdateTicket: (updatedRecord: MaintenanceRecord) => Promise<void>;
@@ -62,8 +77,9 @@ interface AssetContextType {
 const AssetContext = createContext<AssetContextType | undefined>(undefined);
 
 export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { currentOrg, currentUser, isBranchRestricted, handleSyncUsers, handleSyncBranches, handleSyncOrganizations } = useAuth();
+  const { currentOrg, currentUser, isBranchRestricted, handleSyncUsers, handleSyncBranches, handleSyncDepartments, handleSyncOrganizations } = useAuth();
   const { addNotification, setNotifications, evaluateAutomatedAlerts } = useNotifications();
+  const { toast } = useFeedback();
 
   const scopedAssetsKey = useMemo(() => getScopedKey(STORAGE_KEYS.ASSETS, currentOrg?.id, currentUser?.id), [currentOrg?.id, currentUser?.id]);
   const scopedChksKey = useMemo(() => getScopedKey(STORAGE_KEYS.CHECKOUTS, currentOrg?.id, currentUser?.id), [currentOrg?.id, currentUser?.id]);
@@ -85,8 +101,14 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [tiDBSyncTime, setTiDBSyncTime] = useState<string>(getLastTiDBSyncTime());
 
   const refreshAppData = async () => {
+    // Nothing to load while signed out: every request would be rejected with 401.
+    // Loading starts when the signed-in user changes (see the re-sync effect below).
+    if (!currentUser?.id) return;
     try {
       const data = await loadInitialData(currentOrg?.id, currentUser?.id);
+      // A save overlapped this fetch, so the snapshot may be missing it. Keep what is on
+      // screen; the refresh that follows every save (or the next poll) will bring fresh data.
+      if (data.stale) return;
       setAssets(data.assets);
       setCheckouts(data.checkouts);
       setMaintenances(data.maintenances);
@@ -95,6 +117,7 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setNotifications(data.notifications);
       handleSyncUsers(data.users);
       handleSyncBranches(data.branches);
+      if (data.departments) handleSyncDepartments(data.departments);
       if (data.organizations && handleSyncOrganizations) {
         handleSyncOrganizations(data.organizations);
       }
@@ -234,6 +257,14 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // 1. Re-sync whenever tenant or user changes
   useEffect(() => {
     refreshAppData();
+  }, [currentOrg?.id, currentUser?.id]);
+
+  // 1b. A save the server refused leaves an optimistic change on screen: reload to undo it.
+  useEffect(() => {
+    const resync = () => { refreshAppData(); };
+    window.addEventListener(RESYNC_EVENT, resync);
+    return () => window.removeEventListener(RESYNC_EVENT, resync);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentOrg?.id, currentUser?.id]);
 
   // 2. Cross-tab instant synchronization via browser storage events
@@ -408,6 +439,27 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
   };
 
+  // Budget Pipelines: saved on the server first, then reloaded (no optimistic rows, so a
+  // refused save never leaves a budget on screen that does not exist).
+  const handleSaveBudget = async (input: BudgetInput, existing?: BudgetAllocation): Promise<boolean> => {
+    const saved = await persistBudget(input, existing);
+    if (saved) {
+      await refreshAppData();
+      toast(existing ? `Budget for ${input.departmentName} updated.` : `Budget for ${input.departmentName} added.`);
+    }
+    return saved;
+  };
+
+  const handleDeleteBudget = async (budget: BudgetAllocation): Promise<boolean> => {
+    const removed = await deleteBudgetFromDb(budget);
+    if (removed) {
+      setBudgets(current => current.filter(b => b.id !== budget.id));
+      await refreshAppData();
+      toast(`Budget for ${budget.departmentName} removed.`);
+    }
+    return removed;
+  };
+
   const handleDeleteAsset = async (astId: string) => {
     const remainingAssets = assets.filter(a => a.id !== astId);
     setAssets(remainingAssets);
@@ -491,6 +543,19 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     await refreshAppData();
   };
 
+  /**
+   * True when the server refused a save outright (validation, conflict, permission).
+   * Such a request can never succeed on retry, so it must not be queued offline: the user
+   * is told why, and the screen is reloaded from the server to undo the optimistic change.
+   */
+  const handleServerRejection = async (res: Response, what: string): Promise<boolean> => {
+    if (res.status < 400 || res.status >= 500 || res.status === 408 || res.status === 429) return false;
+    const body = await res.json().catch(() => null);
+    toast(`${what} was not saved: ${body?.error || `the server refused it (HTTP ${res.status})`}`, 'error');
+    await refreshAppData();
+    return true;
+  };
+
   // Checkout Pipelines
   const handleNewCheckout = async (chk: CheckoutRecord, _updatedAsset?: Asset) => {
     const updatedCheckouts = [chk, ...checkouts];
@@ -499,20 +564,41 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     try {
       await persistCheckout(chk, updatedCheckouts);
       await refreshAppData();
-    } catch {
+    } catch (err) {
+      if (err instanceof ServerRejectedError) {
+        // The server refused it (already checked out, not available, no permission...).
+        // Undo the optimistic row and say so, rather than leaving a checkout that never existed.
+        setCheckouts((current) => current.filter((c) => c.id !== chk.id));
+        toast(`Checkout of ${chk.assetCode} was not saved: ${err.message}`, 'error');
+        await refreshAppData();
+        return;
+      }
       queueOfflineMutation('checkouts', 'INSERT', chk);
     }
   };
 
-  const handleReturnAsset = async (chkId: string, returnCondition: string, notes?: string) => {
+  const handleReturnAsset = async (
+    chkId: string,
+    returnCondition: string,
+    damageReportedInput?: boolean,
+    damageDescriptionInput?: string,
+    notesInput?: string
+  ) => {
     const chk = checkouts.find(c => c.id === chkId);
     if (!chk) return;
     const nowIso = new Date().toISOString().split('T')[0]!;
+    const notes = (notesInput || '').trim() || undefined;
+    const damageReported = Boolean(damageReportedInput) || returnCondition === 'POOR';
+    const damageDescription = damageReported
+      ? ((damageDescriptionInput || '').trim() || notes || 'Equipment returned in damaged condition')
+      : undefined;
     const updatedChk: CheckoutRecord = {
       ...chk,
       status: 'RETURNED',
       checkedInAt: nowIso,
       returnCondition: returnCondition as any,
+      damageReported,
+      damageDescription,
       notes: notes || `Returned in condition: ${returnCondition}`
     };
     const updatedCheckouts = checkouts.map(c => c.id === chkId ? updatedChk : c);
@@ -525,13 +611,15 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         credentials: 'include',
         body: JSON.stringify({
           returnCondition,
-          damageReported: returnCondition === 'DAMAGED' || returnCondition === 'POOR',
-          damageDescription: returnCondition === 'DAMAGED' || returnCondition === 'POOR' ? notes || 'Equipment returned in damaged condition' : undefined,
+          damageReported,
+          damageDescription,
           notes
         })
       });
       if (res.ok) {
         await refreshAppData();
+      } else if (await handleServerRejection(res, 'Check-in')) {
+        return;
       } else {
         throw new Error(`Return failed (HTTP ${res.status})`);
       }
@@ -539,8 +627,8 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       queueOfflineMutation('checkouts', 'RETURN', {
         id: chkId,
         returnCondition,
-        damageReported: returnCondition === 'DAMAGED' || returnCondition === 'POOR',
-        damageDescription: notes,
+        damageReported,
+        damageDescription,
         notes
       });
     }
@@ -554,7 +642,13 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     try {
       await persistMaintenance(mnt, updatedMaintenances);
       await refreshAppData();
-    } catch {
+    } catch (err) {
+      if (err instanceof ServerRejectedError) {
+        setMaintenances((current) => current.filter((m) => m.id !== mnt.id));
+        toast(`Repair ticket for ${mnt.assetCode} was not saved: ${err.message}`, 'error');
+        await refreshAppData();
+        return;
+      }
       queueOfflineMutation('maintenance', 'INSERT', mnt);
     }
   };
@@ -583,6 +677,8 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       });
       if (res.ok) {
         await refreshAppData();
+      } else if (await handleServerRejection(res, 'Repair completion')) {
+        return;
       } else {
         throw new Error(`Maintenance update failed (HTTP ${res.status})`);
       }
@@ -615,6 +711,8 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       });
       if (res.ok) {
         await refreshAppData();
+      } else if (await handleServerRejection(res, 'Repair ticket update')) {
+        return;
       } else {
         throw new Error(`Ticket update failed (HTTP ${res.status})`);
       }
@@ -657,6 +755,8 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         handleAddAsset,
         handleUpdateAsset,
         handleDeleteAsset,
+        handleSaveBudget,
+        handleDeleteBudget,
         handleBulkAddAssets,
         handleBatchUpdateStatus,
         handleBatchTransferBranch,

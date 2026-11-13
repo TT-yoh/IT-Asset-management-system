@@ -11,7 +11,7 @@
     "preview": "cross-env NODE_ENV=production vite preview",
     "clean": "rm -rf dist api/index.js",
     "test:stress": "cross-env NODE_ENV=test tsx tests/stress-test.ts",
-    "lint": "cross-env NODE_ENV=development tsc --noEmit",
+    "lint": "cross-env NODE_ENV=development tsc --noEmit && cross-env NODE_ENV=development tsc --noEmit -p tsconfig.server.json",
     "test:config": "cross-env NODE_ENV=test tsx tests/config-validation.test.ts",
     "test:db": "cross-env NODE_ENV=test tsx tests/database-layer.test.ts",
     "test:security": "cross-env NODE_ENV=test tsx tests/security-scoping.test.ts",
@@ -31,7 +31,8 @@
     "test:drift": "cross-env NODE_ENV=test tsx tests/schema-drift.test.ts",
     "db:migrate": "node scripts/migrate.mjs",
     "db:status": "node scripts/migrate.mjs --status",
-    "db:dry-run": "node scripts/migrate.mjs --dry-run"
+    "db:dry-run": "node scripts/migrate.mjs --dry-run",
+    "lint:server": "cross-env NODE_ENV=development tsc --noEmit -p tsconfig.server.json"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

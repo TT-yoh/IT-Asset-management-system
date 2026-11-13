@@ -13,6 +13,9 @@ const EXPLICIT_BRANCH_COLUMNS = `
 `;
 
 const CreateBranchSchema = z.object({
+  // Optional client-generated id, so a record created optimistically in the browser keeps
+  // the same id on the server and can be edited before the next data refresh.
+  id: z.string().regex(/^[a-zA-Z0-9_-]{3,64}$/).optional(),
   name: z.string().trim().min(1, 'Branch name is required').max(100),
   city: z.string().trim().min(1, 'City is required').max(100),
   code: z.string().trim().max(64).optional(),
@@ -59,14 +62,14 @@ branchRouter.post('/', requirePermission('branches:manage'), asyncHandler(async 
   const parseResult = CreateBranchSchema.safeParse(req.body);
   if (!parseResult.success) {
     res.status(400).json({
-      error: parseResult.error.errors[0]?.message || 'Invalid branch data',
+      error: parseResult.error.issues[0]?.message || 'Invalid branch data',
       code: 'VALIDATION_ERROR'
     });
     return;
   }
 
   const data = parseResult.data;
-  const branchId = crypto.randomUUID();
+  const branchId = data.id || crypto.randomUUID();
   const rawCode = data.code || `BR-${data.name.substring(0, 3).toUpperCase()}`;
   const code = rawCode.trim();
   const managerName = data.managerName || data.manager_name || 'Unassigned';
@@ -131,7 +134,7 @@ branchRouter.put('/:id', requirePermission('branches:manage'), asyncHandler(asyn
   const parseResult = UpdateBranchSchema.safeParse(req.body);
   if (!parseResult.success) {
     res.status(400).json({
-      error: parseResult.error.errors[0]?.message || 'Invalid branch update payload',
+      error: parseResult.error.issues[0]?.message || 'Invalid branch update payload',
       code: 'VALIDATION_ERROR'
     });
     return;

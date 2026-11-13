@@ -1,3 +1,4 @@
+import { safeStopScanner } from '../../lib/scanner-utils';
 import React, { useState, useEffect, useRef } from 'react';
 import { Asset, Branch, Organization } from '../../types';
 import { Html5Qrcode } from 'html5-qrcode';
@@ -234,13 +235,9 @@ export const PhysicalAuditModal: React.FC<PhysicalAuditModalProps> = ({
       isSubscribed = false;
       clearTimeout(timeout);
       if (qrInstanceRef.current) {
-        qrInstanceRef.current.stop().then(() => {
-          qrInstanceRef.current?.clear();
-          qrInstanceRef.current = null;
-        }).catch(() => {
-          qrInstanceRef.current?.clear();
-          qrInstanceRef.current = null;
-        });
+        const instance = qrInstanceRef.current;
+        qrInstanceRef.current = null;
+        safeStopScanner(instance);
       }
     };
   }, [isCameraActive, activeBranch.id]);

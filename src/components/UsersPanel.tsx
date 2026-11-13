@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { User, Organization, Branch, Asset, AuditLogItem, Department } from '../types';
 import { useFeedback } from '../context/FeedbackContext';
 import { Pagination } from './ui/Pagination';
+import { RESYNC_EVENT } from '../lib/tidb-storage';
 import { 
   Users, 
   UserPlus, 
@@ -435,6 +436,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
         twoFactorEnabled: false,
         avatar: `https://images.unsplash.com/photo-${1534528741775 + (users.length % 10)}?w=100&auto=format&fit=crop&q=80`,
         status: 'INVITED',
+        version: 1,
         invitedAt: new Date().toISOString()
       };
 
@@ -466,12 +468,18 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
       const data = await res.json();
       if (res.ok && data.inviteToken) {
         const updated = { ...targetUser, invitedAt: data.invitedAt };
-        if (onUpdateUser) onUpdateUser(updated);
+        // The server already saved the new invitation (and advanced the record version).
+        // Reload from the server instead of sending a second, out-of-date update.
+        void updated;
+        window.dispatchEvent(new Event(RESYNC_EVENT));
         copyInviteLink(data.inviteToken);
         showToast(`Fresh invitation generated & link copied for ${targetUser.fullName}!`);
       } else if (res.ok) {
         const updated = { ...targetUser, invitedAt: data.invitedAt || targetUser.invitedAt };
-        if (onUpdateUser) onUpdateUser(updated);
+        // The server already saved the new invitation (and advanced the record version).
+        // Reload from the server instead of sending a second, out-of-date update.
+        void updated;
+        window.dispatchEvent(new Event(RESYNC_EVENT));
         if (data.emailDelivered) {
           showToast(`A fresh invitation was emailed to ${targetUser.fullName}.`);
         } else {

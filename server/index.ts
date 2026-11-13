@@ -17,7 +17,7 @@ import {
 
 import { authRouter } from './routes/authRoutes';
 import { adminRouter } from './routes/adminRoutes';
-import { assetRouter } from './routes/assetRoutes';
+import { assetRouter, EXPLICIT_ASSET_COLUMNS } from './routes/assetRoutes';
 import { checkoutRouter } from './routes/checkoutRoutes';
 import { maintenanceRouter } from './routes/maintenanceRoutes';
 import { budgetRouter } from './routes/budgetRoutes';
@@ -117,6 +117,11 @@ const authRateLimiter = rateLimit({
   max: config.isTest ? 5000 : 30,
   standardHeaders: true,
   legacyHeaders: false,
+  // The strict budget protects routes that accept credentials or tokens. Checking an existing
+  // session (/me) and signing out carry no guessable secret and happen on every page load, so
+  // counting them would lock out whole offices that share one IP address. They remain covered
+  // by the global /api limiter.
+  skip: (req) => (req.method === 'GET' && req.path === '/me') || (req.method === 'POST' && req.path === '/logout'),
   message: { error: 'Too many authentication attempts. Please try again later.', code: 'AUTH_RATE_LIMIT_EXCEEDED' }
 });
 
@@ -209,7 +214,7 @@ app.get(
     if (role === 'BRANCH_MANAGER' || role === 'USER') {
       if (branchId) {
         assets = await query(
-          'SELECT `id`, `org_id`, `branch_id`, `branch_name`, `category_id`, `category_name`, `asset_code`, `name`, `model`, `serial_number`, `mac_address`, `phone_number`, `registered_email`, `imei_number`, `status`, `asset_condition`, `purchase_date`, `purchase_cost`, `warranty_expiry`, `current_value`, `image_url`, `notes`, `version`, `created_at`, `updated_at` FROM `assets` WHERE `org_id` = ? AND `branch_id` = ? ORDER BY `created_at` DESC LIMIT 1000;',
+          `SELECT ${EXPLICIT_ASSET_COLUMNS} FROM \`assets\` WHERE \`org_id\` = ? AND \`branch_id\` = ? ORDER BY \`created_at\` DESC LIMIT 1000;`,
           [effectiveOrgId, branchId]
         );
       } else {
@@ -217,7 +222,7 @@ app.get(
       }
     } else {
       assets = await query(
-        'SELECT `id`, `org_id`, `branch_id`, `branch_name`, `category_id`, `category_name`, `asset_code`, `name`, `model`, `serial_number`, `mac_address`, `phone_number`, `registered_email`, `imei_number`, `status`, `asset_condition`, `purchase_date`, `purchase_cost`, `warranty_expiry`, `current_value`, `image_url`, `notes`, `version`, `created_at`, `updated_at` FROM `assets` WHERE `org_id` = ? ORDER BY `created_at` DESC LIMIT 1000;',
+        `SELECT ${EXPLICIT_ASSET_COLUMNS} FROM \`assets\` WHERE \`org_id\` = ? ORDER BY \`created_at\` DESC LIMIT 1000;`,
         [effectiveOrgId]
       );
     }
@@ -276,7 +281,7 @@ app.get(
     let budgets: any[] = [];
     if (hasPermission(role, 'budgets:read')) {
       budgets = await query(
-        'SELECT `id`, `org_id`, `department_name`, `branch_name`, `fiscal_year`, `allocated`, `spent`, `created_at` FROM `budgets` WHERE `org_id` = ? ORDER BY `fiscal_year` DESC;',
+        'SELECT `id`, `org_id`, `department_name`, `branch_name`, `fiscal_year`, `allocated`, `spent`, `version`, `created_at` FROM `budgets` WHERE `org_id` = ? ORDER BY `fiscal_year` DESC;',
         [effectiveOrgId]
       );
     }
@@ -297,12 +302,12 @@ app.get(
     let rawUsers: any[] = [];
     if (hasPermission(role, 'users:read')) {
       rawUsers = await query(
-        'SELECT `id`, `org_id`, `email`, `full_name`, `role`, `department_id`, `department_name`, `branch_id`, `branch_name`, `two_factor_enabled`, `avatar`, `status`, `invited_at`, `created_at` FROM `users` WHERE `org_id` = ?;',
+        'SELECT `id`, `org_id`, `email`, `full_name`, `role`, `department_id`, `department_name`, `branch_id`, `branch_name`, `two_factor_enabled`, `avatar`, `status`, `invited_at`, `version`, `created_at` FROM `users` WHERE `org_id` = ? AND `status` != \'DELETED\';',
         [effectiveOrgId]
       );
     } else {
       rawUsers = await query(
-        'SELECT `id`, `org_id`, `email`, `full_name`, `role`, `department_id`, `department_name`, `branch_id`, `branch_name`, `two_factor_enabled`, `avatar`, `status`, `invited_at`, `created_at` FROM `users` WHERE `id` = ?;',
+        'SELECT `id`, `org_id`, `email`, `full_name`, `role`, `department_id`, `department_name`, `branch_id`, `branch_name`, `two_factor_enabled`, `avatar`, `status`, `invited_at`, `version`, `created_at` FROM `users` WHERE `id` = ?;',
         [userId]
       );
     }
@@ -343,6 +348,8 @@ app.get(
       avatar: u.avatar || '',
       status: u.status || 'ACTIVE',
       invitedAt: u.invited_at || undefined,
+      // Needed by the client to send baseVersion with user edits (optimistic concurrency).
+      version: Number(u.version || 1),
       createdAt: u.created_at
     }));
 

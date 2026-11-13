@@ -35,7 +35,8 @@ export function normalizeStatus(status?: string): string {
   return 'ACTIVE';
 }
 
-const EXPLICIT_ASSET_COLUMNS = `
+/** The one list of asset columns returned to clients; shared with GET /api/init. */
+export const EXPLICIT_ASSET_COLUMNS = `
   \`id\`, \`org_id\`, \`branch_id\`, \`branch_name\`, \`category_id\`, \`category_name\`,
   \`asset_code\`, \`name\`, \`model\`, \`serial_number\`, \`mac_address\`, \`phone_number\`,
   \`registered_email\`, \`imei_number\`, \`status\`, \`asset_condition\`, \`purchase_date\`,

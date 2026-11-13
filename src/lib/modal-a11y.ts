@@ -55,10 +55,18 @@ function findCloseControl(overlay: HTMLElement): HTMLElement | null {
   if (labelled) return labelled;
 
   // Icon-only button showing the lucide "X" glyph.
+  const iconClose = buttons.find(
+    (btn) => !btn.textContent?.trim() && btn.querySelector('svg.lucide-x') !== null
+  );
+  if (iconClose) return iconClose;
+
+  // A button whose whole text is a close glyph ("✕", "×") or the word Close / Cancel.
+  const text = (btn: HTMLButtonElement) => (btn.textContent || '').trim();
   return (
-    buttons.find(
-      (btn) => !btn.textContent?.trim() && btn.querySelector('svg.lucide-x') !== null
-    ) || null
+    buttons.find((btn) => /^[✕✖×xX]$/.test(text(btn))) ||
+    buttons.find((btn) => /^close$/i.test(text(btn))) ||
+    buttons.find((btn) => /^cancel$/i.test(text(btn))) ||
+    null
   );
 }
 

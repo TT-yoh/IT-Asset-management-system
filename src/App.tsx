@@ -57,6 +57,7 @@ function AppShell() {
     handleInviteUser,
     handleRegisterUser,
     handleUpdateUser,
+    handleApplySavedUser,
     handleDeleteUser,
     handleClearDummyUsers,
     handleUpdateBranch,
@@ -79,6 +80,8 @@ function AppShell() {
     filteredCheckouts,
     filteredMaintenances,
     filteredBudgets,
+    handleSaveBudget,
+    handleDeleteBudget,
     filteredAuditLogs,
     searchQuery,
     setSearchQuery,
@@ -235,6 +238,22 @@ function AppShell() {
   }, [currentUser?.id, currentUser?.role]);
 
   // Display clean security verification splash while validating session cookie
+  // Hooks must run on every render, so this stays above the signed-out early returns below.
+  // Enforce branch boundary for branch managers and restricted users
+  const isBranchRestricted = currentUser?.role === 'BRANCH_MANAGER' || currentUser?.role === 'USER';
+
+  const filteredUsers = React.useMemo(() => {
+    return systemUsers.filter(u => {
+      if (u.orgId && u.orgId !== currentOrg.id) return false;
+      if (isBranchRestricted && currentUser) {
+        const matchesBranchId = Boolean(currentUser.branchId && u.branchId === currentUser.branchId);
+        const matchesBranchName = Boolean(currentUser.branchName && u.branchName && u.branchName.toLowerCase() === currentUser.branchName.toLowerCase());
+        return matchesBranchId || matchesBranchName || u.id === currentUser.id;
+      }
+      return true;
+    });
+  }, [systemUsers, currentOrg.id, currentUser, isBranchRestricted]);
+
   if (isSessionLoading) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4">
@@ -278,21 +297,6 @@ function AppShell() {
     );
   }
 
-  // Enforce branch boundary for branch managers and restricted users
-  const isBranchRestricted = currentUser?.role === 'BRANCH_MANAGER' || currentUser?.role === 'USER';
-
-  const filteredUsers = React.useMemo(() => {
-    return systemUsers.filter(u => {
-      if (u.orgId && u.orgId !== currentOrg.id) return false;
-      if (isBranchRestricted && currentUser) {
-        const matchesBranchId = Boolean(currentUser.branchId && u.branchId === currentUser.branchId);
-        const matchesBranchName = Boolean(currentUser.branchName && u.branchName && u.branchName.toLowerCase() === currentUser.branchName.toLowerCase());
-        return matchesBranchId || matchesBranchName || u.id === currentUser.id;
-      }
-      return true;
-    });
-  }, [systemUsers, currentOrg.id, currentUser, isBranchRestricted]);
-
   const orgAssetsCount = filteredAssets.length;
   const orgRepairsCount = filteredMaintenances.filter(m => m.status === 'IN_PROGRESS').length;
 
@@ -307,7 +311,8 @@ function AppShell() {
         onMarkNotificationsRead={() => markAllAsRead(currentOrg.id)}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        onUpdateUser={handleUpdateUser}
+        // The settings window saves profile and 2FA changes through its own routes.
+        onUpdateUser={handleApplySavedUser}
         onToggleMobileMenu={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
         isMobileMenuOpen={isMobileMenuOpen}
         onOpenScanner={() => setIsGlobalScannerOpen(true)}
@@ -437,6 +442,11 @@ function AppShell() {
             <BudgetPanel
               currentOrg={currentOrg}
               budgets={filteredBudgets}
+              currentUser={currentUser}
+              departments={currentOrgDepartments}
+              branches={currentOrgBranches}
+              onSaveBudget={handleSaveBudget}
+              onDeleteBudget={handleDeleteBudget}
             />
           )}
 
@@ -459,6 +469,7 @@ function AppShell() {
               maintenances={filteredMaintenances}
               budgets={filteredBudgets}
               branches={currentOrgBranches}
+              checkouts={filteredCheckouts}
             />
           )}
 

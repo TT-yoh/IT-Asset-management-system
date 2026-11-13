@@ -33,7 +33,8 @@ import { AssetService } from '../../lib/asset-service';
  */
 async function requestAssetTag(reserve: boolean, categoryId?: string, categoryName?: string): Promise<string | null> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 5000);
+  // Reserving a tag is a multi-step transaction; allow for a slow or distant database.
+  const timer = setTimeout(() => controller.abort(), reserve ? 15000 : 8000);
   try {
     const query = new URLSearchParams({ categoryId: categoryId || '', categoryName: categoryName || '' });
     const res = await fetch(reserve ? '/api/assets/next-tag' : `/api/assets/next-tag?${query.toString()}`, {
@@ -315,7 +316,11 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
     setAiSuccessMessage('');
     setFormError('');
     setIsSaving(false);
-  }, [editingAsset, prefilledTag, isOpen, branches, categories]);
+    // Reset only when the modal opens or the asset being edited changes. `branches` and
+    // `categories` get a new array identity on every background data refresh; depending on
+    // them here wiped the form (and anything the user had typed) every 30 seconds.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingAsset, prefilledTag, isOpen]);
 
   // New assets: show the server's next sequential tag for the selected category,
   // as long as the user has not typed a tag of their own.

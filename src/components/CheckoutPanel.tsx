@@ -204,9 +204,23 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
       toast('Only organization admins can revoke custody assignment.', 'error');
       return;
     }
+    const asset = assets.find(a => a.id === targetAssetId);
+    const activeRecord = checkouts.find(c => c.assetId === targetAssetId && isRecordActive(c));
+    if (!asset || !activeRecord) {
+      toast('No active custody record was found for this device, so there is nothing to revoke.', 'error');
+      return;
+    }
+    if (!unassignReason.trim()) {
+      toast('Please enter a reason for revoking custody.', 'error');
+      return;
+    }
+
+    // Revoking custody is a check-in of the device's active checkout, recorded with the reason.
+    // The server confirms or refuses it; a refusal is reported by the check-in handler.
+    onReturnAsset(activeRecord.id, asset.condition || 'GOOD', false, '', `Custody revoked by admin: ${unassignReason.trim()}`);
     if (onUnassignCustody) onUnassignCustody(targetAssetId, unassignReason);
     setShowUnassignModal(false);
-    toast('Asset unassigned and returned to the general IT pool.');
+    toast(`Custody of ${asset.assetCode} revoked. The device is being returned to the general IT pool.`, 'info');
   };
 
   // Handle Export CSV (File 7 requirement)

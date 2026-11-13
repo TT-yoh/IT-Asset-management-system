@@ -165,6 +165,8 @@ export interface BudgetAllocation {
   fiscalYear: number;
   allocated: number;
   spent: number;
+  /** Record version; edits must send it (optimistic concurrency). */
+  version?: number;
 }
 
 export interface AuditLogItem {

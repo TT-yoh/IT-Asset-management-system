@@ -434,12 +434,11 @@ authRouter.post('/register-organization', asyncHandler(async (req: Request, res:
   });
 
   // 6. Issue Session Cookie
+  // The token carries only the user id and token version; the version must match the
+  // new user's token_version (1) or the session is rejected on the next request.
   const sessionToken = createSessionToken({
     userId,
-    orgId,
-    email: cleanAdminEmail,
-    role: 'ADMIN',
-    tokenVersion: 1
+    ver: 1
   });
 
   res.cookie('session_token', sessionToken, {

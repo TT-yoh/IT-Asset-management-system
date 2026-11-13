@@ -1,30 +1,64 @@
 import React, { useState } from 'react';
-import { BudgetAllocation, Organization } from '../types';
-import { PieChart as PieIcon, DollarSign, TrendingUp, Calculator, ArrowRight, AlertTriangle } from 'lucide-react';
+import { BudgetAllocation, Branch, Department, Organization, User } from '../types';
+import { PieChart as PieIcon, DollarSign, TrendingUp, Calculator, ArrowRight, AlertTriangle, Plus, Pencil, Trash2 } from 'lucide-react';
+import { hasPermission } from '../../shared/permissions';
+import { useFeedback } from '../context/FeedbackContext';
+import { BudgetAllocationForm } from './BudgetAllocationForm';
+import type { BudgetInput } from '../lib/tidb-storage';
 import { calculateStraightLineDepreciation } from '../../shared/finance';
 
 interface BudgetPanelProps {
   currentOrg: Organization;
   budgets: BudgetAllocation[];
+  currentUser?: User | null;
+  departments?: Department[];
+  branches?: Branch[];
+  onSaveBudget?: (input: BudgetInput, existing?: BudgetAllocation) => Promise<boolean>;
+  onDeleteBudget?: (budget: BudgetAllocation) => Promise<boolean>;
 }
 
 export const BudgetPanel: React.FC<BudgetPanelProps> = ({
   currentOrg,
-  budgets
+  budgets,
+  currentUser,
+  departments = [],
+  branches = [],
+  onSaveBudget,
+  onDeleteBudget
 }) => {
+  const { confirm } = useFeedback();
+  const canManage = Boolean(onSaveBudget) && hasPermission(currentUser?.role, 'budgets:manage');
+  const [formTarget, setFormTarget] = useState<{ existing?: BudgetAllocation } | null>(null);
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [calcCost, setCalcCost] = useState(5000);
   const [calcSalvage, setCalcSalvage] = useState(500);
   const [calcYears, setCalcYears] = useState(4);
   const [method, setMethod] = useState<'STRAIGHT_LINE' | 'DECLINING_BALANCE'>('STRAIGHT_LINE');
 
-  const orgBudgets = budgets.filter(b => b.orgId === currentOrg.id);
+  const allOrgBudgets = budgets.filter(b => b.orgId === currentOrg.id);
+  const currentYear = new Date().getFullYear();
+  const availableYears = Array.from(new Set([currentYear, ...allOrgBudgets.map(b => b.fiscalYear)])).sort((a, b) => b - a);
+  // Default to the current year if it has budgets, otherwise the most recent year that does.
+  const defaultYear = allOrgBudgets.some(b => b.fiscalYear === currentYear)
+    ? currentYear
+    : (allOrgBudgets.map(b => b.fiscalYear).sort((a, b) => b - a)[0] ?? currentYear);
+  const activeFiscalYear = selectedYear ?? defaultYear;
+  const orgBudgets = allOrgBudgets.filter(b => b.fiscalYear === activeFiscalYear);
   const totalAllocated = orgBudgets.reduce((a, b) => a + (b.allocated || 0), 0);
   const totalSpent = orgBudgets.reduce((a, b) => a + (b.spent || 0), 0);
   const remaining = totalAllocated - totalSpent;
   const isOverspent = remaining < 0;
 
-  // Derive dynamic fiscal year
-  const activeFiscalYear = orgBudgets[0]?.fiscalYear || new Date().getFullYear();
+  const handleDelete = async (b: BudgetAllocation) => {
+    if (!onDeleteBudget) return;
+    const ok = await confirm({
+      title: 'Remove this budget?',
+      message: `The FY ${b.fiscalYear} budget for ${b.departmentName} (${b.branchName}) will be removed. The removal is recorded in the audit log.`,
+      confirmLabel: 'Remove budget',
+      tone: 'danger'
+    });
+    if (ok) await onDeleteBudget(b);
+  };
 
   // Depreciation calculation using shared/finance.ts standard straight-line formulas
   const usefulLifeMonths = Math.max(1, calcYears * 12);
@@ -61,6 +95,23 @@ export const BudgetPanel: React.FC<BudgetPanelProps> = ({
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-200">
+      {formTarget && onSaveBudget && (
+        <BudgetAllocationForm
+          existing={formTarget.existing}
+          departments={departments}
+          branches={branches}
+          defaultFiscalYear={activeFiscalYear}
+          onCancel={() => setFormTarget(null)}
+          onSubmit={async (input) => {
+            const saved = await onSaveBudget(input, formTarget.existing);
+            if (saved) {
+              setFormTarget(null);
+              setSelectedYear(input.fiscalYear);
+            }
+            return saved;
+          }}
+        />
+      )}
       <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-2xl shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
@@ -88,13 +139,43 @@ export const BudgetPanel: React.FC<BudgetPanelProps> = ({
           <div>
             <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
               <span className="text-xs font-bold text-white uppercase tracking-wider">Department Budget Ledger (FY {activeFiscalYear})</span>
-              <span className="text-[10px] text-emerald-400/90 font-mono">Fiscal Allocations</span>
+              <div className="flex items-center gap-2">
+                <label className="sr-only" htmlFor="budget-fiscal-year">Fiscal year</label>
+                <select
+                  id="budget-fiscal-year"
+                  value={activeFiscalYear}
+                  onChange={e => setSelectedYear(Number(e.target.value))}
+                  className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-200 cursor-pointer"
+                >
+                  {availableYears.map(y => <option key={y} value={y}>FY {y}</option>)}
+                </select>
+                {canManage && (
+                  <button
+                    type="button"
+                    onClick={() => setFormTarget({})}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold"
+                  >
+                    <Plus className="w-3.5 h-3.5" aria-hidden="true" /> Add Budget
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="space-y-4">
               {orgBudgets.length === 0 ? (
-                <div className="p-8 text-center text-slate-500 text-xs bg-slate-950/60 rounded-xl border border-dashed border-slate-800">
-                  No departmental budgets configured yet for this organization.
+                <div className="p-8 text-center text-slate-500 text-xs bg-slate-950/60 rounded-xl border border-dashed border-slate-800 space-y-3">
+                  <p>No departmental budgets for FY {activeFiscalYear}.</p>
+                  {canManage ? (
+                    <button
+                      type="button"
+                      onClick={() => setFormTarget({})}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold"
+                    >
+                      <Plus className="w-3.5 h-3.5" aria-hidden="true" /> Add the first budget
+                    </button>
+                  ) : (
+                    <p>Ask an administrator or finance user to add budgets.</p>
+                  )}
                 </div>
               ) : (
                 orgBudgets.map(b => {
@@ -103,9 +184,35 @@ export const BudgetPanel: React.FC<BudgetPanelProps> = ({
                   const pct = allocated > 0 ? Math.min(Math.round((spent / allocated) * 100), 100) : 0;
                   return (
                     <div key={b.id} className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/80">
-                      <div className="flex items-center justify-between text-xs font-bold text-white mb-1">
+                      <div className="flex items-center justify-between gap-2 text-xs font-bold text-white mb-1">
                         <span>{b.departmentName || 'General Department'}</span>
-                        <span className="font-mono text-emerald-400">${spent.toLocaleString()} / ${allocated.toLocaleString()}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-emerald-400">${spent.toLocaleString()} / ${allocated.toLocaleString()}</span>
+                          {canManage && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setFormTarget({ existing: b })}
+                                aria-label={`Edit ${b.departmentName} budget`}
+                                title="Edit budget"
+                                className="p-1 rounded-md text-slate-400 hover:text-sky-300 hover:bg-slate-800"
+                              >
+                                <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
+                              </button>
+                              {onDeleteBudget && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDelete(b)}
+                                  aria-label={`Remove ${b.departmentName} budget`}
+                                  title="Remove budget"
+                                  className="p-1 rounded-md text-slate-400 hover:text-rose-300 hover:bg-slate-800"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
                       </div>
                       <div className="flex items-center justify-between text-[10px] text-slate-400 mb-2">
                         <span>Branch: {b.branchName || 'All Branches'}</span>

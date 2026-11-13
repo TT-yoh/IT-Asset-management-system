@@ -1,3 +1,4 @@
+import { safeStopScanner } from '../lib/scanner-utils';
 import React, { useState, useEffect, useRef } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
 import { Asset, User, AssetStatus } from '../types';
@@ -180,10 +181,9 @@ export const QuickScannerModal: React.FC<QuickScannerModalProps> = ({
   useEffect(() => {
     if (!isOpen) {
       if (qrInstanceRef.current) {
-        qrInstanceRef.current.stop().catch(() => {}).finally(() => {
-          qrInstanceRef.current?.clear();
-          qrInstanceRef.current = null;
-        });
+        const instance = qrInstanceRef.current;
+        qrInstanceRef.current = null;
+        safeStopScanner(instance);
       }
       setScannedCode(null);
       setMatchedAsset(null);
@@ -221,10 +221,9 @@ export const QuickScannerModal: React.FC<QuickScannerModalProps> = ({
     return () => {
       clearTimeout(timer);
       if (qrInstanceRef.current) {
-        qrInstanceRef.current.stop().catch(() => {}).finally(() => {
-          qrInstanceRef.current?.clear();
-          qrInstanceRef.current = null;
-        });
+        const instance = qrInstanceRef.current;
+        qrInstanceRef.current = null;
+        safeStopScanner(instance);
       }
     };
   }, [isOpen]);
@@ -262,7 +261,13 @@ export const QuickScannerModal: React.FC<QuickScannerModalProps> = ({
     if (!clean) return;
 
     if (qrInstanceRef.current && isScanning) {
-      qrInstanceRef.current.stop().catch(() => {});
+      // Pause the camera only (the instance is kept for the result view). stop() throws
+      // synchronously when the camera never started, so guard both failure modes.
+      try {
+        Promise.resolve(qrInstanceRef.current.stop()).catch(() => {});
+      } catch {
+        // Camera was not running.
+      }
     }
 
     handleScanResult(clean);

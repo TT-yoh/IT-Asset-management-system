@@ -14,6 +14,9 @@ const EXPLICIT_DEPARTMENT_COLUMNS = `
 `;
 
 const CreateDepartmentSchema = z.object({
+  // Optional client-generated id, so a record created optimistically in the browser keeps
+  // the same id on the server and can be edited before the next data refresh.
+  id: z.string().regex(/^[a-zA-Z0-9_-]{3,64}$/).optional(),
   name: z.string().trim().min(1, 'Department name is required').max(100),
   headCount: z.coerce.number().int().min(0).default(0),
   head_count: z.coerce.number().int().min(0).optional(),
@@ -56,7 +59,7 @@ departmentRouter.post('/', requirePermission('departments:manage'), asyncHandler
   const parseResult = CreateDepartmentSchema.safeParse(req.body);
   if (!parseResult.success) {
     res.status(400).json({
-      error: parseResult.error.errors[0]?.message || 'Invalid department data',
+      error: parseResult.error.issues[0]?.message || 'Invalid department data',
       code: 'VALIDATION_ERROR'
     });
     return;
@@ -76,7 +79,7 @@ departmentRouter.post('/', requirePermission('departments:manage'), asyncHandler
     return;
   }
 
-  const deptId = crypto.randomUUID();
+  const deptId = data.id || crypto.randomUUID();
 
   try {
     await withTransaction(async (tx) => {
@@ -124,7 +127,7 @@ departmentRouter.put('/:id', requirePermission('departments:manage'), asyncHandl
   const parseResult = UpdateDepartmentSchema.safeParse(req.body);
   if (!parseResult.success) {
     res.status(400).json({
-      error: parseResult.error.errors[0]?.message || 'Invalid department update payload',
+      error: parseResult.error.issues[0]?.message || 'Invalid department update payload',
       code: 'VALIDATION_ERROR'
     });
     return;

@@ -17,7 +17,7 @@ export function validateRequest(schemas: {
         });
         return;
       }
-      req.params = parsed.data;
+      req.params = parsed.data as typeof req.params;
     }
 
     if (schemas.query) {
@@ -30,7 +30,7 @@ export function validateRequest(schemas: {
         });
         return;
       }
-      req.query = parsed.data;
+      req.query = parsed.data as typeof req.query;
     }
 
     if (schemas.body) {

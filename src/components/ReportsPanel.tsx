@@ -13,7 +13,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   LineChart, Line, AreaChart, Area, Cell, PieChart as ReChartsPie, Pie
 } from 'recharts';
-import { Organization, Branch, Asset, MaintenanceRecord, BudgetAllocation } from '../types';
+import { Organization, Branch, Asset, MaintenanceRecord, BudgetAllocation, CheckoutRecord } from '../types';
 import { getMaintenanceCostAnalysis, getBudgetUtilization, getAssetsByAge } from '../lib/report-service';
 import { runTiFlashDepreciationAnalytics } from '../lib/tidb-storage';
 import { ReportExport } from './ReportExport';
@@ -24,6 +24,7 @@ interface ReportsPanelProps {
   maintenances?: MaintenanceRecord[];
   budgets?: BudgetAllocation[];
   branches?: Branch[];
+  checkouts?: CheckoutRecord[];
 }
 
 export const ReportsPanel: React.FC<ReportsPanelProps> = ({
@@ -31,7 +32,8 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
   assets = [],
   maintenances = [],
   budgets = [],
-  branches = []
+  branches = [],
+  checkouts = []
 }) => {
   const [activeReport, setActiveReport] = useState<string>('landing');
   const orgIdToUse = currentOrg?.id || assets[0]?.orgId || 'org-global';
@@ -692,20 +694,56 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
 
   // 5. Interactive Custody Checkout History Subview
   if (activeReport === 'checkout') {
-    const exportData = assets.map(a => ({
-      'Asset Code': a.assetCode,
-      'Asset Name': a.name,
-      'Custodian': a.assignedToUserName || 'In Storage Warehouse',
-      'Location': a.branchName,
-      'Current Value': `$${(a.currentValue || a.purchaseCost).toLocaleString()}`
+    const today = new Date().toISOString().split('T')[0]!;
+    const isActive = (c: CheckoutRecord) => c.status === 'ACTIVE' && !c.checkedInAt;
+    const isOverdue = (c: CheckoutRecord) => isActive(c) && Boolean(c.expectedReturnDate) && c.expectedReturnDate! < today;
+    const statusLabel = (c: CheckoutRecord) => {
+      if (isOverdue(c)) return 'OVERDUE';
+      if (isActive(c)) return 'ACTIVE';
+      if (c.status === 'DAMAGED_DURING_CHECKOUT') return 'RETURNED DAMAGED';
+      return c.status;
+    };
+    const daysHeld = (c: CheckoutRecord) => {
+      const start = Date.parse(c.checkedOutAt);
+      const end = Date.parse(c.checkedInAt || today);
+      return Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, Math.round((end - start) / 86400000)) : null;
+    };
+
+    // Newest handover first.
+    const records = [...checkouts].sort((a, b) => (b.checkedOutAt || '').localeCompare(a.checkedOutAt || ''));
+    const activeCount = records.filter(isActive).length;
+    const overdueCount = records.filter(isOverdue).length;
+    const returnedCount = records.length - activeCount;
+    const damagedCount = records.filter(c => c.damageReported || c.status === 'DAMAGED_DURING_CHECKOUT').length;
+
+    const exportData = records.map(c => ({
+      'Asset Code': c.assetCode,
+      'Asset Name': c.assetName,
+      'Custodian': c.checkedOutToUserName,
+      'Checked Out By': c.checkedOutBy,
+      'Checked Out': c.checkedOutAt,
+      'Expected Return': c.expectedReturnDate || '',
+      'Returned': c.checkedInAt || '',
+      'Days Held': daysHeld(c) ?? '',
+      'Status': statusLabel(c),
+      'Return Condition': c.returnCondition || '',
+      'Damage Reported': c.damageReported ? 'Yes' : 'No',
+      'Reason': c.reason || ''
     }));
+
+    const statusClass = (label: string) =>
+      label === 'OVERDUE' || label === 'RETURNED DAMAGED' || label === 'LOST'
+        ? 'bg-rose-500/10 text-rose-300 border-rose-500/30'
+        : label === 'ACTIVE'
+          ? 'bg-sky-500/10 text-sky-300 border-sky-500/30'
+          : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30';
 
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <button
             onClick={() => setActiveReport('landing')}
-            className="flex items-center space-x-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-all cursor-pointer"
+            className="flex items-center space-x-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
           >
             <ArrowLeft className="w-4 h-4" />
             <span>Back to Directory</span>
@@ -716,33 +754,76 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
           </h1>
         </div>
 
-        <ReportExport 
-          data={exportData} 
-          filename="Custody_Handovers_Report" 
-          title="CUSTODY HANDOVERS AUDIT" 
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            ['Total Handovers', records.length, 'text-slate-100'],
+            ['Currently Out', activeCount, 'text-sky-300'],
+            ['Overdue', overdueCount, overdueCount > 0 ? 'text-rose-300' : 'text-slate-100'],
+            ['Returned', returnedCount, 'text-emerald-300']
+          ].map(([label, value, cls]) => (
+            <div key={label as string} className="p-4 rounded-2xl border border-slate-800 bg-slate-950/60">
+              <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">{label}</div>
+              <div className={`text-2xl font-bold mt-1 ${cls}`}>{value as number}</div>
+            </div>
+          ))}
+        </div>
+        {damagedCount > 0 && (
+          <p className="text-xs text-rose-300">{damagedCount} handover{damagedCount === 1 ? '' : 's'} returned with damage reported.</p>
+        )}
+
+        <ReportExport
+          data={exportData}
+          filename="Custody_Handovers_Report"
+          title="CUSTODY HANDOVERS AUDIT"
         />
 
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/60 overflow-hidden">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/60 overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-300">
             <thead>
-              <tr className="bg-slate-900/60 text-slate-400 border-b border-slate-850">
-                <th className="p-3">Asset Code</th>
-                <th className="p-3">Asset</th>
-                <th className="p-3">Current Custodian</th>
-                <th className="p-3">Branch Location</th>
-                <th className="p-3 text-right">Value</th>
+              <tr className="bg-slate-900/60 text-slate-400 border-b border-slate-800">
+                <th scope="col" className="p-3">Asset</th>
+                <th scope="col" className="p-3">Custodian</th>
+                <th scope="col" className="p-3">Checked Out</th>
+                <th scope="col" className="p-3">Expected Return</th>
+                <th scope="col" className="p-3">Returned</th>
+                <th scope="col" className="p-3 text-right">Days</th>
+                <th scope="col" className="p-3">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-900">
-              {assets.map(a => (
-                <tr key={a.id} className="hover:bg-slate-900/20">
-                  <td className="p-3 font-mono text-emerald-400 font-bold">{a.assetCode}</td>
-                  <td className="p-3 text-slate-200 font-semibold">{a.name}</td>
-                  <td className="p-3 text-slate-300">{a.assignedToUserName || <span className="text-slate-600 italic">Storage Warehouse</span>}</td>
-                  <td className="p-3 text-slate-400">{a.branchName}</td>
-                  <td className="p-3 text-right font-mono font-bold text-emerald-300">${(a.currentValue || a.purchaseCost).toLocaleString()}</td>
+              {records.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="p-8 text-center text-slate-500">
+                    No custody handovers recorded yet. Checkouts appear here as soon as a device is checked out.
+                  </td>
                 </tr>
-              ))}
+              ) : (
+                records.map(c => {
+                  const label = statusLabel(c);
+                  return (
+                    <tr key={c.id} className="hover:bg-slate-900/20">
+                      <td className="p-3">
+                        <div className="font-mono text-emerald-400 font-bold">{c.assetCode}</div>
+                        <div className="text-slate-400">{c.assetName}</div>
+                      </td>
+                      <td className="p-3">
+                        <div className="text-slate-200 font-semibold">{c.checkedOutToUserName}</div>
+                        <div className="text-[11px] text-slate-500">by {c.checkedOutBy || 'unknown'}</div>
+                      </td>
+                      <td className="p-3 font-mono">{c.checkedOutAt}</td>
+                      <td className={`p-3 font-mono ${isOverdue(c) ? 'text-rose-300 font-bold' : ''}`}>{c.expectedReturnDate || '—'}</td>
+                      <td className="p-3 font-mono">{c.checkedInAt || '—'}</td>
+                      <td className="p-3 text-right font-mono">{daysHeld(c) ?? '—'}</td>
+                      <td className="p-3">
+                        <span className={`inline-block px-2 py-0.5 rounded-full border text-[11px] font-semibold ${statusClass(label)}`}>{label}</span>
+                        {c.returnCondition && !isActive(c) && (
+                          <div className="text-[11px] text-slate-500 mt-1">Condition: {c.returnCondition}</div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>

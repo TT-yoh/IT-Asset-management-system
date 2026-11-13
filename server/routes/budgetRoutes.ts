@@ -55,7 +55,7 @@ budgetRouter.post('/', requirePermission('budgets:manage'), idempotent(), asyncH
   const parseResult = CreateBudgetSchema.safeParse(req.body);
   if (!parseResult.success) {
     res.status(400).json({
-      error: parseResult.error.errors[0]?.message || 'Invalid budget data',
+      error: parseResult.error.issues[0]?.message || 'Invalid budget data',
       code: 'VALIDATION_ERROR'
     });
     return;
@@ -119,7 +119,7 @@ budgetRouter.put('/:id', requirePermission('budgets:manage'), idempotent(), asyn
   const parseResult = UpdateBudgetSchema.safeParse(req.body);
   if (!parseResult.success) {
     res.status(400).json({
-      error: parseResult.error.errors[0]?.message || 'Invalid budget update payload',
+      error: parseResult.error.issues[0]?.message || 'Invalid budget update payload',
       code: 'VALIDATION_ERROR'
     });
     return;

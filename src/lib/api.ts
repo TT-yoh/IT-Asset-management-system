@@ -16,6 +16,16 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   });
 }
 
+// Write tracking: lets data loaders tell whether a save was in flight while they were
+// fetching, in which case their snapshot may be missing that save.
+let writesInFlight = 0;
+let writeEpoch = 0;
+
+/** inFlight: saves currently being sent. epoch: changes whenever a save starts or finishes. */
+export function getWriteActivity(): { inFlight: number; epoch: number } {
+  return { inFlight: writesInFlight, epoch: writeEpoch };
+}
+
 // Global browser fetch interceptor for all /api calls
 if (typeof window !== 'undefined' && window.fetch) {
   const originalFetch = window.fetch.bind(window);
@@ -34,11 +44,24 @@ if (typeof window !== 'undefined' && window.fetch) {
       if (!headers.has('X-Requested-With')) {
         headers.set('X-Requested-With', 'XMLHttpRequest');
       }
-      return originalFetch(input, {
-        ...init,
-        credentials: init?.credentials || 'include',
-        headers
-      });
+      const method = (init?.method || (typeof input === 'object' && 'method' in input ? (input as Request).method : 'GET') || 'GET').toUpperCase();
+      const isWrite = method !== 'GET' && method !== 'HEAD';
+      if (isWrite) {
+        writesInFlight++;
+        writeEpoch++;
+      }
+      try {
+        return await originalFetch(input, {
+          ...init,
+          credentials: init?.credentials || 'include',
+          headers
+        });
+      } finally {
+        if (isWrite) {
+          writesInFlight--;
+          writeEpoch++;
+        }
+      }
     }
 
     return originalFetch(input, init);

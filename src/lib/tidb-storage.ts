@@ -4,6 +4,7 @@
  * conditional ETag caching, bulk ingestion, and TiFlash columnar analytical rollups.
  */
 
+import { getWriteActivity } from './api';
 import {
   Asset,
   CheckoutRecord,
@@ -233,8 +234,119 @@ export const mapTiDBRowToAsset = (row: any): Asset => ({
   version: row.version || 1
 });
 
+/**
+ * Thrown when the server answers a save with a 4xx: the request reached the server and was
+ * refused (validation, conflict, permission). Retrying or queueing it offline cannot succeed.
+ */
+export class ServerRejectedError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ServerRejectedError';
+    this.status = status;
+  }
+}
+
+async function throwIfNotSaved(res: Response, what: string): Promise<void> {
+  if (res.ok) return;
+  const body = await res.json().catch(() => null);
+  const message = body?.error || `${what} could not be saved (HTTP ${res.status}).`;
+  if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+    throw new ServerRejectedError(res.status, message);
+  }
+  throw new Error(message);
+}
+
+/** Date-only (YYYY-MM-DD) text from a DATE/DATETIME value, or undefined. */
+const toDateOnly = (value: unknown): string | undefined => {
+  if (value === null || value === undefined || value === '') return undefined;
+  return String(value).replace(' ', 'T').split('T')[0] || undefined;
+};
+
+/**
+ * Server rows use database column names (snake_case); the app's records are camelCase.
+ * Each mapper accepts either form, so already-mapped records pass through unchanged.
+ */
+export const mapTiDBRowToCheckout = (row: any): CheckoutRecord => ({
+  id: row.id,
+  assetId: row.assetId ?? row.asset_id,
+  assetCode: row.assetCode ?? row.asset_code ?? '',
+  assetName: row.assetName ?? row.asset_name ?? '',
+  checkedOutBy: row.checkedOutBy ?? row.checked_out_by ?? '',
+  checkedOutToUserId: row.checkedOutToUserId ?? row.checked_out_to_user_id ?? '',
+  checkedOutToUserName: row.checkedOutToUserName ?? row.checked_out_to_user_name ?? '',
+  checkedOutAt: toDateOnly(row.checkedOutAt ?? row.checked_out_at) || '',
+  expectedReturnDate: toDateOnly(row.expectedReturnDate ?? row.expected_return_date),
+  checkedInAt: toDateOnly(row.checkedInAt ?? row.checked_in_at),
+  returnCondition: (row.returnCondition ?? row.return_condition) || undefined,
+  damageReported: Boolean(row.damageReported ?? row.damage_reported),
+  damageDescription: (row.damageDescription ?? row.damage_description) || undefined,
+  reason: row.reason || 'Equipment assignment',
+  status: row.status || 'ACTIVE',
+  notes: row.notes || undefined,
+  version: row.version || 1
+});
+
+export const mapTiDBRowToMaintenance = (row: any): MaintenanceRecord => ({
+  id: row.id,
+  assetId: row.assetId ?? row.asset_id,
+  assetCode: row.assetCode ?? row.asset_code ?? '',
+  assetName: row.assetName ?? row.asset_name ?? '',
+  type: row.type || 'REPAIR',
+  status: row.status || 'PENDING',
+  priority: row.priority || 'MEDIUM',
+  description: row.description || '',
+  reportedBy: row.reportedBy ?? row.reported_by ?? '',
+  assignedTechnician: row.assignedTechnician ?? row.assigned_technician ?? '',
+  startDate: toDateOnly(row.startDate ?? row.start_date) || '',
+  expectedCompletion: toDateOnly(row.expectedCompletion ?? row.expected_completion) || '',
+  actualCompletion: toDateOnly(row.actualCompletion ?? row.actual_completion),
+  cost: Number(row.cost) || 0,
+  partsReplaced: (row.partsReplaced ?? row.parts_replaced) || undefined,
+  notes: row.notes || undefined,
+  version: row.version || 1,
+  auditLogs: Array.isArray(row.auditLogs) ? row.auditLogs : undefined
+});
+
+export const mapTiDBRowToBudget = (row: any): BudgetAllocation => ({
+  id: row.id,
+  orgId: row.orgId ?? row.org_id,
+  departmentName: row.departmentName ?? row.department_name ?? '',
+  branchName: row.branchName ?? row.branch_name ?? '',
+  fiscalYear: Number(row.fiscalYear ?? row.fiscal_year) || new Date().getFullYear(),
+  allocated: Number(row.allocated) || 0,
+  spent: Number(row.spent) || 0,
+  version: Number(row.version) || 1
+});
+
+export const mapTiDBRowToAuditLog = (row: any): AuditLogItem => {
+  const changes = row.changes;
+  return {
+    id: String(row.id),
+    orgId: row.orgId ?? row.org_id,
+    seq: row.seq !== undefined && row.seq !== null ? Number(row.seq) : undefined,
+    actorId: (row.actorId ?? row.actor_id) || undefined,
+    userName: row.userName ?? row.user_name ?? 'System',
+    userRole: row.userRole ?? row.user_role ?? 'USER',
+    action: row.action || '',
+    entityType: row.entityType ?? row.entity_type ?? 'Asset',
+    entityId: (row.entityId ?? row.entity_id) || undefined,
+    entityName: row.entityName ?? row.entity_name ?? '',
+    // The audit screen prints this as text; the column may arrive as parsed JSON.
+    changes: typeof changes === 'string' ? changes : changes ? JSON.stringify(changes) : '',
+    timestamp: row.timestamp ? String(row.timestamp) : '',
+    prevHash: (row.prevHash ?? row.prev_hash) || undefined,
+    hash: row.hash || undefined,
+    ipAddress: row.ipAddress ?? row.ip_address ?? ''
+  };
+};
+
 export const mapCheckoutToTiDBRow = (chk: CheckoutRecord) => ({
   id: chk.id,
+  // The API reads the camelCase names; snake_case is kept for older consumers.
+  assetId: chk.assetId,
+  checkedOutToUserId: chk.checkedOutToUserId,
+  expectedReturnDate: chk.expectedReturnDate || null,
   asset_id: chk.assetId,
   asset_code: chk.assetCode,
   asset_name: chk.assetName,
@@ -254,6 +366,13 @@ export const mapCheckoutToTiDBRow = (chk: CheckoutRecord) => ({
 
 export const mapMaintenanceToTiDBRow = (mnt: MaintenanceRecord) => ({
   id: mnt.id,
+  // The API reads the camelCase names; snake_case is kept for older consumers.
+  assetId: mnt.assetId,
+  assignedTechnician: mnt.assignedTechnician,
+  startDate: mnt.startDate,
+  expectedCompletion: mnt.expectedCompletion,
+  actualCompletion: mnt.actualCompletion || null,
+  partsReplaced: mnt.partsReplaced || null,
   asset_id: mnt.assetId,
   asset_code: mnt.assetCode,
   asset_name: mnt.assetName,
@@ -285,6 +404,11 @@ export interface SystemDataPayload {
   organizations?: Organization[];
   isTiDBLive: boolean;
   lastSyncedAt: string;
+  /**
+   * True when a save started or finished while this snapshot was being fetched. The snapshot
+   * may be missing that save, so callers must not replace on-screen data with it.
+   */
+  stale?: boolean;
 }
 
 let lastEtag: string | null = null;
@@ -303,6 +427,12 @@ export const loadInitialData = async (orgId?: string, userId?: string): Promise<
   const branchesKey = getScopedKey(STORAGE_KEYS.BRANCHES, orgId, userId);
   const deptsKey = getScopedKey(STORAGE_KEYS.DEPARTMENTS, orgId, userId);
 
+  const writesAtStart = getWriteActivity().epoch;
+  const overlappedWrite = () => {
+    const now = getWriteActivity();
+    return now.inFlight > 0 || now.epoch !== writesAtStart;
+  };
+
   try {
     const url = orgId ? `/api/init?orgId=${encodeURIComponent(orgId)}` : '/api/init';
     const headers: Record<string, string> = {};
@@ -316,7 +446,8 @@ export const loadInitialData = async (orgId?: string, userId?: string): Promise<
     if (res.status === 304 && lastCachedPayload) {
       return {
         ...lastCachedPayload,
-        lastSyncedAt: updateLastTiDBSyncTime()
+        lastSyncedAt: updateLastTiDBSyncTime(),
+        stale: overlappedWrite()
       };
     }
 
@@ -330,13 +461,13 @@ export const loadInitialData = async (orgId?: string, userId?: string): Promise<
         const mappedAssets: Asset[] = data.assets.map(mapTiDBRowToAsset);
         saveToStorage(assetsKey, mappedAssets);
 
-        const checkoutsList: CheckoutRecord[] = data.checkouts || [];
+        const checkoutsList: CheckoutRecord[] = (data.checkouts || []).map(mapTiDBRowToCheckout);
         saveToStorage(chksKey, checkoutsList);
 
-        const maintenancesList: MaintenanceRecord[] = data.maintenances || [];
+        const maintenancesList: MaintenanceRecord[] = (data.maintenances || []).map(mapTiDBRowToMaintenance);
         saveToStorage(maintsKey, maintenancesList);
 
-        const budgetsList: BudgetAllocation[] = data.budgets || [];
+        const budgetsList: BudgetAllocation[] = (data.budgets || []).map(mapTiDBRowToBudget);
         saveToStorage(budgetsKey, budgetsList);
 
         const mappedBranches: Branch[] = (data.branches || []).map((b: any) => ({
@@ -367,7 +498,7 @@ export const loadInitialData = async (orgId?: string, userId?: string): Promise<
           checkouts: checkoutsList,
           maintenances: maintenancesList,
           budgets: budgetsList,
-          auditLogs: data.auditLogs || [],
+          auditLogs: (data.auditLogs || []).map(mapTiDBRowToAuditLog),
           notifications: loadFromStorage<SystemNotification[]>(getScopedKey(STORAGE_KEYS.NOTIFICATIONS, orgId, userId), []),
           users: data.users || [],
           branches: mappedBranches,
@@ -376,6 +507,12 @@ export const loadInitialData = async (orgId?: string, userId?: string): Promise<
           isTiDBLive: true,
           lastSyncedAt: updateLastTiDBSyncTime()
         };
+
+        if (overlappedWrite()) {
+          // Do not cache a snapshot that may predate an in-flight save; force a full reload next time.
+          lastEtag = null;
+          return { ...payload, stale: true };
+        }
 
         lastCachedPayload = payload;
         return payload;
@@ -497,11 +634,9 @@ export async function persistCheckout(chk: CheckoutRecord, _allCheckouts?: Check
     body: JSON.stringify(row)
   });
 
-  if (res.ok) {
-    updateLastTiDBSyncTime();
-    return true;
-  }
-  return false;
+  await throwIfNotSaved(res, 'Checkout');
+  updateLastTiDBSyncTime();
+  return true;
 }
 
 /**
@@ -516,96 +651,176 @@ export async function persistMaintenance(mnt: MaintenanceRecord, _allMaintenance
     body: JSON.stringify(row)
   });
 
-  if (res.ok) {
-    updateLastTiDBSyncTime();
-    return true;
-  }
-  return false;
+  await throwIfNotSaved(res, 'Repair ticket');
+  updateLastTiDBSyncTime();
+  return true;
 }
 
 /**
- * Persist User via typed API.
+ * Reporter for saves that the server refused or that never reached it. The app registers a
+ * function that shows the message to the user, so a failed save is never silently presented
+ * as if it had worked.
  */
-export async function persistUser(user: User, _allUsers?: User[]): Promise<boolean> {
-  const res = await fetch(`/api/users/${encodeURIComponent(user.id)}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({
-      fullName: user.fullName,
-      role: user.role,
-      status: user.status,
-      departmentId: user.departmentId,
-      departmentName: user.departmentName,
-      branchId: user.branchId,
-      branchName: user.branchName,
-      avatar: user.avatar
-    })
+/** Fired after a failed save so the app reloads from the server and drops the optimistic change. */
+export const RESYNC_EVENT = 'omni:resync-after-failed-save';
+
+let saveFailureReporter: ((message: string) => void) | null = null;
+export function setSaveFailureReporter(reporter: ((message: string) => void) | null): void {
+  saveFailureReporter = reporter;
+}
+
+const inFlightSaves = new Map<string, Promise<boolean>>();
+
+/**
+ * Send one save request. Identical requests issued back-to-back (React runs state updaters
+ * twice in development) share a single network call. Resolves true only when the server
+ * accepted the change; otherwise the failure is reported and false is returned.
+ */
+function sendSave(what: string, url: string, method: 'POST' | 'PUT' | 'DELETE', body?: unknown): Promise<boolean> {
+  const key = `${method} ${url} ${JSON.stringify(body ?? null)}`;
+  const existing = inFlightSaves.get(key);
+  if (existing) return existing;
+
+  const request = (async () => {
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+        credentials: 'include',
+        body: body !== undefined ? JSON.stringify(body) : undefined
+      });
+      if (res.ok) {
+        updateLastTiDBSyncTime();
+        return true;
+      }
+      const data = await res.json().catch(() => null);
+      saveFailureReporter?.(`${what} was not saved: ${data?.error || `the server refused it (HTTP ${res.status})`}`);
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event(RESYNC_EVENT));
+      return false;
+    } catch {
+      saveFailureReporter?.(`${what} could not reach the server. Check your connection and try again.`);
+      return false;
+    } finally {
+      setTimeout(() => inFlightSaves.delete(key), 1500);
+    }
+  })();
+
+  inFlightSaves.set(key, request);
+  return request;
+}
+
+/**
+ * Update a user via typed API. The server requires the record version the edit was based on
+ * (optimistic concurrency). A user object without a version has not been loaded from the
+ * server yet, so there is nothing to update: pass `reportMissingVersion` for a real edit so
+ * the user is told instead of the change silently not saving.
+ */
+export async function persistUser(user: User, _allUsers?: User[], reportMissingVersion = false): Promise<boolean> {
+  if (user.version === undefined || user.version === null) {
+    if (reportMissingVersion) {
+      saveFailureReporter?.(`Changes to ${user.fullName} were not saved: this account is still syncing. Wait a few seconds and try again.`);
+    }
+    return false;
+  }
+  return sendSave(`Changes to ${user.fullName}`, `/api/users/${encodeURIComponent(user.id)}`, 'PUT', {
+    fullName: user.fullName,
+    role: user.role,
+    status: user.status,
+    departmentId: user.departmentId,
+    departmentName: user.departmentName,
+    branchId: user.branchId,
+    branchName: user.branchName,
+    avatar: user.avatar,
+    baseVersion: user.version
   });
-  return res.ok;
 }
 
 /**
  * Delete User via typed API.
  */
 export async function deleteUserFromStorage(userId: string, _allUsers?: User[]): Promise<boolean> {
-  const res = await fetch(`/api/users/${encodeURIComponent(userId)}`, {
-    method: 'DELETE',
-    credentials: 'include'
-  });
-  return res.ok;
+  return sendSave('Removing the staff account', `/api/users/${encodeURIComponent(userId)}`, 'DELETE');
 }
 
 /**
- * Persist Branch via typed API.
+ * Create (POST) or update (PUT) a branch via typed API.
  */
-export async function persistBranch(branch: Branch, _allBranches?: Branch[]): Promise<boolean> {
-  const res = await fetch('/api/branches', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({
-      id: branch.id,
-      name: branch.name,
-      code: branch.code,
-      location: branch.location,
-      city: branch.city,
-      country: branch.country,
-      manager_name: branch.managerName
-    })
-  });
-  return res.ok;
+export async function persistBranch(branch: Branch, _allBranches?: Branch[], isUpdate = false): Promise<boolean> {
+  const body = {
+    id: branch.id,
+    name: branch.name,
+    code: branch.code,
+    location: branch.location,
+    city: branch.city,
+    country: branch.country,
+    managerName: branch.managerName,
+    manager_name: branch.managerName
+  };
+  return isUpdate
+    ? sendSave(`Changes to ${branch.name}`, `/api/branches/${encodeURIComponent(branch.id)}`, 'PUT', body)
+    : sendSave(`Facility ${branch.name}`, '/api/branches', 'POST', body);
 }
 
 export async function deleteBranchFromStorage(branchId: string, _allBranches?: Branch[]): Promise<boolean> {
-  const res = await fetch(`/api/branches/${encodeURIComponent(branchId)}`, {
-    method: 'DELETE',
-    credentials: 'include'
-  });
-  return res.ok;
+  return sendSave('Removing the facility', `/api/branches/${encodeURIComponent(branchId)}`, 'DELETE');
 }
 
-export async function persistDepartment(dept: Department, _allDepts?: Department[]): Promise<boolean> {
-  const res = await fetch('/api/departments', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({
-      id: dept.id,
-      name: dept.name,
-      headCount: dept.headCount,
-      budgetAllocated: dept.budgetAllocated
-    })
-  });
-  return res.ok;
+/**
+ * Create (POST) or update (PUT) a department via typed API.
+ */
+export async function persistDepartment(dept: Department, _allDepts?: Department[], isUpdate = false): Promise<boolean> {
+  const body = {
+    id: dept.id,
+    name: dept.name,
+    headCount: dept.headCount,
+    budgetAllocated: dept.budgetAllocated
+  };
+  return isUpdate
+    ? sendSave(`Changes to ${dept.name}`, `/api/departments/${encodeURIComponent(dept.id)}`, 'PUT', body)
+    : sendSave(`Department ${dept.name}`, '/api/departments', 'POST', body);
 }
 
 export async function deleteDepartmentFromStorage(deptId: string, _allDepts?: Department[]): Promise<boolean> {
-  const res = await fetch(`/api/departments/${encodeURIComponent(deptId)}`, {
-    method: 'DELETE',
-    credentials: 'include'
+  return sendSave('Removing the department', `/api/departments/${encodeURIComponent(deptId)}`, 'DELETE');
+}
+
+/** Fields a budget save sends. `reason` is required by the server when `spent` changes. */
+export interface BudgetInput {
+  departmentName: string;
+  branchName: string;
+  fiscalYear: number;
+  allocated: number;
+  spent?: number;
+  reason?: string;
+}
+
+/**
+ * Create a budget (no `existing`) or update one. Updates send the record version so a
+ * concurrent change is refused instead of silently overwritten.
+ */
+export async function persistBudget(input: BudgetInput, existing?: BudgetAllocation): Promise<boolean> {
+  const label = `Budget for ${input.departmentName} (${input.branchName}, FY ${input.fiscalYear})`;
+  if (!existing) {
+    return sendSave(label, '/api/budgets', 'POST', {
+      departmentName: input.departmentName,
+      branchName: input.branchName,
+      fiscalYear: input.fiscalYear,
+      allocated: input.allocated
+    });
+  }
+  return sendSave(label, `/api/budgets/${encodeURIComponent(existing.id)}`, 'PUT', {
+    departmentName: input.departmentName,
+    branchName: input.branchName,
+    fiscalYear: input.fiscalYear,
+    allocated: input.allocated,
+    spent: input.spent,
+    reason: input.reason,
+    baseVersion: existing.version || 1
   });
-  return res.ok;
+}
+
+export async function deleteBudgetFromDb(budget: BudgetAllocation): Promise<boolean> {
+  return sendSave(`Removing the ${budget.departmentName} budget`, `/api/budgets/${encodeURIComponent(budget.id)}`, 'DELETE');
 }
 
 export async function persistNotification(notification: SystemNotification, allNotifs?: SystemNotification[]): Promise<boolean> {
