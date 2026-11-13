@@ -5,6 +5,7 @@ import { useFeedback } from '../context/FeedbackContext';
 import { Pagination } from './ui/Pagination';
 import { EmptyState, ListSkeleton } from './ui/EmptyState';
 import type { AssetSortKey } from './asset-manager/AssetTable';
+import type { BulkImportResult } from '../lib/tidb-storage';
 import { 
   AssetTable, 
   AssetGrid, 
@@ -107,7 +108,7 @@ export interface AssetManagerProps {
   onAddAsset: (newAsset: Asset) => void;
   onUpdateAsset?: (updatedAsset: Asset) => void;
   onDeleteAsset?: (assetId: string) => void;
-  onBulkAddAssets?: (newAssets: Asset[]) => void;
+  onBulkAddAssets?: (newAssets: Asset[]) => Promise<BulkImportResult | null> | void;
   onBatchUpdateStatus?: (assetIds: string[], status: AssetStatus, reason?: string) => void;
   onBatchTransferBranch?: (assetIds: string[], branchId: string, branchName: string) => void;
   onBatchDelete?: (assetIds: string[]) => void;
@@ -118,6 +119,12 @@ export interface AssetManagerProps {
   isLoading?: boolean;
   /** Departments of the current organization, for the asset's owning department. */
   departments?: Department[];
+  /** Open the enrol form with this tag filled in (from a scan of an unknown tag). */
+  enrollTag?: string | null;
+  onEnrollTagHandled?: () => void;
+  /** Hand a scanned device to the Checkouts page for check-out or return. */
+  onRequestCheckout?: (asset: Asset) => void;
+  onRequestReturn?: (asset: Asset) => void;
 }
 
 export const AssetManager: React.FC<AssetManagerProps> = ({
@@ -137,7 +144,11 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
   initialStatusFilter = 'ALL',
   onReportIssue,
   isLoading = false,
-  departments = []
+  departments = [],
+  enrollTag,
+  onEnrollTagHandled,
+  onRequestCheckout,
+  onRequestReturn
 }) => {
   const { confirm } = useFeedback();
   const [viewMode, setViewMode] = useState<'TABLE' | 'GRID'>('TABLE');
@@ -158,6 +169,16 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
   const [isUpsertOpen, setIsUpsertOpen] = useState<boolean>(false);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [prefilledTag, setPrefilledTag] = useState<string>('');
+
+  // A scan of an unknown tag elsewhere in the app: open the enrol form with that tag.
+  useEffect(() => {
+    if (!enrollTag) return;
+    setEditingAsset(null);
+    setPrefilledTag(enrollTag);
+    setIsUpsertOpen(true);
+    onEnrollTagHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enrollTag]);
   const [selectedAssetForDetails, setSelectedAssetForDetails] = useState<Asset | null>(null);
   const [checkoutModalAsset, setCheckoutModalAsset] = useState<Asset | null>(null);
   const [isScannerOpen, setIsScannerOpen] = useState<boolean>(false);
@@ -375,10 +396,22 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
       if (result.errors.length > 0 && result.createdAssets.length === 0) {
         setImportBanner({ message: `CSV Import Failed: ${result.errors[0]?.message}`, isError: true });
       } else {
-        if (result.createdAssets.length > 0) {
-          if (onBulkAddAssets) {
-            onBulkAddAssets(result.createdAssets);
-          } else if (onAddAsset) {
+        if (result.createdAssets.length > 0 && onBulkAddAssets) {
+          // Report what the server actually saved (rows can still be refused there).
+          const localSkipped = result.errors.length;
+          Promise.resolve(onBulkAddAssets(result.createdAssets)).then((server) => {
+            if (!server) return; // offline: the context already explained the rows are queued
+            const skipped = server.skipped + localSkipped;
+            const reason = server.errors[0] || result.errors[0]?.message || '';
+            setImportBanner(
+              server.imported > 0
+                ? { message: `Imported ${server.imported} asset${server.imported === 1 ? '' : 's'}${skipped > 0 ? `; skipped ${skipped}${reason ? ` (${reason})` : ''}` : ''}.`, isError: false }
+                : { message: `CSV import failed: ${reason || 'every row was refused by the server.'}`, isError: true }
+            );
+            setTimeout(() => setImportBanner(null), 8000);
+          });
+        } else if (result.createdAssets.length > 0) {
+          if (onAddAsset) {
             result.createdAssets.forEach((a) => onAddAsset(a));
           }
           const skippedCount = result.errors.length;
@@ -780,10 +813,11 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
         assets={assets}
         currentUser={currentUser}
         onSelectAssetForCheckout={(ast) => {
-          setSelectedAssetForDetails(ast);
+          // The detail window has no check-out action: hand over to the Checkouts page.
+          if (onRequestCheckout) onRequestCheckout(ast); else setSelectedAssetForDetails(ast);
         }}
         onSelectAssetForReturn={(ast) => {
-          setSelectedAssetForDetails(ast);
+          if (onRequestReturn) onRequestReturn(ast); else setSelectedAssetForDetails(ast);
         }}
         onSelectAssetForRepair={(ast) => {
           if (onReportIssue) onReportIssue(ast);

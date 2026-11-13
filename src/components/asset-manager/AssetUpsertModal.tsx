@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Asset, Branch, AssetCategory, Organization, User, Department } from '../../types';
 import { AssetExtendedFields } from './AssetExtendedFields';
-import { isSerialRequired, sanitizeSpecs } from '../../../shared/asset-fields';
+import { isSerialRequired, sanitizeSpecs, specFieldsForCategory } from '../../../shared/asset-fields';
 import { 
   X, 
   Sparkles, 
@@ -378,14 +378,42 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
         setSuggestedCost(specs.estimatedCostUSD);
       }
 
-      setFormData(prev => ({
-        ...prev,
-        name: prev.name || `${specs.manufacturer} ${specs.model}`,
-        model: specs.model,
-        categoryId: matchedCat ? matchedCat.id : prev.categoryId,
-        categoryName: matchedCat ? matchedCat.name : prev.categoryName,
-        notes: `${specs.cpu} | ${specs.ram} | ${specs.storage}${specs.ports ? ` | Ports: ${specs.ports}` : ''}\n${specs.notes}`
-      }));
+      // "16GB DDR5" -> 16, "1TB SSD" -> 1024; anything unreadable is left blank.
+      const toGb = (text?: string): number | undefined => {
+        const m = String(text || '').match(/(\d+(?:\.\d+)?)\s*(TB|GB)/i);
+        if (!m) return undefined;
+        const n = Number(m[1]);
+        return m[2]!.toUpperCase() === 'TB' ? Math.round(n * 1024) : Math.round(n);
+      };
+
+      setFormData(prev => {
+        const categoryId = matchedCat ? matchedCat.id : prev.categoryId;
+        const categoryName = matchedCat ? matchedCat.name : prev.categoryName;
+        // Fill the structured device details too (only fields this category has, and only
+        // where the user has not typed a value already).
+        const suggested: Record<string, string | number | undefined> = {
+          cpu: specs.cpu || undefined,
+          ramGb: toGb(specs.ram),
+          storageGb: toGb(specs.storage)
+        };
+        const allowed = new Set(specFieldsForCategory(categoryId, categoryName).map(f => f.key));
+        const specsNext = { ...(prev.specs || {}) };
+        for (const [key, value] of Object.entries(suggested)) {
+          if (value !== undefined && allowed.has(key) && (specsNext[key] === undefined || specsNext[key] === '')) {
+            specsNext[key] = value;
+          }
+        }
+        return {
+          ...prev,
+          name: prev.name || `${specs.manufacturer} ${specs.model}`,
+          model: specs.model,
+          manufacturer: prev.manufacturer || specs.manufacturer || '',
+          categoryId,
+          categoryName,
+          specs: specsNext,
+          notes: `${specs.cpu} | ${specs.ram} | ${specs.storage}${specs.ports ? ` | Ports: ${specs.ports}` : ''}\n${specs.notes}`
+        };
+      });
 
       setAiSuccessMessage(`Catalog specs populated for ${specs.model}!${specs.estimatedCostUSD > 0 ? ` Suggested MSRP: $${specs.estimatedCostUSD.toLocaleString()} (Click "Apply to Cost" to accept).` : ''}`);
     } catch (err: any) {
@@ -448,8 +476,18 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
       return;
     }
 
-    const branch = branches.find(b => b.id === formData.branchId) || branches[0]!;
-    const category = categories.find(c => c.id === formData.categoryId) || categories[0]!;
+    const branch = branches.find(b => b.id === formData.branchId) || branches[0];
+    const category = categories.find(c => c.id === formData.categoryId) || categories[0];
+    // Branches arrive with the first data load, which can take a few seconds on a slow
+    // connection. Without this check, saving before then crashed the form.
+    if (!branch) {
+      setFormError('No branch is available yet. Wait a moment for your data to finish loading, or add a branch under Facilities & Departments first.');
+      return;
+    }
+    if (!category) {
+      setFormError('Choose a category for this asset.');
+      return;
+    }
 
     // New computers, servers and network gear must carry the manufacturer's serial number.
     if (!editingAsset && isSerialRequired(category.id, category.name) && !formData.serialNumber?.trim()) {
@@ -789,6 +827,12 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                           setFormError(`Serial Number "${formData.serialNumber}" is already in use by "${redundancyCheck.serialConflict.name}".`);
                           return;
                         }
+                        // Check the serial here, where its field is: if this waited until Save on
+                        // step 2, the user would be told to fill a field that is no longer shown.
+                        if (!editingAsset && isSerialRequired(formData.categoryId, formData.categoryName) && !formData.serialNumber?.trim()) {
+                          setFormError(`A manufacturer serial number is required for ${formData.categoryName || 'this category'}. It is printed on the device or its box.`);
+                          return;
+                        }
                         setFormError('');
                         setActiveStep(2);
                       }}
@@ -969,6 +1013,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                         <input
                           type="number"
                           min="0"
+                          aria-label="Current depreciated value ($)"
                           value={formData.currentValue ?? computedDepreciatedValue}
                           onChange={(e) => setFormData({ ...formData, currentValue: Number(e.target.value) })}
                           className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl font-mono text-emerald-400 font-bold focus:outline-none focus:border-emerald-500 text-sm"

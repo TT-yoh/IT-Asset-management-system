@@ -109,6 +109,11 @@ function AppShell() {
   const [initialAssetStatusFilter, setInitialAssetStatusFilter] = useState<string>('ALL');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   const [isGlobalScannerOpen, setIsGlobalScannerOpen] = useState<boolean>(false);
+  const [reportIssueAssetId, setReportIssueAssetId] = useState<string | null>(null);
+  // Hand-offs from scan results to the page that owns the action.
+  const [checkoutRequestAssetId, setCheckoutRequestAssetId] = useState<string | null>(null);
+  const [returnRequestAssetId, setReturnRequestAssetId] = useState<string | null>(null);
+  const [enrollRequestTag, setEnrollRequestTag] = useState<string | null>(null);
   const [inspectingAsset, setInspectingAsset] = useState<Asset | null>(null);
   const [facilitiesSubTab, setFacilitiesSubTab] = useState<'branches' | 'departments'>('branches');
   const mainViewportRef = React.useRef<HTMLElement>(null);
@@ -234,6 +239,12 @@ function AppShell() {
     if (currentUser) {
       const currentHashTab = getTabFromHash(currentUser.role);
       setActiveTabState(currentHashTab);
+      // Signing in by registration or invite activation leaves #/login or #/activate in the
+      // address bar; replace it so the address matches the page and reloads land correctly.
+      const cleanHash = window.location.hash.replace(/^#\/?/, '').trim().toLowerCase();
+      if (!VALID_TABS.includes(cleanHash as NavTab)) {
+        window.history.replaceState({ tab: currentHashTab }, '', `#/${currentHashTab}`);
+      }
     }
   }, [currentUser?.id, currentUser?.role]);
 
@@ -394,21 +405,14 @@ function AppShell() {
               onBatchDelete={handleBatchDeleteAssets}
               searchQuery={searchQuery}
               initialStatusFilter={initialAssetStatusFilter}
+              enrollTag={enrollRequestTag}
+              onEnrollTagHandled={() => setEnrollRequestTag(null)}
+              onRequestCheckout={(ast: Asset) => { setCheckoutRequestAssetId(ast.id); navigateToTab('checkout'); }}
+              onRequestReturn={(ast: Asset) => { setReturnRequestAssetId(ast.id); navigateToTab('checkout'); }}
               onReportIssue={(ast: Asset) => {
-                handleReportIssue({
-                  id: `mnt-${Date.now()}`,
-                  assetId: ast.id,
-                  assetCode: ast.assetCode,
-                  assetName: ast.name,
-                  type: 'REPAIR',
-                  status: 'IN_PROGRESS',
-                  description: 'Flagged for hardware diagnostic review',
-                  reportedBy: currentUser.fullName,
-                  assignedTechnician: currentUser.fullName,
-                  startDate: new Date().toISOString().split('T')[0]!,
-                  expectedCompletion: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().split('T')[0]!,
-                  cost: 150
-                });
+                // Open the repair ticket form for this asset so the problem can be described,
+                // instead of filing a placeholder ticket with an invented description and cost.
+                setReportIssueAssetId(ast.id);
                 navigateToTab('repair');
               }}
             />
@@ -423,6 +427,9 @@ function AppShell() {
               branches={currentOrgBranches}
               onNewCheckout={handleNewCheckout}
               onReturnAsset={handleReturnAsset}
+              startCheckoutForAssetId={checkoutRequestAssetId}
+              startReturnForAssetId={returnRequestAssetId}
+              onStartRequestHandled={() => { setCheckoutRequestAssetId(null); setReturnRequestAssetId(null); }}
             />
           )}
 
@@ -435,6 +442,8 @@ function AppShell() {
               onReportIssue={handleReportIssue}
               onUpdateTicket={handleUpdateTicket}
               onCompleteRepair={handleCompleteRepair}
+              reportIssueForAssetId={reportIssueAssetId}
+              onReportIssueHandled={() => setReportIssueAssetId(null)}
             />
           )}
 
@@ -532,32 +541,24 @@ function AppShell() {
               assets={filteredAssets}
               currentUser={currentUser}
               onSelectAssetForCheckout={(ast) => {
-                setSearchQuery(ast.assetCode);
-                navigateToTab('assets');
+                setIsGlobalScannerOpen(false);
+                setCheckoutRequestAssetId(ast.id);
+                navigateToTab('checkout');
               }}
               onSelectAssetForReturn={(ast) => {
-                setSearchQuery(ast.assetCode);
-                navigateToTab('assets');
+                setIsGlobalScannerOpen(false);
+                setReturnRequestAssetId(ast.id);
+                navigateToTab('checkout');
               }}
               onSelectAssetForRepair={(ast) => {
-                handleReportIssue({
-                  id: `mnt-${Date.now()}`,
-                  assetId: ast.id,
-                  assetCode: ast.assetCode,
-                  assetName: ast.name,
-                  type: 'REPAIR',
-                  status: 'IN_PROGRESS',
-                  description: 'Scanned via quick camera diagnostic intake',
-                  reportedBy: currentUser.fullName,
-                  assignedTechnician: currentUser.fullName,
-                  startDate: new Date().toISOString().split('T')[0]!,
-                  expectedCompletion: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().split('T')[0]!,
-                  cost: 150
-                });
+                // Open the ticket form so the problem can be described (no placeholder ticket).
+                setIsGlobalScannerOpen(false);
+                setReportIssueAssetId(ast.id);
                 navigateToTab('repair');
               }}
               onEnrollScannedTag={canAddAsset ? (tag) => {
-                setSearchQuery(tag);
+                setIsGlobalScannerOpen(false);
+                setEnrollRequestTag(tag);
                 navigateToTab('assets');
               } : undefined}
               onUpdateAssetStatus={(assetId, st) => {

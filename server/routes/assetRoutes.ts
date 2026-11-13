@@ -6,6 +6,7 @@ import { hasPermission, canApproveWriteOff } from '../permissions';
 import { recordAuditEvent } from '../audit';
 import { calculateStraightLineDepreciation } from '../../shared/finance';
 import { issueNextAssetTag } from '../assetTags';
+import { STANDARD_ASSET_CATEGORIES } from '../../shared/categories';
 import {
   EXTENDED_ASSET_COLUMN_SQL,
   EXTENDED_ASSET_PLACEHOLDER_SQL,
@@ -410,9 +411,17 @@ assetRouter.post('/bulk', express.json({ limit: '5mb' }), requirePermission('ass
       const dbCats = await tx<any>('SELECT `id`, `name`, `depreciation_years` FROM `asset_categories`;');
       const catById = new Map<string, { id: string; name: string; depreciation_years: number }>();
       const catByName = new Map<string, { id: string; name: string; depreciation_years: number }>();
+      // Accept the categories the app itself offers (shared list) as well as any extra ones
+      // stored in asset_categories. Previously only the table was consulted, and it holds a
+      // different list, so imports using the app's own category names were always refused.
+      for (const c of STANDARD_ASSET_CATEGORIES) {
+        const entry = { id: c.id, name: c.name, depreciation_years: c.depreciationYears };
+        catById.set(c.id, entry);
+        catByName.set(c.name.toLowerCase().trim(), entry);
+      }
       for (const c of dbCats) {
-        catById.set(c.id, c);
-        catByName.set(c.name.toLowerCase().trim(), c);
+        if (!catById.has(c.id)) catById.set(c.id, c);
+        if (!catByName.has(c.name.toLowerCase().trim())) catByName.set(c.name.toLowerCase().trim(), c);
       }
 
       // 2. Preload existing asset tags and serial numbers in this organization to check DB duplicates
@@ -467,7 +476,8 @@ assetRouter.post('/bulk', express.json({ limit: '5mb' }), requirePermission('ass
         // Category matching (fail closed)
         const catKey = item.categoryId || item.category_id;
         const catNameKey = String(item.categoryName || item.category_name || item.category || '').toLowerCase().trim();
-        const targetCat = catKey ? catById.get(catKey) : (catNameKey ? catByName.get(catNameKey) : undefined);
+        // Try the id first, then the name (an unknown id should not hide a valid name).
+        const targetCat = (catKey ? catById.get(catKey) : undefined) || (catNameKey ? catByName.get(catNameKey) : undefined);
 
         if (!targetCat) {
           results.skipped++;

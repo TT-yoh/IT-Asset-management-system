@@ -20,11 +20,39 @@ import {
 import { RegisterCompanyModal, RegisterCompanyData } from '../RegisterCompanyModal';
 import { PasswordResetPanel } from './PasswordResetPanel';
 
+type AuthLink = { kind: 'reset' | 'activate'; token: string } | null;
+
+/**
+ * Read a password-reset (#/reset?token=) or invitation (#activate?token=, ?invite=) link from
+ * the address bar. Called from state initialisers so the value survives React running effects
+ * twice (development StrictMode): the effect that strips the token from the URL used to run a
+ * second time, find no token, and switch an invitation link back to the plain sign-in screen.
+ */
+function readAuthLinkFromUrl(): AuthLink {
+  if (typeof window === 'undefined') return null;
+  try {
+    const hash = window.location.hash;
+    const queryStart = hash.indexOf('?');
+    const hashParams = new URLSearchParams(queryStart !== -1 ? hash.substring(queryStart + 1) : '');
+    if (/^#\/?reset\b/i.test(hash)) {
+      return { kind: 'reset', token: hashParams.get('token') || '' };
+    }
+    const fromHash = hashParams.get('token') || hashParams.get('invite');
+    if (fromHash) return { kind: 'activate', token: fromHash };
+    const searchParams = new URLSearchParams(window.location.search);
+    const fromQuery = searchParams.get('invite') || searchParams.get('token');
+    if (fromQuery) return { kind: 'activate', token: fromQuery };
+  } catch {
+    // Unparseable URL: fall through to the normal sign-in screen.
+  }
+  return null;
+}
+
 interface LoginPortalProps {
   organizations: Organization[];
   users: User[];
   onLoginSuccess: (user: User, org: Organization) => void;
-  onRegisterOrganization?: (data: RegisterCompanyData) => void;
+  onRegisterOrganization?: (data: RegisterCompanyData) => Promise<unknown> | void;
   onActivateUser?: (inviteToken: string, newPassword: string, twoFactorEnabled: boolean) => Promise<any> | any;
 }
 
@@ -36,9 +64,12 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
   onActivateUser
 }) => {
   // Mode: 'SIGNIN' | 'ACTIVATE'
-  const [authMode, setAuthMode] = useState<'SIGNIN' | 'ACTIVATE'>('SIGNIN');
+  const [authLink] = useState<AuthLink>(readAuthLinkFromUrl);
+  const [authMode, setAuthMode] = useState<'SIGNIN' | 'ACTIVATE'>(() =>
+    authLink?.kind === 'activate' || (typeof window !== 'undefined' && /activate/i.test(window.location.hash)) ? 'ACTIVATE' : 'SIGNIN'
+  );
   // Password reset view: null when hidden, otherwise the token from a #/reset?token= link (may be empty).
-  const [resetToken, setResetToken] = useState<string | null>(null);
+  const [resetToken, setResetToken] = useState<string | null>(authLink?.kind === 'reset' ? authLink.token : null);
   const [showRegisterCompanyModal, setShowRegisterCompanyModal] = useState(false);
 
   // Standard Sign-In Form State (User must input their own credentials)
@@ -53,7 +84,7 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
   const [totpCode, setTotpCode] = useState('');
 
   // Option A: Invite Activation Form State
-  const [activationTokenInput, setActivationTokenInput] = useState('');
+  const [activationTokenInput, setActivationTokenInput] = useState(authLink?.kind === 'activate' ? authLink.token : '');
   const [activationPassword, setActivationPassword] = useState('');
   const [confirmActivationPassword, setConfirmActivationPassword] = useState('');
   const [showActivationPassword, setShowActivationPassword] = useState(false);
@@ -61,61 +92,19 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
   const [matchedInvitedUser, setMatchedInvitedUser] = useState<User | null>(null);
   const [matchedInvitedOrg, setMatchedInvitedOrg] = useState<Organization | null>(null);
 
-  // Auto-detect URL fragment (#activate?token=) or query (?invite=) on mount
+  // Links were read into state above. Here: strip any token from the address bar (so it does
+  // not linger in history or leak via Referer) and keep the URL in step with the screen.
   useEffect(() => {
     try {
-      let fragmentToken: string | null = null;
-      const hash = window.location.hash;
-
-      // Password reset links: #/reset?token=... (token is stripped from the URL immediately)
-      if (/^#\/?reset\b/i.test(hash)) {
-        const queryStart = hash.indexOf('?');
-        const params = new URLSearchParams(queryStart !== -1 ? hash.substring(queryStart + 1) : '');
-        setResetToken(params.get('token') || '');
-        setAuthMode('SIGNIN');
+      if (authLink?.kind === 'reset') {
         window.history.replaceState({ mode: 'login' }, '', '#/login');
-        return;
-      }
-      if (hash && hash.includes('token=')) {
-        const queryStart = hash.indexOf('?');
-        if (queryStart !== -1) {
-          const params = new URLSearchParams(hash.substring(queryStart + 1));
-          fragmentToken = params.get('token') || params.get('invite');
-        }
-      } else if (hash && hash.includes('invite=')) {
-        const queryStart = hash.indexOf('?');
-        if (queryStart !== -1) {
-          const params = new URLSearchParams(hash.substring(queryStart + 1));
-          fragmentToken = params.get('invite');
-        }
-      }
-
-      // Check query param fallback for legacy links
-      if (!fragmentToken && window.location.search) {
-        const urlParams = new URLSearchParams(window.location.search);
-        fragmentToken = urlParams.get('invite') || urlParams.get('token');
-      }
-
-      if (fragmentToken) {
-        setActivationTokenInput(fragmentToken);
-        setAuthMode('ACTIVATE');
-        // Immediately strip token from URL to prevent Referer / history exposure
-        if (typeof window !== 'undefined') {
-          window.history.replaceState(null, '', window.location.pathname + window.location.search);
-        }
-        return;
-      }
-
-      if (hash.toLowerCase().includes('activate')) {
-        setAuthMode('ACTIVATE');
-      } else {
-        setAuthMode('SIGNIN');
-        if (!window.location.hash && typeof window !== 'undefined') {
-          window.history.replaceState({ mode: 'login' }, '', '#/login');
-        }
+      } else if (authLink?.kind === 'activate') {
+        window.history.replaceState({ mode: 'activate' }, '', window.location.pathname + '#/activate');
+      } else if (!window.location.hash) {
+        window.history.replaceState({ mode: 'login' }, '', '#/login');
       }
     } catch {
-      // URL parsing fallback
+      // History API unavailable: nothing to clean.
     }
 
     const handlePopState = () => {
@@ -767,8 +756,9 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
         <RegisterCompanyModal
           isOpen={showRegisterCompanyModal}
           onClose={() => setShowRegisterCompanyModal(false)}
-          onRegister={(data) => {
-            onRegisterOrganization(data);
+          onRegister={async (data) => {
+            // A failure throws: the registration window catches it and shows the reason.
+            await onRegisterOrganization(data);
             setShowRegisterCompanyModal(false);
           }}
         />

@@ -3,6 +3,7 @@ import { Asset, Branch, AssetCategory, Organization, AssetStatus } from '../../t
 import ExcelJS from 'exceljs';
 import Papa from 'papaparse';
 import { calculateStraightLineDepreciation } from '../../../shared/finance';
+import { RESYNC_EVENT } from '../../lib/tidb-storage';
 import { 
   Upload, 
   X, 
@@ -613,14 +614,10 @@ export const ImportAssetsModal: React.FC<ImportAssetsModalProps> = ({
       });
 
       if (data.imported > 0) {
-        // Build mock typed assets for immediate client view update
-        const importedList: Asset[] = payloadAssets.slice(0, data.imported).map((item, idx) => ({
-          id: `ast-${Date.now()}-${idx}`,
-          orgId: organization.id,
-          ...item,
-          imageUrl: ''
-        }));
-        onBulkAddAssets(importedList);
+        // The rows are already saved by the request above. Reload from the server so the list
+        // shows the real records (handing them to onBulkAddAssets would send them a second time).
+        void onBulkAddAssets;
+        window.dispatchEvent(new Event(RESYNC_EVENT));
       }
     } catch (err: any) {
       setServerReport({

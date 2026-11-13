@@ -195,7 +195,17 @@ export const QuickScannerModal: React.FC<QuickScannerModalProps> = ({
     }
 
     const timer = setTimeout(() => {
-      const html5Qr = new Html5Qrcode('quick-scanner-viewport');
+      // The camera view is only on screen while scanning. If a result was already shown (for
+      // example a quick manual search) the element is gone, and constructing the scanner would
+      // throw an uncaught "HTML Element with id=quick-scanner-viewport not found".
+      if (!document.getElementById('quick-scanner-viewport')) return;
+      let html5Qr: Html5Qrcode;
+      try {
+        html5Qr = new Html5Qrcode('quick-scanner-viewport');
+      } catch {
+        setCameraError('Unable to start camera stream. Please use manual entry below.');
+        return;
+      }
       qrInstanceRef.current = html5Qr;
 
       html5Qr.start(

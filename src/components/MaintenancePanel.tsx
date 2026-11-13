@@ -20,6 +20,9 @@ interface MaintenancePanelProps {
   onReportIssue: (record: MaintenanceRecord) => void;
   onUpdateTicket?: (updatedRecord: MaintenanceRecord) => void;
   onCompleteRepair: (recordId: string) => void;
+  /** Open the new-ticket form with this asset already selected (from an asset's "Report Issue"). */
+  reportIssueForAssetId?: string | null;
+  onReportIssueHandled?: () => void;
 }
 
 export const MaintenancePanel: React.FC<MaintenancePanelProps> = ({
@@ -29,12 +32,24 @@ export const MaintenancePanel: React.FC<MaintenancePanelProps> = ({
   currentUser,
   onReportIssue,
   onUpdateTicket,
-  onCompleteRepair
+  onCompleteRepair,
+  reportIssueForAssetId,
+  onReportIssueHandled
 }) => {
   const [viewType, setViewType] = useState<'GRID' | 'TABLE'>('GRID');
 
   // Modals
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createForAssetId, setCreateForAssetId] = useState<string | null>(null);
+
+  // Arriving from an asset's "Report Issue": open the ticket form for that asset.
+  React.useEffect(() => {
+    if (!reportIssueForAssetId) return;
+    setCreateForAssetId(reportIssueForAssetId);
+    setShowCreateModal(true);
+    onReportIssueHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportIssueForAssetId]);
   const [selectedDetailRecord, setSelectedDetailRecord] = useState<MaintenanceRecord | null>(null);
   const [historyAsset, setHistoryAsset] = useState<Asset | null>(null);
   const [showRepairsSummary, setShowRepairsSummary] = useState(false);
@@ -164,7 +179,7 @@ export const MaintenancePanel: React.FC<MaintenancePanelProps> = ({
             </button>
 
             <button
-              onClick={() => setShowCreateModal(true)}
+              onClick={() => { setCreateForAssetId(null); setShowCreateModal(true); }}
               className="flex items-center space-x-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold px-4 py-2 rounded-xl shadow-lg shadow-rose-600/25 transition-all"
             >
               <Plus className="w-4 h-4" />
@@ -446,6 +461,8 @@ export const MaintenancePanel: React.FC<MaintenancePanelProps> = ({
             </h3>
 
             <MaintenanceForm
+              key={createForAssetId || 'new'}
+              initialAssetId={createForAssetId || undefined}
               assets={assets}
               technicians={users.filter(u => u.role === 'IT_SUPPORT' || u.role === 'ADMIN') || []}
               currentUser={currentUser}

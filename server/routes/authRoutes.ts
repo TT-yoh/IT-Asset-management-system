@@ -23,12 +23,31 @@ import {
   recordFailedTotpAttempt,
   clearFailedTotpAttempts,
   DUMMY_BCRYPT_HASH,
+  parseDbDate,
   SESSION_TTL_SECONDS
 } from '../auth';
 import { authenticate, invalidateUserCache, asyncHandler } from '../middleware';
 import { sendPasswordResetEmail } from '../mailer';
 
 export const authRouter = Router();
+
+/**
+ * After a security change that bumps token_version (password change, enabling or disabling
+ * 2FA), every existing session is invalid, which signs the user out on all other devices.
+ * Issue a fresh cookie to the device that made the change, so the user is not left on a page
+ * whose every request now fails with "Session has been invalidated".
+ */
+async function reissueSessionCookie(res: Response, userId: string): Promise<void> {
+  const rows = await query<any>('SELECT `token_version` FROM `users` WHERE `id` = ? LIMIT 1;', [userId]);
+  const ver = Number(rows[0]?.token_version || 1);
+  res.cookie('session_token', createSessionToken({ userId, ver }), {
+    httpOnly: true,
+    secure: config.COOKIE_SECURE,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: SESSION_TTL_SECONDS * 1000
+  });
+}
 
 /**
  * 4.1 & 4.6: Corporate User Sign-In
@@ -624,6 +643,7 @@ authRouter.post('/2fa/verify', authenticate, asyncHandler(async (req: Request, r
     [verifyResult.step, req.auth!.userId]
   );
   invalidateUserCache(req.auth!.userId);
+  await reissueSessionCookie(res, req.auth!.userId);
 
   res.json({
     success: true,
@@ -694,6 +714,7 @@ authRouter.post('/2fa/disable', authenticate, asyncHandler(async (req: Request, 
   );
   await query('DELETE FROM `recovery_codes` WHERE `user_id` = ?;', [userId]);
   invalidateUserCache(userId);
+  await reissueSessionCookie(res, userId);
 
   res.json({ success: true, message: 'Two-factor authentication disabled.' });
 }));
@@ -730,7 +751,7 @@ authRouter.get('/invite/:token', asyncHandler(async (req: Request, res: Response
     return;
   }
 
-  if (user.invite_expires_at && new Date(user.invite_expires_at).getTime() < Date.now()) {
+  if (user.invite_expires_at && parseDbDate(user.invite_expires_at).getTime() < Date.now()) {
     res.status(410).json({ valid: false, error: 'Invitation token has expired. Please request a new invite from your administrator.' });
     return;
   }
@@ -795,7 +816,7 @@ authRouter.post('/activate', asyncHandler(async (req: Request, res: Response) =>
 
   const user = users[0]!;
 
-  if (user.invite_expires_at && new Date(user.invite_expires_at).getTime() < Date.now()) {
+  if (user.invite_expires_at && parseDbDate(user.invite_expires_at).getTime() < Date.now()) {
     res.status(410).json({ error: 'Invitation token has expired. Please request a new invite.' });
     return;
   }
@@ -936,7 +957,7 @@ authRouter.post('/reset-password', asyncHandler(async (req: Request, res: Respon
   }
 
   const user = users[0]!;
-  if (user.reset_expires_at && new Date(user.reset_expires_at).getTime() < Date.now()) {
+  if (user.reset_expires_at && parseDbDate(user.reset_expires_at).getTime() < Date.now()) {
     res.status(400).json({ error: 'Password reset token has expired.' });
     return;
   }
@@ -1003,8 +1024,9 @@ authRouter.post('/change-password', authenticate, asyncHandler(async (req: Reque
     [newHash, userId]
   );
   invalidateUserCache(userId);
+  await reissueSessionCookie(res, userId);
 
-  res.json({ success: true, message: 'Password has been successfully updated.' });
+  res.json({ success: true, message: 'Password has been successfully updated. Other devices have been signed out.' });
 }));
 
 /**

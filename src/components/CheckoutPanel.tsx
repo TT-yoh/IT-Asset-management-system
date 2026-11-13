@@ -41,6 +41,11 @@ interface CheckoutPanelProps {
   onReturnAsset: (recordId: string, returnCondition: AssetCondition, damageReported: boolean, damageDesc: string, returnNotes: string) => void;
   onAssignCustody?: (assetId: string, userId: string) => void;
   onUnassignCustody?: (assetId: string, reason: string) => void;
+  /** Open the new-checkout form for this device (from a scan result). */
+  startCheckoutForAssetId?: string | null;
+  /** Open the check-in form for this device's active checkout (from a scan result). */
+  startReturnForAssetId?: string | null;
+  onStartRequestHandled?: () => void;
 }
 
 export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
@@ -52,7 +57,10 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
   onNewCheckout,
   onReturnAsset,
   onAssignCustody,
-  onUnassignCustody
+  onUnassignCustody,
+  startCheckoutForAssetId,
+  startReturnForAssetId,
+  onStartRequestHandled
 }) => {
   const { toast } = useFeedback();
   // Modals state
@@ -93,6 +101,30 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
 
   // Status helper
   const isRecordActive = (c: CheckoutRecord) => (c.status === 'ACTIVE' || (!c.checkedInAt && c.status !== 'RETURNED'));
+
+  // Requests from a scan result: open the matching form for that device, or say why not.
+  useEffect(() => {
+    if (!startCheckoutForAssetId && !startReturnForAssetId) return;
+    if (startCheckoutForAssetId) {
+      const ast = assets.find(a => a.id === startCheckoutForAssetId);
+      if (ast && activeAssetsPool.some(a => a.id === ast.id)) {
+        setTargetAssetId(ast.id);
+        setShowCheckoutModal(true);
+      } else {
+        toast(`${ast?.assetCode || 'This device'} cannot be checked out right now: it is already in someone's custody or not in service.`, 'info');
+      }
+    } else if (startReturnForAssetId) {
+      const record = checkouts.find(c => c.assetId === startReturnForAssetId && isRecordActive(c));
+      if (record) {
+        setTargetCheckoutRecord(record);
+        setShowCheckinModal(true);
+      } else {
+        toast('This device has no active checkout to return.', 'info');
+      }
+    }
+    onStartRequestHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startCheckoutForAssetId, startReturnForAssetId]);
 
   // Filter Checkouts
   const filteredCheckouts = checkouts.filter(c => {

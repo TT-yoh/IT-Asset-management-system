@@ -4,6 +4,8 @@ import { Wrench, AlertTriangle, Calendar, DollarSign, UserCheck } from 'lucide-r
 
 interface MaintenanceFormProps {
   initialData?: MaintenanceRecord;
+  /** Pre-select this asset for a new ticket. */
+  initialAssetId?: string;
   assets: Asset[];
   technicians: User[];
   currentUser?: User;
@@ -13,6 +15,7 @@ interface MaintenanceFormProps {
 
 export const MaintenanceForm: React.FC<MaintenanceFormProps> = ({
   initialData,
+  initialAssetId,
   assets,
   technicians,
   currentUser,
@@ -21,7 +24,7 @@ export const MaintenanceForm: React.FC<MaintenanceFormProps> = ({
 }) => {
   const isITSupportOrAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'IT_SUPPORT';
 
-  const [assetId, setAssetId] = useState(initialData?.assetId || assets[0]?.id || '');
+  const [assetId, setAssetId] = useState(initialData?.assetId || (initialAssetId && assets.some(a => a.id === initialAssetId) ? initialAssetId : '') || assets[0]?.id || '');
   const [type, setType] = useState<MaintenanceType>(initialData?.type || 'REPAIR');
   const [priority, setPriority] = useState<'HIGH' | 'MEDIUM' | 'LOW'>(initialData?.priority || 'MEDIUM');
   const [description, setDescription] = useState(initialData?.description || '');

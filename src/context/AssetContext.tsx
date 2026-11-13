@@ -17,7 +17,8 @@ import {
   RESYNC_EVENT,
   persistBudget,
   deleteBudgetFromDb,
-  BudgetInput
+  BudgetInput,
+  BulkImportResult
 } from '../lib/tidb-storage';
 import {
   isTiDBConfigured,
@@ -55,7 +56,7 @@ interface AssetContextType {
   /** Create (no existing) or update a budget. Resolves true when the server saved it. */
   handleSaveBudget: (input: BudgetInput, existing?: BudgetAllocation) => Promise<boolean>;
   handleDeleteBudget: (budget: BudgetAllocation) => Promise<boolean>;
-  handleBulkAddAssets: (newAssets: Asset[]) => Promise<void>;
+  handleBulkAddAssets: (newAssets: Asset[]) => Promise<BulkImportResult | null>;
   handleBatchUpdateStatus: (assetIds: string[], newStatus: AssetStatus, reason?: string) => Promise<void>;
   handleBatchTransferBranch: (assetIds: string[], targetBranchId: string, targetBranchName: string) => Promise<void>;
   handleBatchDeleteAssets: (assetIds: string[]) => Promise<void>;
@@ -407,14 +408,18 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       await refreshAppData();
     } catch (err: any) {
       setAssets(assets);
+      const message = err?.message || 'Duplicate or invalid data rejected by server.';
       addNotification({
         orgId: currentOrg.id,
         type: 'WARNING',
         title: 'Asset Registration Rejected',
-        message: err.message || 'Duplicate or invalid data rejected by server.',
+        message,
         read: false
       });
-      throw err;
+      // Tell the user now (the notification bell alone is easy to miss) and stop here
+      // rather than rethrowing into a click handler that nothing catches.
+      toast(`${newAst.assetCode || 'The asset'} was not saved: ${message}`, 'error');
+      return;
     }
 
     addNotification({
@@ -435,7 +440,8 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       await refreshAppData();
     } catch (err: any) {
       setAssets(assets);
-      throw err;
+      toast(`Changes to ${updatedAst.assetCode || 'the asset'} were not saved: ${err?.message || 'the server refused them.'}`, 'error');
+      await refreshAppData();
     }
   };
 
@@ -469,78 +475,127 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       await refreshAppData();
     } catch (err: any) {
       setAssets(assets);
-      throw err;
+      const code = assets.find(a => a.id === astId)?.assetCode || 'The asset';
+      toast(`${code} was not deleted: ${err?.message || 'the server refused it.'}`, 'error');
     }
   };
 
-  const handleBulkAddAssets = async (newAssets: Asset[]) => {
-    const updatedAssets = [...newAssets, ...assets];
-    setAssets(updatedAssets);
-
+  const handleBulkAddAssets = async (newAssets: Asset[]): Promise<BulkImportResult | null> => {
     try {
-      await bulkPersistAssets(newAssets, updatedAssets);
+      const result = await bulkPersistAssets(newAssets);
       await refreshAppData();
+      if (result.imported > 0 && result.skipped === 0) {
+        toast(`Imported ${result.imported} asset${result.imported === 1 ? '' : 's'}.`);
+      } else if (result.imported > 0) {
+        toast(`Imported ${result.imported} asset${result.imported === 1 ? '' : 's'}; skipped ${result.skipped}. ${result.errors[0] || ''}`.trim(), 'info');
+      } else {
+        toast(`No assets were imported. ${result.errors[0] || 'Every row was refused by the server.'}`, 'error');
+      }
+      return result;
     } catch {
+      // Could not reach the server: keep the rows queued and send them when back online.
       newAssets.forEach(a => queueOfflineMutation('assets', 'INSERT', a));
+      toast(`The server could not be reached. ${newAssets.length} asset${newAssets.length === 1 ? ' is' : 's are'} queued and will be saved when the connection returns.`, 'info');
+      return null;
+    }
+  };
+
+  /**
+   * Run one request per asset and report the outcome once: how many succeeded and, if any
+   * failed, the first reason the server gave. Network failures are queued for later.
+   */
+  const runAssetBatch = async (
+    assetIds: string[],
+    describe: { done: string; failed: string },
+    send: (asset: Asset) => Promise<Response>,
+    queueOffline: (asset: Asset) => void
+  ) => {
+    let succeeded = 0;
+    let queued = 0;
+    const failures: string[] = [];
+    for (const id of assetIds) {
+      const asset = assets.find(a => a.id === id);
+      if (!asset) continue;
+      try {
+        const res = await send(asset);
+        if (res.ok) {
+          succeeded++;
+        } else {
+          const body = await res.json().catch(() => null);
+          failures.push(`${asset.assetCode}: ${body?.error || `HTTP ${res.status}`}`);
+        }
+      } catch {
+        queueOffline(asset);
+        queued++;
+      }
+    }
+    await refreshAppData();
+
+    const plural = (n: number) => `${n} asset${n === 1 ? '' : 's'}`;
+    if (failures.length === 0 && queued === 0) {
+      toast(`${describe.done} ${plural(succeeded)}.`);
+    } else if (failures.length > 0) {
+      toast(
+        `${succeeded > 0 ? `${describe.done} ${plural(succeeded)}. ` : ''}${describe.failed} ${plural(failures.length)}: ${failures[0]}${failures.length > 1 ? ` (and ${failures.length - 1} more)` : ''}`,
+        'error'
+      );
+    }
+    if (queued > 0) {
+      toast(`${plural(queued)} could not reach the server and will be saved when the connection returns.`, 'info');
     }
   };
 
   const handleBatchUpdateStatus = async (assetIds: string[], newStatus: AssetStatus, reason?: string) => {
     const idSet = new Set(assetIds);
-    const updatedAssets = assets.map(a => idSet.has(a.id) ? { ...a, status: newStatus, notes: reason ? `${a.notes ? a.notes + ' | ' : ''}Write-off reason: ${reason}` : a.notes } : a);
-    setAssets(updatedAssets);
-
-    for (const id of assetIds) {
-      try {
-        await fetch(`/api/assets/${encodeURIComponent(id)}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ status: newStatus, notes: reason })
-        });
-      } catch {
-        queueOfflineMutation('assets', 'UPDATE', { id, status: newStatus, notes: reason });
-      }
-    }
-    await refreshAppData();
+    setAssets(current => current.map(a => (idSet.has(a.id) ? { ...a, status: newStatus } : a)));
+    await runAssetBatch(
+      assetIds,
+      { done: `Set status to ${newStatus} for`, failed: 'Could not change the status of' },
+      (asset) => fetch(`/api/assets/${encodeURIComponent(asset.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          status: newStatus,
+          // Write-offs record their reason on the asset as well as in the audit log.
+          notes: reason ? `${asset.notes ? asset.notes + ' | ' : ''}Write-off reason: ${reason}` : undefined,
+          reason,
+          // The server requires the version each change is based on.
+          baseVersion: asset.version || 1
+        })
+      }),
+      (asset) => queueOfflineMutation('assets', 'UPDATE', { id: asset.id, status: newStatus, notes: reason, baseVersion: asset.version || 1 })
+    );
   };
 
   const handleBatchTransferBranch = async (assetIds: string[], targetBranchId: string, targetBranchName: string) => {
     const idSet = new Set(assetIds);
-    const updatedAssets = assets.map(a => idSet.has(a.id) ? { ...a, branchId: targetBranchId, branchName: targetBranchName } : a);
-    setAssets(updatedAssets);
-
-    for (const id of assetIds) {
-      try {
-        await fetch(`/api/assets/${encodeURIComponent(id)}/transfer-branch`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ targetBranchId, reason: 'Batch facility transfer' })
-        });
-      } catch {
-        queueOfflineMutation('assets', 'UPDATE', { id, branchId: targetBranchId, branchName: targetBranchName });
-      }
-    }
-    await refreshAppData();
+    setAssets(current => current.map(a => (idSet.has(a.id) ? { ...a, branchId: targetBranchId, branchName: targetBranchName } : a)));
+    await runAssetBatch(
+      assetIds,
+      { done: `Moved to ${targetBranchName}:`, failed: 'Could not move' },
+      (asset) => fetch(`/api/assets/${encodeURIComponent(asset.id)}/transfer-branch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ targetBranchId, reason: 'Batch facility transfer' })
+      }),
+      (asset) => queueOfflineMutation('assets', 'UPDATE', { id: asset.id, branchId: targetBranchId, branchName: targetBranchName })
+    );
   };
 
   const handleBatchDeleteAssets = async (assetIds: string[]) => {
     const idSet = new Set(assetIds);
-    const remainingAssets = assets.filter(a => !idSet.has(a.id));
-    setAssets(remainingAssets);
-
-    for (const id of assetIds) {
-      try {
-        await fetch(`/api/assets/${encodeURIComponent(id)}`, {
-          method: 'DELETE',
-          credentials: 'include'
-        });
-      } catch {
-        queueOfflineMutation('assets', 'DELETE', { id });
-      }
-    }
-    await refreshAppData();
+    setAssets(current => current.filter(a => !idSet.has(a.id)));
+    await runAssetBatch(
+      assetIds,
+      { done: 'Deleted', failed: 'Could not delete' },
+      (asset) => fetch(`/api/assets/${encodeURIComponent(asset.id)}`, {
+        method: 'DELETE',
+        credentials: 'include'
+      }),
+      (asset) => queueOfflineMutation('assets', 'DELETE', { id: asset.id })
+    );
   };
 
   /**

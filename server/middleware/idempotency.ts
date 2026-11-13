@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import config from '../config';
 import { query, QueryExecutor } from '../db';
+import { parseDbDate } from '../auth';
 
 export interface IdempotencyOptions {
   ttlHours?: number; // default: 24
@@ -347,7 +348,7 @@ export function idempotent(options: IdempotencyOptions = {}) {
         }
 
         // 6.3 PROCESSING State: Evaluate Lease Lock & Poll
-        const lockExpiration = new Date(existing.locked_until).getTime();
+        const lockExpiration = parseDbDate(existing.locked_until).getTime();
         const currentTime = Date.now();
 
         if (lockExpiration > currentTime) {

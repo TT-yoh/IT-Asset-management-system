@@ -88,7 +88,7 @@ export const RegisterCompanyModal: React.FC<RegisterCompanyModalProps> = ({
   // Step 3: Operating Branches / Facilities (Supports Primary HQ + Multiple Regional Branches)
   const [primaryBranchName, setPrimaryBranchName] = useState('');
   const [primaryBranchCity, setPrimaryBranchCity] = useState('');
-  const [primaryBranchCountry, setPrimaryBranchCountry] = useState('Australia');
+  const [primaryBranchCountry, setPrimaryBranchCountry] = useState('');
   const [primaryBranchLocation, setPrimaryBranchLocation] = useState('');
 
   // Additional branches
@@ -142,15 +142,23 @@ export const RegisterCompanyModal: React.FC<RegisterCompanyModalProps> = ({
       return;
     }
 
+    // The first branch is a real facility record: require its name and city instead of
+    // inventing placeholders ("Headquarters City") that end up in reports and labels.
+    if (!primaryBranchName.trim() || !primaryBranchCity.trim()) {
+      setActiveStep(3);
+      setErrorMessage('Enter the name and city of your first branch (headquarters).');
+      return;
+    }
+
     const cleanDomain = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '') || 'company';
     const finalEmail = adminEmail.trim() || `admin@${cleanDomain}.com`;
 
     const primaryHqBranch: InitialBranchInput = {
-      name: primaryBranchName.trim() || `${name.trim()} Global HQ`,
+      name: primaryBranchName.trim(),
       code: `HQ-${name.trim().slice(0, 3).toUpperCase()}`,
-      city: primaryBranchCity.trim() || 'Headquarters City',
+      city: primaryBranchCity.trim(),
       location: primaryBranchLocation.trim() || 'Main Campus',
-      country: primaryBranchCountry.trim() || 'Global',
+      country: primaryBranchCountry.trim(),
       managerName: adminName.trim() || 'Primary Admin'
     };
 
@@ -466,10 +474,11 @@ export const RegisterCompanyModal: React.FC<RegisterCompanyModalProps> = ({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[10px] text-slate-400 uppercase font-semibold mb-1">
-                      HQ Facility Name
+                      HQ Facility Name *
                     </label>
                     <input
                       type="text"
+                      required
                       value={primaryBranchName}
                       onChange={(e) => setPrimaryBranchName(e.target.value)}
                       placeholder={`${name || 'Company'} Global HQ`}
@@ -479,13 +488,14 @@ export const RegisterCompanyModal: React.FC<RegisterCompanyModalProps> = ({
 
                   <div>
                     <label className="block text-[10px] text-slate-400 uppercase font-semibold mb-1">
-                      City / Metropolis
+                      City / Metropolis *
                     </label>
                     <input
                       type="text"
+                      required
                       value={primaryBranchCity}
                       onChange={(e) => setPrimaryBranchCity(e.target.value)}
-                      placeholder="e.g. Sydney, London, New York"
+                      placeholder="e.g. Harare, London, New York"
                       className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 font-medium"
                     />
                   </div>
@@ -512,7 +522,7 @@ export const RegisterCompanyModal: React.FC<RegisterCompanyModalProps> = ({
                       type="text"
                       value={primaryBranchCountry}
                       onChange={(e) => setPrimaryBranchCountry(e.target.value)}
-                      placeholder="e.g. Australia"
+                      placeholder="e.g. Zimbabwe"
                       className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500"
                     />
                   </div>

@@ -14,7 +14,8 @@ import {
   saveToStorage,
   STORAGE_KEYS,
   setSaveFailureReporter,
-  RESYNC_EVENT
+  RESYNC_EVENT,
+  SESSION_EXPIRED_EVENT
 } from '../lib/tidb-storage';
 import { clearOfflineStoreOnLogout, setActiveSessionContext } from '../lib/offline-sync';
 import { useFeedback } from './FeedbackContext';
@@ -88,6 +89,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setSaveFailureReporter((message) => toast(message, 'error'));
     return () => setSaveFailureReporter(null);
   }, [toast]);
+
+  // The server says this session no longer exists: go back to sign-in and say why.
+  useEffect(() => {
+    const onExpired = () => {
+      if (!currentUserRef.current) return;
+      clearStoredSession();
+      wipeUserAndOrgCaches();
+      setActiveSessionContext(null);
+      setCurrentUser(null);
+      window.history.replaceState({ tab: 'login' }, '', '#/login');
+      toast('Your session has ended (it expired or you were signed out on another device). Please sign in again.', 'info');
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+  }, [toast]);
   const [systemOrgs, setSystemOrgs] = useState<Organization[]>([]);
   const [systemUsers, setSystemUsers] = useState<User[]>([]);
   const [systemBranches, setSystemBranches] = useState<Branch[]>([]);
@@ -103,6 +119,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Server session cookie is authoritative; client never trusts localStorage on boot
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const currentUserRef = React.useRef<User | null>(null);
+  currentUserRef.current = currentUser;
   const [isSessionLoading, setIsSessionLoading] = useState<boolean>(true);
 
   // Server session verification against backend /api/auth/me cookie

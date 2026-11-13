@@ -442,6 +442,14 @@ export const loadInitialData = async (orgId?: string, userId?: string): Promise<
 
     const res = await fetch(url, { credentials: 'include', headers });
 
+    // The session ended on the server (expired, signed out elsewhere, password changed on
+    // another device). Tell the app so it can return to sign-in instead of quietly showing
+    // cached data while every action fails.
+    if (res.status === 401 && typeof window !== 'undefined') {
+      const body = await res.clone().json().catch(() => null);
+      window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT, { detail: body?.error || '' }));
+    }
+
     // 304 Not Modified: Return existing in-memory/scoped cache
     if (res.status === 304 && lastCachedPayload) {
       return {
@@ -588,19 +596,32 @@ export async function deleteAssetFromDb(assetId: string): Promise<boolean> {
     return true;
   }
 
+  const errData = await res.json().catch(() => ({}));
   if (res.status === 409) {
-    const errData = await res.json().catch(() => ({}));
     throw new Error(errData.error || 'Asset has checkout or maintenance history and cannot be deleted.');
   }
-
-  return false;
+  throw new Error(errData.error || `The asset could not be deleted (HTTP ${res.status}).`);
 }
 
 /**
  * Bulk ingest assets using POST /api/assets/bulk in 500-item chunks.
  */
-export async function bulkPersistAssets(newAssets: Asset[], _allAssets?: Asset[]): Promise<boolean> {
+/** What the server did with a bulk import. */
+export interface BulkImportResult {
+  imported: number;
+  skipped: number;
+  errors: string[];
+}
+
+/**
+ * Send assets to POST /api/assets/bulk in 500-item chunks and add up the server's report.
+ * A chunk the server refuses outright counts all its rows as skipped, with the reason.
+ * Throws only when the server cannot be reached at all.
+ */
+export async function bulkPersistAssets(newAssets: Asset[], _allAssets?: Asset[]): Promise<BulkImportResult> {
   const CHUNK_SIZE = 500;
+  const result: BulkImportResult = { imported: 0, skipped: 0, errors: [] };
+
   for (let i = 0; i < newAssets.length; i += CHUNK_SIZE) {
     const chunk = newAssets.slice(i, i + CHUNK_SIZE);
     const rows = chunk.map(mapAssetToTiDBRow);
@@ -611,15 +632,22 @@ export async function bulkPersistAssets(newAssets: Asset[], _allAssets?: Asset[]
       credentials: 'include',
       body: JSON.stringify({ assets: rows })
     });
+    const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      console.warn(`Bulk chunk persist notice (HTTP ${res.status}):`, errData);
+      result.skipped += chunk.length;
+      result.errors.push(data?.error || `The server refused the import (HTTP ${res.status}).`);
+      continue;
+    }
+    result.imported += Number(data?.imported) || 0;
+    result.skipped += Number(data?.skipped) || 0;
+    if (Array.isArray(data?.errors)) {
+      result.errors.push(...data.errors.map((e: unknown) => (typeof e === 'string' ? e : JSON.stringify(e))));
     }
   }
 
-  updateLastTiDBSyncTime();
-  return true;
+  if (result.imported > 0) updateLastTiDBSyncTime();
+  return result;
 }
 
 /**
@@ -663,6 +691,8 @@ export async function persistMaintenance(mnt: MaintenanceRecord, _allMaintenance
  */
 /** Fired after a failed save so the app reloads from the server and drops the optimistic change. */
 export const RESYNC_EVENT = 'omni:resync-after-failed-save';
+/** Fired when the server reports that the signed-in session no longer exists. */
+export const SESSION_EXPIRED_EVENT = 'omni:session-expired';
 
 let saveFailureReporter: ((message: string) => void) | null = null;
 export function setSaveFailureReporter(reporter: ((message: string) => void) | null): void {
