@@ -5,7 +5,6 @@ import {
   AssetSpecs,
   AssetSpecValue,
   OWNERSHIP_LABELS,
-  OWNERSHIP_TYPES,
   SpecFieldDef,
   formatSpecValue,
   specFieldsForCategory
@@ -117,16 +116,13 @@ const SpecField: React.FC<{
 
 /**
  * Form sections for the fields added on top of the core asset record:
- * sourcing and ownership (every device) and the device-specific details that
+ * location and department (every device) and the device-specific details that
  * depend on the selected category.
  */
 export const AssetExtendedFields: React.FC<AssetExtendedFieldsProps> = ({ formData, departments, onChange, hideLocation = false }) => {
-  const ownershipId = useId();
-  const leaseEndId = useId();
   const departmentId = useId();
   const specFields = specFieldsForCategory(formData.categoryId, formData.categoryName);
   const specs: AssetSpecs = formData.specs || {};
-  const ownership = formData.ownershipType || 'OWNED';
   const activeDepartments = departments.filter((d) => !(d as any).archivedAt);
 
   const setSpec = (key: string, value: AssetSpecValue | undefined) => {
@@ -141,31 +137,10 @@ export const AssetExtendedFields: React.FC<AssetExtendedFieldsProps> = ({ formDa
       <div className={SECTION_CLASS}>
         <div className={SECTION_TITLE_CLASS}>
           <Building2 className="w-4 h-4 text-emerald-400" aria-hidden="true" />
-          <span>Sourcing, Ownership &amp; Location</span>
+          <span>Location &amp; Department</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <TextField
-            label="Manufacturer"
-            value={formData.manufacturer || ''}
-            placeholder="e.g. Dell, Apple, Cisco"
-            maxLength={128}
-            onChange={(manufacturer) => onChange({ manufacturer })}
-          />
-          <TextField
-            label="Supplier / Vendor"
-            value={formData.supplier || ''}
-            placeholder="Who it was bought or leased from"
-            maxLength={255}
-            onChange={(supplier) => onChange({ supplier })}
-          />
-          <TextField
-            label="Invoice / PO Number"
-            value={formData.invoiceNumber || ''}
-            placeholder="e.g. INV-2026-00412"
-            maxLength={128}
-            onChange={(invoiceNumber) => onChange({ invoiceNumber })}
-          />
           {!hideLocation && (
             <TextField
               label="Location within Branch"
@@ -197,36 +172,6 @@ export const AssetExtendedFields: React.FC<AssetExtendedFieldsProps> = ({ formDa
               )}
             </select>
           </div>
-
-          <div>
-            <label htmlFor={ownershipId} className={LABEL_CLASS}>Ownership</label>
-            <select
-              id={ownershipId}
-              value={ownership}
-              onChange={(e) => {
-                const ownershipType = e.target.value as Asset['ownershipType'];
-                onChange(ownershipType === 'LEASED' ? { ownershipType } : { ownershipType, leaseEndDate: '' });
-              }}
-              className={`${INPUT_CLASS} cursor-pointer`}
-            >
-              {OWNERSHIP_TYPES.map((type) => (
-                <option key={type} value={type}>{OWNERSHIP_LABELS[type]}</option>
-              ))}
-            </select>
-          </div>
-
-          {ownership === 'LEASED' && (
-            <div>
-              <label htmlFor={leaseEndId} className={LABEL_CLASS}>Lease End Date</label>
-              <input
-                id={leaseEndId}
-                type="date"
-                value={formData.leaseEndDate || ''}
-                onChange={(e) => onChange({ leaseEndDate: e.target.value })}
-                className={`${INPUT_CLASS} font-mono`}
-              />
-            </div>
-          )}
         </div>
       </div>
 
