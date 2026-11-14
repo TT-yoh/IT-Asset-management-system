@@ -54,11 +54,26 @@ async function requestAssetTag(reserve: boolean, categoryId?: string, categoryNa
   }
 }
 
-/** Shown in place of the branch picker while the asset is checked out to someone. */
-const AssignedLocationNote: React.FC<{ userName: string }> = ({ userName }) => (
-  <div className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-300 text-xs">
-    With <strong className="text-slate-100">{userName}</strong>. Located where they are based.
-  </div>
+/** Read-only branch shown in place of the branch picker while the asset is with someone. */
+const AssignedLocationNote: React.FC<{
+  userName: string;
+  branchName?: string | null;
+  fallbackBranchName?: string;
+  /** False when the person is not in the loaded user list, so their branch is unknown. */
+  personKnown: boolean;
+}> = ({ userName, branchName, fallbackBranchName, personKnown }) => (
+  <>
+    <div className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-200 text-xs">
+      {branchName || fallbackBranchName || 'No branch'}
+    </div>
+    <p className="text-[10px] text-slate-400 mt-0.5">
+      {branchName
+        ? `Taken from ${userName}.`
+        : personKnown
+          ? `${userName} has no branch set, so it stays at ${fallbackBranchName || 'its current branch'}. Set one for them under Users.`
+          : `With ${userName}.`}
+    </p>
+  </>
 );
 
 interface AssetUpsertModalProps {
@@ -105,14 +120,19 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
   const lockedAssigneeName = editingAsset?.assignedToUserId
     ? (editingAsset.assignedToUserName || 'a user')
     : null;
-  // The person the asset is with (being assigned now, or already). Their department is the asset's.
-  const departmentOwner: User | null = selectedAssignee
+  // The person the asset is with (being assigned now, or already). Their department and branch are the asset's.
+  const assignedPerson: User | null = selectedAssignee
     || (editingAsset?.assignedToUserId ? users.find(u => u.id === editingAsset.assignedToUserId) : undefined)
     || null;
 
   // An asset that is with a person is wherever that person is based, so its own
   // branch and location are only asked for while it is unassigned.
   const assignedUserName = lockedAssigneeName || selectedAssignee?.fullName || null;
+  // The assigned person's branch, when it is one this org knows. (Branch managers only see
+  // people in their own branch, so for them this is always their branch.)
+  const assignedPersonBranch = assignedPerson
+    ? branches.find(b => b.id === assignedPerson.branchId)
+    : undefined;
   const [showAdvancedFields, setShowAdvancedFields] = useState<boolean>(true);
 
   const [formData, setFormData] = useState<Partial<Asset>>({
@@ -513,11 +533,8 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
       return;
     }
 
-    // An assigned asset belongs to the branch its person is based at (branch managers stay in their own).
-    const assigneeBranch = selectedAssignee && currentUser?.role !== 'BRANCH_MANAGER'
-      ? branches.find(b => b.id === selectedAssignee.branchId)
-      : undefined;
-    const branch = assigneeBranch || branches.find(b => b.id === formData.branchId) || branches[0];
+    // An assigned asset belongs to the branch its person is based at.
+    const branch = assignedPersonBranch || branches.find(b => b.id === formData.branchId) || branches[0];
     const category = categories.find(c => c.id === formData.categoryId) || categories[0];
     // Branches arrive with the first data load, which can take a few seconds on a slow
     // connection. Without this check, saving before then crashed the form.
@@ -583,8 +600,8 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
       invoiceNumber: formData.invoiceNumber?.trim() || '',
       locationDetail: formData.locationDetail?.trim() || '',
       // The owning department is only ever the assigned user's; an unassigned asset has none.
-      departmentId: departmentOwner?.departmentId || '',
-      departmentName: departmentOwner?.departmentName || '',
+      departmentId: assignedPerson?.departmentId || '',
+      departmentName: assignedPerson?.departmentName || '',
       ownershipType: formData.ownershipType || 'OWNED',
       leaseEndDate: formData.ownershipType === 'LEASED' ? (formData.leaseEndDate || '') : '',
       specs: sanitizeSpecs(category.id, category.name, formData.specs) || {}
@@ -893,7 +910,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                         Operating Branch Location
                       </label>
                       {assignedUserName ? (
-                        <AssignedLocationNote userName={assignedUserName} />
+                        <AssignedLocationNote userName={assignedUserName} branchName={assignedPersonBranch?.name} fallbackBranchName={formData.branchName} personKnown={Boolean(assignedPerson)} />
                       ) : currentUser?.role === 'BRANCH_MANAGER' ? (
                         <div className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-emerald-400 font-mono text-xs font-semibold">
                           {currentUser.branchName || formData.branchName || 'Assigned Branch'}
@@ -1343,7 +1360,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                   <div>
                     <label className="block text-slate-300 font-semibold mb-1">Branch Facility</label>
                     {assignedUserName ? (
-                      <AssignedLocationNote userName={assignedUserName} />
+                      <AssignedLocationNote userName={assignedUserName} branchName={assignedPersonBranch?.name} fallbackBranchName={formData.branchName} personKnown={Boolean(assignedPerson)} />
                     ) : currentUser?.role === 'BRANCH_MANAGER' ? (
                       <div className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-emerald-400 font-mono text-xs font-semibold">
                         {currentUser.branchName || formData.branchName || 'Assigned Branch'}
@@ -1572,8 +1589,8 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                   onChange: setAssigneeId,
                   lockedToName: lockedAssigneeName ? `With ${lockedAssigneeName}` : null
                 } : undefined}
-                departmentFromUser={departmentOwner
-                  ? { userName: departmentOwner.fullName, departmentName: departmentOwner.departmentName || '' }
+                departmentFromUser={assignedPerson
+                  ? { userName: assignedPerson.fullName, departmentName: assignedPerson.departmentName || '' }
                   : null}
                 onChange={(patch) => setFormData(prev => ({ ...prev, ...patch }))}
               />
