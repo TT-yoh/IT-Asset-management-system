@@ -54,6 +54,13 @@ async function requestAssetTag(reserve: boolean, categoryId?: string, categoryNa
   }
 }
 
+/** Shown in place of the branch picker while the asset is checked out to someone. */
+const AssignedLocationNote: React.FC<{ userName: string }> = ({ userName }) => (
+  <div className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-300 text-xs">
+    With <strong className="text-slate-100">{userName}</strong>. Located where they are based.
+  </div>
+);
+
 interface AssetUpsertModalProps {
   isOpen: boolean;
   editingAsset: Asset | null;
@@ -82,6 +89,11 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
   onSave
 }) => {
   const [activeStep, setActiveStep] = useState<number>(1);
+  // An asset that is checked out to a person is wherever that person is based, so its
+  // own branch and location are only asked for while it is unassigned.
+  const assignedUserName = editingAsset?.assignedToUserId
+    ? (editingAsset.assignedToUserName || 'a user')
+    : null;
   const [showAdvancedFields, setShowAdvancedFields] = useState<boolean>(true);
 
   const [formData, setFormData] = useState<Partial<Asset>>({
@@ -849,7 +861,9 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                       <label className="block text-slate-300 font-semibold mb-1">
                         Operating Branch Location
                       </label>
-                      {currentUser?.role === 'BRANCH_MANAGER' ? (
+                      {assignedUserName ? (
+                        <AssignedLocationNote userName={assignedUserName} />
+                      ) : currentUser?.role === 'BRANCH_MANAGER' ? (
                         <div className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-emerald-400 font-mono text-xs font-semibold">
                           {currentUser.branchName || formData.branchName || 'Assigned Branch'}
                         </div>
@@ -1297,7 +1311,9 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-slate-300 font-semibold mb-1">Branch Facility</label>
-                    {currentUser?.role === 'BRANCH_MANAGER' ? (
+                    {assignedUserName ? (
+                      <AssignedLocationNote userName={assignedUserName} />
+                    ) : currentUser?.role === 'BRANCH_MANAGER' ? (
                       <div className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-emerald-400 font-mono text-xs font-semibold">
                         {currentUser.branchName || formData.branchName || 'Assigned Branch'}
                       </div>
@@ -1495,63 +1511,14 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
               <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80 space-y-3">
                 <div className="flex items-center gap-2 text-slate-300 font-semibold text-xs border-b border-slate-800/60 pb-2">
                   <Cpu className="w-4 h-4 text-emerald-400" />
-                  <span>4. Technical Specifications, Specs &amp; Network</span>
+                  <span>4. Notes &amp; Specifications</span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* MAC address and IMEI live in section 1, shown only for the device types that have them. */}
+                <div className="grid grid-cols-1 gap-3">
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Network MAC Address</label>
-                    <input
-                      type="text"
-                      value={formData.macAddress || ''}
-                      onChange={(e) => setFormData({ ...formData, macAddress: e.target.value })}
-                      placeholder="00:1A:2B:3C:4D:5E"
-                      className={`w-full px-3 py-2 bg-slate-900 border rounded-xl font-mono text-slate-100 focus:outline-none transition ${
-                        redundancyCheck.macConflict
-                          ? 'border-rose-500/80 bg-rose-950/20 focus:border-rose-400'
-                          : 'border-slate-700 focus:border-emerald-500'
-                      }`}
-                    />
-                    {redundancyCheck.macConflict ? (
-                      <div className="mt-1.5 p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] flex items-center gap-1.5">
-                        <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                        <span>
-                          MAC in use by <strong>{redundancyCheck.macConflict.name}</strong> ({redundancyCheck.macConflict.assetCode}).
-                        </span>
-                      </div>
-                    ) : (
-                      <p className="text-[10px] text-slate-400 mt-0.5">Physical Wi-Fi or Ethernet MAC address.</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1">IMEI / Cellular Identifier</label>
-                    <input
-                      type="text"
-                      value={formData.imeiNumber || ''}
-                      onChange={(e) => setFormData({ ...formData, imeiNumber: e.target.value })}
-                      placeholder="e.g. 354892091234567"
-                      className={`w-full px-3 py-2 bg-slate-900 border rounded-xl font-mono text-slate-100 focus:outline-none transition ${
-                        redundancyCheck.imeiConflict
-                          ? 'border-rose-500/80 bg-rose-950/20 focus:border-rose-400'
-                          : 'border-slate-700 focus:border-emerald-500'
-                      }`}
-                    />
-                    {redundancyCheck.imeiConflict ? (
-                      <div className="mt-1.5 p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] flex items-center gap-1.5">
-                        <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                        <span>
-                          IMEI in use by <strong>{redundancyCheck.imeiConflict.name}</strong> ({redundancyCheck.imeiConflict.assetCode}).
-                        </span>
-                      </div>
-                    ) : (
-                      <p className="text-[10px] text-slate-400 mt-0.5">For cellular LTE laptops, tablets, or phones.</p>
-                    )}
-                  </div>
-
-                  <div className="sm:col-span-2">
                     <label className="block text-slate-300 font-semibold mb-1">
-                      Specifications &amp; Hardware Telemetry (CPU, RAM, SSD, Ports)
+                      Notes &amp; specifications
                     </label>
                     <textarea
                       rows={3}
@@ -1568,6 +1535,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
               <AssetExtendedFields
                 formData={formData}
                 departments={departments}
+                hideLocation={Boolean(assignedUserName)}
                 onChange={(patch) => setFormData(prev => ({ ...prev, ...patch }))}
               />
 

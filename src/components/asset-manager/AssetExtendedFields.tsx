@@ -21,6 +21,8 @@ interface AssetExtendedFieldsProps {
   formData: Partial<Asset>;
   departments: Department[];
   onChange: (patch: Partial<Asset>) => void;
+  /** Hide "Location within Branch" while the asset is with a user (it is wherever they are based). */
+  hideLocation?: boolean;
 }
 
 const TextField: React.FC<{
@@ -118,7 +120,7 @@ const SpecField: React.FC<{
  * sourcing and ownership (every device) and the device-specific details that
  * depend on the selected category.
  */
-export const AssetExtendedFields: React.FC<AssetExtendedFieldsProps> = ({ formData, departments, onChange }) => {
+export const AssetExtendedFields: React.FC<AssetExtendedFieldsProps> = ({ formData, departments, onChange, hideLocation = false }) => {
   const ownershipId = useId();
   const leaseEndId = useId();
   const departmentId = useId();
@@ -164,13 +166,15 @@ export const AssetExtendedFields: React.FC<AssetExtendedFieldsProps> = ({ formDa
             maxLength={128}
             onChange={(invoiceNumber) => onChange({ invoiceNumber })}
           />
-          <TextField
-            label="Location within Branch"
-            value={formData.locationDetail || ''}
-            placeholder="e.g. 2nd floor, Finance, desk 14"
-            maxLength={255}
-            onChange={(locationDetail) => onChange({ locationDetail })}
-          />
+          {!hideLocation && (
+            <TextField
+              label="Location within Branch"
+              value={formData.locationDetail || ''}
+              placeholder="e.g. 2nd floor, Finance, desk 14"
+              maxLength={255}
+              onChange={(locationDetail) => onChange({ locationDetail })}
+            />
+          )}
 
           <div>
             <label htmlFor={departmentId} className={LABEL_CLASS}>Owning Department</label>
