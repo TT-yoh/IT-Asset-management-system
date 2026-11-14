@@ -9,7 +9,7 @@
     "start": "cross-env NODE_ENV=production tsx server/index.ts",
     "build": "cross-env NODE_ENV=production vite build && node scripts/verify-client-bundle.mjs && node scripts/build-server.mjs",
     "preview": "cross-env NODE_ENV=production vite preview",
-    "clean": "rm -rf dist api/index.js",
+    "clean": "rm -rf dist api/_server.js",
     "test:stress": "cross-env NODE_ENV=test tsx tests/stress-test.ts",
     "lint": "cross-env NODE_ENV=development tsc --noEmit && cross-env NODE_ENV=development tsc --noEmit -p tsconfig.server.json",
     "test:config": "cross-env NODE_ENV=test tsx tests/config-validation.test.ts",

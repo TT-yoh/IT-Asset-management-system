@@ -8,13 +8,13 @@ async function buildServer() {
     platform: 'node',
     target: 'node18',
     format: 'esm',
-    outfile: 'api/index.js',
+    outfile: 'api/_server.js',
     banner: {
       js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);"
     },
     external: ['mysql2', 'bcryptjs']
   });
-  console.log('Server bundle generated at api/index.js successfully!');
+  console.log('Server bundle generated at api/_server.js successfully!');
 }
 
 buildServer().catch(err => {
