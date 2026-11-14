@@ -144,8 +144,9 @@ export const AssetExtendedFields: React.FC<AssetExtendedFieldsProps> = ({ formDa
                   >
                     <option value="">Nobody (kept at the branch)</option>
                     {assignment.users.map((u) => (
-                      <option key={u.id} value={u.id}>
+                      <option key={u.id} value={u.id} disabled={u.status === 'SUSPENDED'}>
                         {u.fullName}{u.branchName ? ` (${u.branchName})` : ''}
+                        {u.status === 'INVITED' ? ' – invited' : u.status === 'SUSPENDED' ? ' – suspended' : ''}
                       </option>
                     ))}
                   </select>
@@ -153,7 +154,7 @@ export const AssetExtendedFields: React.FC<AssetExtendedFieldsProps> = ({ formDa
                     {assignment.selectedUserId
                       ? 'It will be checked out to this person when you save.'
                       : assignment.users.length === 0
-                        ? 'No active users yet. Add people under Users to assign devices to them.'
+                        ? 'No staff yet. Add people under Users to assign devices to them.'
                         : 'Pick one of your users, or leave it at the branch.'}
                   </p>
                 </>

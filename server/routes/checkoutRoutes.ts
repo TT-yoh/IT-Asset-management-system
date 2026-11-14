@@ -107,7 +107,9 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), idempotent(), as
       return;
     }
     const targetUser = targetUsers[0]!;
-    if (targetUser.status !== 'ACTIVE') {
+    // Equipment can be issued to active staff and to invited staff who have not logged in yet;
+    // suspended accounts cannot receive it.
+    if (targetUser.status !== 'ACTIVE' && targetUser.status !== 'INVITED') {
       res.status(409).json({
         error: `Cannot assign equipment to user with status "${targetUser.status}".`,
         code: 'USER_NOT_ACTIVE'

@@ -112,11 +112,11 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
 
   // Admins and managers can assign; branch managers only to people in their own branch.
   const canAssign = Boolean(currentUser && currentUser.role !== 'USER');
+  // Everyone in the Staff & User Directory. Suspended people are listed but cannot be picked.
   const assignableUsers = useMemo(() => users
-    .filter(u => (u.status || 'ACTIVE') === 'ACTIVE')
     .filter(u => currentUser?.role !== 'BRANCH_MANAGER' || u.branchId === currentUser.branchId)
     .sort((a, b) => a.fullName.localeCompare(b.fullName)), [users, currentUser]);
-  const selectedAssignee = assignableUsers.find(u => u.id === assigneeId) || null;
+  const selectedAssignee = assignableUsers.find(u => u.id === assigneeId && u.status !== 'SUSPENDED') || null;
   const lockedAssigneeName = editingAsset?.assignedToUserId
     ? (editingAsset.assignedToUserName || 'a user')
     : null;
