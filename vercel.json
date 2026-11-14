@@ -1,6 +1,7 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "regions": ["sin1"],
   "functions": {
     "api/index.js": {
       "regions": ["sin1"],

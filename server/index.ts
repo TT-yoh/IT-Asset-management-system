@@ -140,6 +140,7 @@ app.use(csrfProtection);
 app.get(config.ALLOW_ROOT_ROUTES ? ['/api/health', '/health'] : ['/api/health'], (_req: Request, res: Response) => {
   res.json({
     status: 'healthy',
+    region: process.env.VERCEL_REGION || 'local',
     timestamp: new Date().toISOString()
   });
 });
