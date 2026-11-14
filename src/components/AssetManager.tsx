@@ -105,8 +105,13 @@ export interface AssetManagerProps {
   categories: AssetCategory[];
   assets: Asset[];
   currentUser: User;
-  onAddAsset: (newAsset: Asset) => void;
-  onUpdateAsset?: (updatedAsset: Asset) => void;
+  /** May resolve false when the server refused the asset. */
+  onAddAsset: (newAsset: Asset) => void | Promise<boolean | void>;
+  onUpdateAsset?: (updatedAsset: Asset) => void | Promise<boolean | void>;
+  /** People the add/edit form can assign an asset to. */
+  users?: User[];
+  /** Check a just-saved asset out to a person. */
+  onAssignAsset?: (asset: Asset, user: User) => void | Promise<void>;
   onDeleteAsset?: (assetId: string) => void;
   onBulkAddAssets?: (newAssets: Asset[]) => Promise<BulkImportResult | null> | void;
   onBatchUpdateStatus?: (assetIds: string[], status: AssetStatus, reason?: string) => void;
@@ -135,6 +140,8 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
   currentUser,
   onAddAsset,
   onUpdateAsset,
+  users = [],
+  onAssignAsset,
   onDeleteAsset,
   onBulkAddAssets,
   onBatchUpdateStatus,
@@ -792,16 +799,19 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
         departments={departments}
         currentOrg={currentOrg}
         currentUser={currentUser}
+        users={onAssignAsset ? users : []}
         onClose={() => {
           setIsUpsertOpen(false);
           setEditingAsset(null);
           setPrefilledTag('');
         }}
-        onSave={(ast) => {
-          if (editingAsset && onUpdateAsset) {
-            onUpdateAsset(ast);
-          } else {
-            onAddAsset(ast);
+        onSave={async (ast, assignTo) => {
+          const saved = editingAsset && onUpdateAsset
+            ? await onUpdateAsset(ast)
+            : await onAddAsset(ast);
+          // Check it out only once the asset itself is stored; a refused save has nothing to assign.
+          if (assignTo && saved !== false && onAssignAsset) {
+            await onAssignAsset(ast, assignTo);
           }
         }}
       />

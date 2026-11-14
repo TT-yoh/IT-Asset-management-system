@@ -71,8 +71,11 @@ interface AssetUpsertModalProps {
   departments?: Department[];
   currentOrg: Organization;
   currentUser?: User;
+  /** People the asset can be assigned to from the form. */
+  users?: User[];
   onClose: () => void;
-  onSave: (asset: Asset) => void;
+  /** `assignTo` is set when the asset should be checked out to that person once saved. */
+  onSave: (asset: Asset, assignTo?: User) => void;
 }
 
 export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
@@ -85,15 +88,31 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
   departments = [],
   currentOrg,
   currentUser,
+  users = [],
   onClose,
   onSave
 }) => {
   const [activeStep, setActiveStep] = useState<number>(1);
-  // An asset that is checked out to a person is wherever that person is based, so its
-  // own branch and location are only asked for while it is unassigned.
-  const assignedUserName = editingAsset?.assignedToUserId
+  const [assigneeId, setAssigneeId] = useState<string>('');
+
+  // Admins and managers can assign; branch managers only to people in their own branch.
+  const canAssign = Boolean(currentUser && currentUser.role !== 'USER');
+  const assignableUsers = useMemo(() => users
+    .filter(u => (u.status || 'ACTIVE') === 'ACTIVE')
+    .filter(u => currentUser?.role !== 'BRANCH_MANAGER' || u.branchId === currentUser.branchId)
+    .sort((a, b) => a.fullName.localeCompare(b.fullName)), [users, currentUser]);
+  const selectedAssignee = assignableUsers.find(u => u.id === assigneeId) || null;
+  const lockedAssigneeName = editingAsset?.assignedToUserId
     ? (editingAsset.assignedToUserName || 'a user')
     : null;
+  // The person the asset is with (being assigned now, or already). Their department is the asset's.
+  const departmentOwner: User | null = selectedAssignee
+    || (editingAsset?.assignedToUserId ? users.find(u => u.id === editingAsset.assignedToUserId) : undefined)
+    || null;
+
+  // An asset that is with a person is wherever that person is based, so its own
+  // branch and location are only asked for while it is unassigned.
+  const assignedUserName = lockedAssigneeName || selectedAssignee?.fullName || null;
   const [showAdvancedFields, setShowAdvancedFields] = useState<boolean>(true);
 
   const [formData, setFormData] = useState<Partial<Asset>>({
@@ -324,6 +343,7 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
       });
     }
     setActiveStep(1);
+    setAssigneeId('');
     setSuggestedCost(null);
     setAiSuccessMessage('');
     setFormError('');
@@ -488,7 +508,16 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
       return;
     }
 
-    const branch = branches.find(b => b.id === formData.branchId) || branches[0];
+    if (selectedAssignee && (formData.status || 'ACTIVE') !== 'ACTIVE') {
+      setFormError(`Only an asset with status ACTIVE can be assigned to ${selectedAssignee.fullName}. Change the status, or set "Assigned to" back to Nobody.`);
+      return;
+    }
+
+    // An assigned asset belongs to the branch its person is based at (branch managers stay in their own).
+    const assigneeBranch = selectedAssignee && currentUser?.role !== 'BRANCH_MANAGER'
+      ? branches.find(b => b.id === selectedAssignee.branchId)
+      : undefined;
+    const branch = assigneeBranch || branches.find(b => b.id === formData.branchId) || branches[0];
     const category = categories.find(c => c.id === formData.categoryId) || categories[0];
     // Branches arrive with the first data load, which can take a few seconds on a slow
     // connection. Without this check, saving before then crashed the form.
@@ -523,7 +552,8 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
     }
 
     const payload: Asset = {
-      id: editingAsset?.id || '',
+      // A new asset that is assigned straight away needs its id now, so the checkout can point at it.
+      id: editingAsset?.id || (selectedAssignee ? crypto.randomUUID() : ''),
       orgId: currentOrg.id,
       name: formData.name.trim(),
       model: formData.model?.trim() || formData.name.trim(),
@@ -552,14 +582,15 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
       supplier: formData.supplier?.trim() || '',
       invoiceNumber: formData.invoiceNumber?.trim() || '',
       locationDetail: formData.locationDetail?.trim() || '',
-      departmentId: formData.departmentId || '',
-      departmentName: formData.departmentName || '',
+      // The owning department is only ever the assigned user's; an unassigned asset has none.
+      departmentId: departmentOwner?.departmentId || '',
+      departmentName: departmentOwner?.departmentName || '',
       ownershipType: formData.ownershipType || 'OWNED',
       leaseEndDate: formData.ownershipType === 'LEASED' ? (formData.leaseEndDate || '') : '',
       specs: sanitizeSpecs(category.id, category.name, formData.specs) || {}
     };
 
-    onSave(payload);
+    onSave(payload, selectedAssignee || undefined);
     onClose();
   };
 
@@ -1535,7 +1566,15 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
               <AssetExtendedFields
                 formData={formData}
                 departments={departments}
-                hideLocation={Boolean(assignedUserName)}
+                assignment={canAssign ? {
+                  users: assignableUsers,
+                  selectedUserId: assigneeId,
+                  onChange: setAssigneeId,
+                  lockedToName: lockedAssigneeName ? `With ${lockedAssigneeName}` : null
+                } : undefined}
+                departmentFromUser={departmentOwner
+                  ? { userName: departmentOwner.fullName, departmentName: departmentOwner.departmentName || '' }
+                  : null}
                 onChange={(patch) => setFormData(prev => ({ ...prev, ...patch }))}
               />
 

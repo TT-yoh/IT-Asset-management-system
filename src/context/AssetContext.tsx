@@ -50,8 +50,9 @@ interface AssetContextType {
   showTiDBModal: boolean;
   setShowTiDBModal: (show: boolean) => void;
   refreshAppData: () => Promise<void>;
-  handleAddAsset: (newAst: Asset) => Promise<void>;
-  handleUpdateAsset: (updatedAst: Asset) => Promise<void>;
+  /** Resolves true once the server has saved the asset, false if it was refused. */
+  handleAddAsset: (newAst: Asset) => Promise<boolean>;
+  handleUpdateAsset: (updatedAst: Asset) => Promise<boolean>;
   handleDeleteAsset: (astId: string) => Promise<void>;
   /** Create (no existing) or update a budget. Resolves true when the server saved it. */
   handleSaveBudget: (input: BudgetInput, existing?: BudgetAllocation) => Promise<boolean>;
@@ -419,7 +420,7 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       // Tell the user now (the notification bell alone is easy to miss) and stop here
       // rather than rethrowing into a click handler that nothing catches.
       toast(`${newAst.assetCode || 'The asset'} was not saved: ${message}`, 'error');
-      return;
+      return false;
     }
 
     addNotification({
@@ -429,6 +430,7 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       message: `${newAst.name} (${newAst.assetCode}) added to ${newAst.branchName}.`,
       read: false
     });
+    return true;
   };
 
   const handleUpdateAsset = async (updatedAst: Asset) => {
@@ -442,7 +444,9 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setAssets(assets);
       toast(`Changes to ${updatedAst.assetCode || 'the asset'} were not saved: ${err?.message || 'the server refused them.'}`, 'error');
       await refreshAppData();
+      return false;
     }
+    return true;
   };
 
   // Budget Pipelines: saved on the server first, then reloaded (no optimistic rows, so a

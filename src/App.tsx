@@ -28,6 +28,7 @@ import {
   useAssets
 } from './context';
 import { Asset } from './types';
+import { CheckoutService } from './lib/checkout-service';
 
 const VALID_TABS: NavTab[] = ['dashboard', 'assets', 'checkout', 'repair', 'branches', 'users', 'reports', 'budget', 'audit'];
 
@@ -398,6 +399,18 @@ function AppShell() {
               currentUser={currentUser}
               onAddAsset={handleAddAsset}
               onUpdateAsset={handleUpdateAsset}
+              users={filteredUsers}
+              onAssignAsset={(ast: Asset, user) => {
+                // Same path as an assignment made on the Checkouts page: a checkout record plus audit entry.
+                const { checkout, updatedAsset } = CheckoutService.checkoutAsset({
+                  asset: ast,
+                  user,
+                  adminUser: currentUser,
+                  reason: 'Assigned when the asset was added or edited',
+                  expectedReturnDate: ''
+                });
+                return handleNewCheckout(checkout, updatedAsset);
+              }}
               onDeleteAsset={handleDeleteAsset}
               onBulkAddAssets={handleBulkAddAssets}
               onBatchUpdateStatus={handleBatchUpdateStatus}

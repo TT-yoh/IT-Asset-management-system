@@ -1,6 +1,6 @@
 import React, { useId } from 'react';
 import { Building2, ClipboardList } from 'lucide-react';
-import { Asset, Department } from '../../types';
+import { Asset, Department, User } from '../../types';
 import {
   AssetSpecs,
   AssetSpecValue,
@@ -20,33 +20,17 @@ interface AssetExtendedFieldsProps {
   formData: Partial<Asset>;
   departments: Department[];
   onChange: (patch: Partial<Asset>) => void;
-  /** Hide "Location within Branch" while the asset is with a user (it is wherever they are based). */
-  hideLocation?: boolean;
+  /** "Assigned to" picker. Omitted for people who cannot assign equipment. */
+  assignment?: {
+    users: User[];
+    selectedUserId: string;
+    onChange: (userId: string) => void;
+    /** Set when the asset is already checked out: shown as text, changed via the Checkouts page. */
+    lockedToName?: string | null;
+  };
+  /** Set while the asset is with a person: its department is theirs and is shown read-only. */
+  departmentFromUser?: { userName: string; departmentName: string } | null;
 }
-
-const TextField: React.FC<{
-  label: string;
-  value: string;
-  placeholder?: string;
-  maxLength: number;
-  onChange: (value: string) => void;
-}> = ({ label, value, placeholder, maxLength, onChange }) => {
-  const id = useId();
-  return (
-    <div>
-      <label htmlFor={id} className={LABEL_CLASS}>{label}</label>
-      <input
-        id={id}
-        type="text"
-        value={value}
-        maxLength={maxLength}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className={INPUT_CLASS}
-      />
-    </div>
-  );
-};
 
 const SpecField: React.FC<{
   def: SpecFieldDef;
@@ -119,11 +103,11 @@ const SpecField: React.FC<{
  * location and department (every device) and the device-specific details that
  * depend on the selected category.
  */
-export const AssetExtendedFields: React.FC<AssetExtendedFieldsProps> = ({ formData, departments, onChange, hideLocation = false }) => {
+export const AssetExtendedFields: React.FC<AssetExtendedFieldsProps> = ({ formData, departments, onChange, assignment, departmentFromUser }) => {
+  const assigneeId = useId();
   const departmentId = useId();
   const specFields = specFieldsForCategory(formData.categoryId, formData.categoryName);
   const specs: AssetSpecs = formData.specs || {};
-  const activeDepartments = departments.filter((d) => !(d as any).archivedAt);
 
   const setSpec = (key: string, value: AssetSpecValue | undefined) => {
     const next: AssetSpecs = { ...specs };
@@ -137,40 +121,59 @@ export const AssetExtendedFields: React.FC<AssetExtendedFieldsProps> = ({ formDa
       <div className={SECTION_CLASS}>
         <div className={SECTION_TITLE_CLASS}>
           <Building2 className="w-4 h-4 text-emerald-400" aria-hidden="true" />
-          <span>Location &amp; Department</span>
+          <span>Assignment &amp; Department</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {!hideLocation && (
-            <TextField
-              label="Location within Branch"
-              value={formData.locationDetail || ''}
-              placeholder="e.g. 2nd floor, Finance, desk 14"
-              maxLength={255}
-              onChange={(locationDetail) => onChange({ locationDetail })}
-            />
+          {/* "Assigned to" takes the place of the old free-text "Location within Branch":
+              a device is either with one of the system's users or kept at its branch. */}
+          {assignment && (
+            <div>
+              <label htmlFor={assigneeId} className={LABEL_CLASS}>Assigned to</label>
+              {assignment.lockedToName ? (
+                <div className={`${INPUT_CLASS} text-slate-300 text-xs`}>
+                  {assignment.lockedToName}. To give it to someone else, return it on the Checkouts page first.
+                </div>
+              ) : (
+                <>
+                  <select
+                    id={assigneeId}
+                    value={assignment.selectedUserId}
+                    onChange={(e) => assignment.onChange(e.target.value)}
+                    className={`${INPUT_CLASS} cursor-pointer`}
+                  >
+                    <option value="">Nobody (kept at the branch)</option>
+                    {assignment.users.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.fullName}{u.branchName ? ` (${u.branchName})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    {assignment.selectedUserId
+                      ? 'It will be checked out to this person when you save.'
+                      : assignment.users.length === 0
+                        ? 'No active users yet. Add people under Users to assign devices to them.'
+                        : 'Pick one of your users, or leave it at the branch.'}
+                  </p>
+                </>
+              )}
+            </div>
           )}
 
           <div>
             <label htmlFor={departmentId} className={LABEL_CLASS}>Owning Department</label>
-            <select
-              id={departmentId}
-              value={formData.departmentId || ''}
-              onChange={(e) => {
-                const dept = activeDepartments.find((d) => d.id === e.target.value);
-                onChange({ departmentId: dept?.id || '', departmentName: dept?.name || '' });
-              }}
-              className={`${INPUT_CLASS} cursor-pointer`}
-            >
-              <option value="">No department</option>
-              {activeDepartments.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-              {/* Keep showing a department that has since been archived or is not in the loaded list. */}
-              {formData.departmentId && !activeDepartments.some((d) => d.id === formData.departmentId) && (
-                <option value={formData.departmentId}>{formData.departmentName || 'Current department'}</option>
-              )}
-            </select>
+            {/* Read-only: the department always comes from the user the asset is assigned to. */}
+            <div id={departmentId} className={`${INPUT_CLASS} text-slate-200`}>
+              {departmentFromUser?.departmentName || 'No department'}
+            </div>
+            <p className="text-[10px] text-slate-400 mt-0.5">
+              {!departmentFromUser
+                ? 'Comes from the user it is assigned to.'
+                : departmentFromUser.departmentName
+                  ? `Taken from ${departmentFromUser.userName}.`
+                  : `${departmentFromUser.userName} has no department. Set one for them under Users.`}
+            </p>
           </div>
         </div>
       </div>
