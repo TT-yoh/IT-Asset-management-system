@@ -604,7 +604,10 @@ export const AssetUpsertModal: React.FC<AssetUpsertModalProps> = ({
       departmentName: assignedPerson?.departmentName || '',
       ownershipType: formData.ownershipType || 'OWNED',
       leaseEndDate: formData.ownershipType === 'LEASED' ? (formData.leaseEndDate || '') : '',
-      specs: sanitizeSpecs(category.id, category.name, formData.specs) || {}
+      specs: sanitizeSpecs(category.id, category.name, formData.specs) || {},
+      // The server refuses an edit unless it names the version it was based on. Leaving this
+      // out made every save default to version 1, so any asset edited before was locked.
+      version: editingAsset?.version
     };
 
     onSave(payload, selectedAssignee || undefined);
