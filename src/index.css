@@ -69,12 +69,15 @@ body {
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    /* Must end on `none`: any retained transform makes this wrapper the
+       containing block for position:fixed modals inside the tab, pinning them
+       to the top of the scrolled content instead of the viewport. */
+    transform: none;
   }
 }
 
 .animate-fadeIn {
-  animation: fadeIn 0.16s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: fadeIn 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 html {
