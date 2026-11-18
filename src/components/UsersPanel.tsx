@@ -721,18 +721,16 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
               <tr className="bg-slate-950/60 border-b border-slate-800 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                 <th className="py-3 px-4">Operator / Staff</th>
                 <th className="py-3 px-4">Corporate Role</th>
-                <th className="py-3 px-4">Branch Facility</th>
-                <th className="py-3 px-4">Department</th>
+                <th className="py-3 px-4">Branch / Department</th>
                 <th className="py-3 px-4">Custody Assets</th>
-                <th className="py-3 px-4">Security / 2FA</th>
-                <th className="py-3 px-4">Status</th>
+                <th className="py-3 px-4">Status / 2FA</th>
                 <th className="py-3 px-4 text-right">Admin Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
               {filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-500 text-xs">
+                  <td colSpan={6} className="py-12 text-center text-slate-500 text-xs">
                     No staff members match the specified filters.
                   </td>
                 </tr>
@@ -760,7 +758,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                               isSuspended ? 'border-rose-500/40 grayscale' : 'border-slate-700'
                             }`}
                           />
-                          <div>
+                          <div className="min-w-0">
                             <div className="font-bold text-slate-100 flex items-center gap-1.5">
                               <span className={isSuspended ? 'line-through text-slate-400' : ''}>
                                 {user.fullName}
@@ -771,7 +769,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                                 </span>
                               )}
                             </div>
-                            <span className="text-[11px] text-slate-400 font-mono block">
+                            <span className="text-[11px] text-slate-400 font-mono block break-all">
                               {user.email}
                             </span>
                           </div>
@@ -785,17 +783,15 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                         </span>
                       </td>
 
-                      {/* Branch */}
+                      {/* Branch & Department */}
                       <td className="py-3 px-4 text-slate-300">
                         <div className="flex items-center gap-1.5">
                           <MapPin className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                           <span>{user.branchName}</span>
                         </div>
-                      </td>
-
-                      {/* Department */}
-                      <td className="py-3 px-4 text-slate-400">
-                        {user.departmentName}
+                        {user.departmentName && (
+                          <div className="text-[10px] text-slate-500 mt-0.5 pl-5">{user.departmentName}</div>
+                        )}
                       </td>
 
                       {/* Hardware in Custody */}
@@ -808,20 +804,8 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                         </div>
                       </td>
 
-                      {/* Security / 2FA */}
-                      <td className="py-3 px-4">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold flex items-center gap-1 w-fit ${
-                          user.twoFactorEnabled 
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                            : 'bg-slate-800 text-slate-400'
-                        }`}>
-                          <Lock className="w-3 h-3" />
-                          <span>{user.twoFactorEnabled ? '2FA ON' : 'Standard'}</span>
-                        </span>
-                      </td>
-
-                      {/* Status */}
-                      <td className="py-3 px-4">
+                      {/* Status & Security / 2FA */}
+                      <td className="py-3 px-4 space-y-1">
                         {isInvited ? (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center gap-1 w-fit">
                             <Clock className="w-3 h-3" />
@@ -838,6 +822,14 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                             <span>ACTIVE</span>
                           </span>
                         )}
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold flex items-center gap-1 w-fit ${
+                          user.twoFactorEnabled
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-slate-800 text-slate-400'
+                        }`}>
+                          <Lock className="w-3 h-3" />
+                          <span>{user.twoFactorEnabled ? '2FA ON' : 'Standard'}</span>
+                        </span>
                       </td>
 
                       {/* Actions */}

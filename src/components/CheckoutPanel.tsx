@@ -431,8 +431,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
                   <tr>
                     <th className="p-4">Hardware Asset</th>
                     <th className="p-4">Employee Custody</th>
-                    <th className="p-4">Checkout Date</th>
-                    <th className="p-4">Expected Return</th>
+                    <th className="p-4">Out / Expected Return</th>
                     <th className="p-4">Purpose / Reason</th>
                     <th className="p-4">Status & Action</th>
                   </tr>
@@ -440,7 +439,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
                 <tbody className="divide-y divide-slate-800/80">
                   {filteredCheckouts.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="p-12 text-center text-slate-500 font-mono">
+                      <td colSpan={5} className="p-12 text-center text-slate-500 font-mono">
                         No custody checkout records match active filter query.
                       </td>
                     </tr>
@@ -464,8 +463,8 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
                               <span>{rec.checkedOutToUserName || 'User'}</span>
                             </div>
                           </td>
-                          <td className="p-4 font-mono text-slate-400 text-xs">{rec.checkedOutAt}</td>
                           <td className="p-4 font-mono text-xs">
+                            <div className="text-slate-400 mb-1">{rec.checkedOutAt}</div>
                             {isOverdue ? (
                               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30 whitespace-nowrap">
                                 {rec.expectedReturnDate} • Overdue
@@ -476,7 +475,7 @@ export const CheckoutPanel: React.FC<CheckoutPanelProps> = ({
                               </span>
                             )}
                           </td>
-                          <td className="p-4 truncate max-w-[180px] text-slate-400 text-xs">
+                          <td className="p-4 max-w-[220px] text-slate-400 text-xs break-words">
                             {rec.reason || 'Daily production use'}
                           </td>
                           <td className="p-4">

@@ -237,14 +237,11 @@ export default function ReportsInventoryPage({
           <table className="w-full text-left text-slate-300 text-xs border-collapse">
             <thead>
               <tr className="bg-slate-900/60 border-b border-slate-800 text-slate-400 font-bold">
-                <th className="p-3.5">Code</th>
-                <th className="p-3.5">Asset Name</th>
-                <th className="p-3.5">Category</th>
-                <th className="p-3.5">Branch</th>
+                <th className="p-3.5">Asset</th>
+                <th className="p-3.5">Branch / Category</th>
                 <th className="p-3.5">Condition</th>
                 <th className="p-3.5">Status</th>
-                <th className="p-3.5 text-right">Cost</th>
-                <th className="p-3.5 text-right">Current Value</th>
+                <th className="p-3.5 text-right">Value / Cost</th>
                 <th className="p-3.5">Assigned Custody</th>
               </tr>
             </thead>
@@ -262,13 +259,15 @@ export default function ReportsInventoryPage({
 
                   return (
                     <tr key={asset.id} className="hover:bg-slate-900/40 transition-colors">
-                      <td className="p-3.5 font-mono text-emerald-400 font-bold">{asset.assetCode}</td>
                       <td className="p-3.5 font-bold text-slate-100">
+                        <div className="font-mono text-[11px] text-emerald-400">{asset.assetCode}</div>
                         <div>{asset.name}</div>
                         {asset.model && <div className="text-[10px] text-slate-500 font-normal">{asset.model}</div>}
                       </td>
-                      <td className="p-3.5 text-slate-300 font-medium">{asset.categoryName}</td>
-                      <td className="p-3.5 text-slate-400 text-[11px] leading-tight font-medium">{asset.branchName}</td>
+                      <td className="p-3.5 text-[11px] leading-tight font-medium">
+                        <div className="text-slate-300">{asset.branchName}</div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">{asset.categoryName}</div>
+                      </td>
                       <td className="p-3.5">
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${condColor}`}>
                           {asset.condition}
@@ -279,15 +278,17 @@ export default function ReportsInventoryPage({
                           {asset.status}
                         </span>
                       </td>
-                      <td className="p-3.5 text-right font-mono text-slate-300">${(asset.purchaseCost || 0).toLocaleString()}</td>
-                      <td className="p-3.5 text-right font-mono text-emerald-300 font-bold">${(asset.currentValue || asset.purchaseCost || 0).toLocaleString()}</td>
+                      <td className="p-3.5 text-right font-mono">
+                        <div className="text-emerald-300 font-bold">${(asset.currentValue || asset.purchaseCost || 0).toLocaleString()}</div>
+                        <div className="text-[10px] text-slate-500">Cost: ${(asset.purchaseCost || 0).toLocaleString()}</div>
+                      </td>
                       <td className="p-3.5 text-slate-400">{asset.assignedToUserName || <span className="text-slate-600 font-normal italic">In Storage</span>}</td>
                     </tr>
                   );
                 })
               ) : (
                 <tr>
-                  <td colSpan={9} className="p-8 text-center text-slate-500 font-semibold">
+                  <td colSpan={6} className="p-8 text-center text-slate-500 font-semibold">
                     No physical asset records match your filtered queries.
                   </td>
                 </tr>

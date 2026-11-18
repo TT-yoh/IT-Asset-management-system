@@ -391,12 +391,10 @@ export const MaintenancePanel: React.FC<MaintenancePanelProps> = ({
                   <thead>
                     <tr className="border-b border-slate-800 text-[10px] uppercase font-mono text-slate-400 bg-slate-950/80">
                       <th className="p-3.5">Asset</th>
-                      <th className="p-3.5">Type</th>
+                      <th className="p-3.5">Type / Priority</th>
                       <th className="p-3.5">Status</th>
-                      <th className="p-3.5">Priority</th>
                       <th className="p-3.5">Assigned Tech</th>
-                      <th className="p-3.5">Start Date</th>
-                      <th className="p-3.5">ETA</th>
+                      <th className="p-3.5">Start / ETA</th>
                       <th className="p-3.5 text-right">Actions</th>
                     </tr>
                   </thead>
@@ -419,7 +417,10 @@ export const MaintenancePanel: React.FC<MaintenancePanelProps> = ({
                               </div>
                             </div>
                           </td>
-                          <td className="p-3.5"><span className="bg-slate-800 border border-slate-700 px-2 py-0.5 rounded text-[10px] text-slate-200">{rec.type}</span></td>
+                          <td className="p-3.5">
+                            <span className="bg-slate-800 border border-slate-700 px-2 py-0.5 rounded text-[10px] text-slate-200">{rec.type}</span>
+                            <div className="font-sans font-bold text-[10px] text-slate-400 mt-1">{rec.priority || 'MEDIUM'}</div>
+                          </td>
                           <td className="p-3.5">
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                               rec.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-300' :
@@ -428,11 +429,12 @@ export const MaintenancePanel: React.FC<MaintenancePanelProps> = ({
                               {rec.status}
                             </span>
                           </td>
-                          <td className="p-3.5 font-sans font-bold text-slate-200">{rec.priority || 'MEDIUM'}</td>
                           <td className="p-3.5 font-sans text-emerald-400 truncate max-w-[130px]">{rec.assignedTechnician}</td>
-                          <td className="p-3.5 text-slate-400">{rec.startDate}</td>
-                          <td className={`p-3.5 font-bold ${isOver ? 'text-rose-400' : 'text-slate-300'}`}>
-                            {rec.expectedCompletion} {isOver && '⚠️'}
+                          <td className="p-3.5 text-[11px] whitespace-nowrap">
+                            <div className="text-slate-400">{rec.startDate}</div>
+                            <div className={`font-bold ${isOver ? 'text-rose-400' : 'text-slate-300'}`}>
+                              → {rec.expectedCompletion} {isOver && '⚠️'}
+                            </div>
                           </td>
                           <td className="p-3.5 text-right font-sans space-x-2">
                             {rec.status === 'IN_PROGRESS' && (
