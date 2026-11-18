@@ -438,11 +438,23 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     setAssets(updatedAssets);
 
     try {
-      await persistAsset(updatedAst, updatedAssets, true);
+      const newVersion = await persistAsset(updatedAst, updatedAssets, true);
+      // Take the server's new version now: the refresh below is skipped when another save
+      // overlaps it, and a copy left on the old version makes the next edit fail as a conflict.
+      if (newVersion !== undefined) {
+        setAssets(current => current.map(a => (a.id === updatedAst.id ? { ...a, version: newVersion } : a)));
+      }
       await refreshAppData();
     } catch (err: any) {
       setAssets(assets);
-      toast(`Changes to ${updatedAst.assetCode || 'the asset'} were not saved: ${err?.message || 'the server refused them.'}`, 'error');
+      const code = updatedAst.assetCode || 'the asset';
+      const message = String(err?.message || '');
+      toast(
+        /version mismatch/i.test(message)
+          ? `Changes to ${code} were not saved: it was changed elsewhere since you opened it. The latest copy is now loaded. Open it again and redo your change.`
+          : `Changes to ${code} were not saved: ${message || 'the server refused them.'}`,
+        'error'
+      );
       await refreshAppData();
       return false;
     }

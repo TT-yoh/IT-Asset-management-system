@@ -556,7 +556,12 @@ export const loadInitialData = async (orgId?: string, userId?: string): Promise<
 /**
  * Persist an Asset to TiDB via typed REST API.
  */
-export async function persistAsset(asset: Asset, allAssets?: Asset[], isUpdate = false): Promise<boolean> {
+/**
+ * Saves an asset. Resolves to the asset's new version as reported by the server (or
+ * undefined when the server did not say), so callers can keep their copy current even
+ * when the refresh that follows the save is skipped as stale.
+ */
+export async function persistAsset(asset: Asset, allAssets?: Asset[], isUpdate = false): Promise<number | undefined> {
   const row = mapAssetToTiDBRow(asset);
   const method = isUpdate ? 'PUT' : 'POST';
   const url = isUpdate ? `/api/assets/${encodeURIComponent(asset.id)}` : '/api/assets';
@@ -570,7 +575,9 @@ export async function persistAsset(asset: Asset, allAssets?: Asset[], isUpdate =
 
   if (res.ok) {
     updateLastTiDBSyncTime();
-    return true;
+    const body = await res.json().catch(() => null);
+    const version = Number(body?.version);
+    return Number.isFinite(version) && version > 0 ? version : undefined;
   }
 
   if (res.status === 409) {
