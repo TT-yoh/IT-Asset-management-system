@@ -20,6 +20,7 @@ import {
   ArrowRight,
   X
 } from 'lucide-react';
+import { LocationAssetsModal } from './facilities/LocationAssetsModal';
 
 interface FacilitiesPanelProps {
   currentOrg: Organization;
@@ -137,6 +138,26 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
   const orgDepartments = departments.filter(d => d.orgId === currentOrg.id);
   const orgUsers = users.filter(u => u.orgId === currentOrg.id);
   const orgAssets = assets.filter(a => a.orgId === currentOrg.id);
+
+  // One rule each, shared by the card counts and the device list so they always agree:
+  // a facility holds the assets stationed at it; a department holds the assets assigned to
+  // its people (an asset's department comes from the person it is assigned to).
+  const getBranchAssets = (branchId: string) => orgAssets.filter(a => a.branchId === branchId);
+  const getDeptAssets = (deptId: string) => orgAssets.filter(a => {
+    const holder = orgUsers.find(u => u.id === a.assignedToUserId);
+    return holder ? holder.departmentId === deptId : false;
+  });
+
+  // Which facility or department's device list is open (kept as an id so it stays live).
+  const [deviceView, setDeviceView] = useState<{ kind: 'facility' | 'department'; id: string } | null>(null);
+  const openDevices = (kind: 'facility' | 'department', id: string) => setDeviceView({ kind, id });
+  const cardKeyHandler = (kind: 'facility' | 'department', id: string) => (e: React.KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openDevices(kind, id);
+    }
+  };
 
   const filteredBranches = orgBranches.filter(b => {
     if (!searchQuery.trim()) return true;
@@ -494,12 +515,17 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
           ) : (
             filteredBranches.map(branch => {
               const branchStaff = orgUsers.filter(u => u.branchId === branch.id);
-              const branchAssets = orgAssets.filter(a => a.branchId === branch.id);
+              const branchAssets = getBranchAssets(branch.id);
 
               return (
                 <div
                   key={branch.id}
-                  className="bg-slate-900/90 border border-slate-800 hover:border-slate-700/80 rounded-3xl p-5 flex flex-col justify-between transition shadow-md group relative overflow-hidden"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openDevices('facility', branch.id)}
+                  onKeyDown={cardKeyHandler('facility', branch.id)}
+                  title={`View the ${branchAssets.length} device(s) at ${branch.name}`}
+                  className="bg-slate-900/90 border border-slate-800 hover:border-emerald-500/40 focus-visible:outline-none focus-visible:border-emerald-500 rounded-3xl p-5 flex flex-col justify-between transition shadow-md group relative overflow-hidden cursor-pointer"
                 >
                   <div className="space-y-3">
                     <div className="flex items-start justify-between gap-3">
@@ -543,6 +569,7 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
                           <span>Hardware</span>
                         </div>
                         <div className="text-base font-black text-slate-100 mt-0.5">{branchAssets.length}</div>
+                        <div className="text-[10px] text-emerald-400/80 group-hover:text-emerald-400 font-semibold mt-0.5">View devices →</div>
                       </div>
 
                       <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-2.5 text-center">
@@ -557,7 +584,7 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
 
                   {/* Actions Footer */}
                   {isAdmin && (
-                    <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between">
+                    <div onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()} className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between cursor-default">
                       <div className="text-[10px] text-slate-500">
                         ID: <span className="font-mono text-slate-400">{branch.id}</span>
                       </div>
@@ -606,15 +633,17 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
           ) : (
             filteredDepartments.map(dept => {
               const deptStaff = orgUsers.filter(u => u.departmentId === dept.id);
-              const deptAssets = orgAssets.filter(a => {
-                const holder = orgUsers.find(u => u.id === a.assignedToUserId);
-                return holder ? holder.departmentId === dept.id : false;
-              });
+              const deptAssets = getDeptAssets(dept.id);
 
               return (
                 <div
                   key={dept.id}
-                  className="bg-slate-900/90 border border-slate-800 hover:border-slate-700/80 rounded-3xl p-5 flex flex-col justify-between transition shadow-md group relative overflow-hidden"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openDevices('department', dept.id)}
+                  onKeyDown={cardKeyHandler('department', dept.id)}
+                  title={`View the ${deptAssets.length} device(s) assigned to ${dept.name}`}
+                  className="bg-slate-900/90 border border-slate-800 hover:border-purple-500/40 focus-visible:outline-none focus-visible:border-purple-500 rounded-3xl p-5 flex flex-col justify-between transition shadow-md group relative overflow-hidden cursor-pointer"
                 >
                   <div className="space-y-3">
                     <div className="flex items-start justify-between gap-2">
@@ -638,11 +667,12 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
                         <span className="text-slate-500">Active Deployed Equipment</span>
                         <span className="font-semibold text-slate-200">{deptAssets.length} asset(s)</span>
                       </div>
+                      <div className="text-[10px] text-purple-400/80 group-hover:text-purple-400 font-semibold text-right">View devices →</div>
                     </div>
                   </div>
 
                   {canManageDepartments && (
-                    <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between">
+                    <div onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()} className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between cursor-default">
                       <div className="text-[10px] text-slate-500">
                         ID: <span className="font-mono text-slate-400">{dept.id}</span>
                       </div>
@@ -1000,6 +1030,34 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
           </div>
         </div>
       )}
+
+      {/* Devices at a facility / assigned to a department */}
+      {deviceView && (() => {
+        if (deviceView.kind === 'facility') {
+          const branch = orgBranches.find(b => b.id === deviceView.id);
+          if (!branch) return null;
+          return (
+            <LocationAssetsModal
+              kind="facility"
+              title={branch.name}
+              subtitle={[branch.code, branch.city].filter(Boolean).join(' · ')}
+              assets={getBranchAssets(branch.id)}
+              onClose={() => setDeviceView(null)}
+            />
+          );
+        }
+        const dept = orgDepartments.find(d => d.id === deviceView.id);
+        if (!dept) return null;
+        return (
+          <LocationAssetsModal
+            kind="department"
+            title={dept.name}
+            subtitle="Devices assigned to people in this department"
+            assets={getDeptAssets(dept.id)}
+            onClose={() => setDeviceView(null)}
+          />
+        );
+      })()}
     </div>
   );
 };
