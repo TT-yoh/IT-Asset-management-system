@@ -178,7 +178,14 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
   });
 
   // Calculate metrics
-  const totalAllocatedBudget = orgDepartments.reduce((acc, d) => acc + (d.budgetAllocated || 0), 0);
+  const totalAllocatedBudget = orgDepartments.reduce((acc, d) => acc + (Number(d.budgetAllocated) || 0), 0);
+  // "$15k", "$1.2M"; under $1k shows the exact amount instead of "$0k".
+  const formatBudget = (amount: number) => {
+    const n = Number(amount) || 0;
+    if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+    if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}k`;
+    return `$${Math.round(n).toLocaleString()}`;
+  };
 
   // --- Branch Handlers ---
   const handleOpenCreateBranch = () => {
@@ -453,7 +460,7 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
             <span className="text-xs font-semibold">Budget Allocated</span>
             <DollarSign className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="text-2xl font-black text-white">${(totalAllocatedBudget / 1000).toFixed(0)}k</div>
+          <div className="text-2xl font-black text-white">{formatBudget(totalAllocatedBudget)}</div>
           <div className="text-[10px] text-slate-500 mt-0.5">Annual departmental budget</div>
         </div>
       </div>
@@ -654,7 +661,7 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
                         <p className="text-[11px] text-slate-400 mt-0.5">Corporate Cost Center</p>
                       </div>
                       <span className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-purple-500/10 text-purple-300 border border-purple-500/25 shrink-0">
-                        ${((dept.budgetAllocated || 0) / 1000).toFixed(0)}k Allocated
+                        {formatBudget(dept.budgetAllocated)} Allocated
                       </span>
                     </div>
 

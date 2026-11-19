@@ -494,8 +494,10 @@ export const loadInitialData = async (orgId?: string, userId?: string): Promise<
           id: d.id,
           orgId: d.orgId || d.org_id,
           name: d.name,
-          headCount: d.headCount ?? d.head_count ?? 0,
-          budgetAllocated: d.budgetAllocated ?? d.budget_allocated ?? 0
+          // The database returns DECIMAL/INT columns as text (e.g. "15000.00"); keep them numbers
+          // so totals add up instead of joining strings (which showed "$NaNk").
+          headCount: Number(d.headCount ?? d.head_count) || 0,
+          budgetAllocated: Number(d.budgetAllocated ?? d.budget_allocated) || 0
         }));
         saveToStorage(deptsKey, mappedDepts);
 
