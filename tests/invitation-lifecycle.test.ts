@@ -12,28 +12,22 @@
 
 import app from '../server/index';
 import { query } from '../server/db';
-import { hashPassword } from '../server/auth';
+import { seedTestTenant, type SeedTestTenantResult } from './helpers';
 import { getLatestTestInviteToken } from '../server/mailer';
 
-const testAdminEmail = process.env.TEST_ADMIN_EMAIL || 'test-admin-invite@omniasset.internal';
-const testAdminPassword = process.env.TEST_ADMIN_PASSWORD || 'TestPass123!Secure';
+const testAdminPassword = 'TestPass123!Secure';
 
-let BASE_URL = 'http://localhost:3001';
+// Runs inside its own seeded test organisation and removes it afterwards.
+let tenant: SeedTestTenantResult | undefined;
+
+let BASE_URL = '';
 let serverInstance: any = null;
 
 async function run() {
-  try {
-    const probe = await fetch('http://localhost:3001/api/health', { signal: AbortSignal.timeout(600) });
-    if (!probe.ok) {
-      serverInstance = app.listen(0);
-      const address = serverInstance.address() as any;
-      BASE_URL = `http://127.0.0.1:${address.port}`;
-    }
-  } catch {
-    serverInstance = app.listen(0);
-    const address = serverInstance.address() as any;
-    BASE_URL = `http://127.0.0.1:${address.port}`;
-  }
+  // Always run against an in-process server on a random port. Never reuse a server that
+  // happens to be listening on :3001: that one may be a dev server on the production database.
+  serverInstance = app.listen(0);
+  BASE_URL = `http://127.0.0.1:${(serverInstance.address() as any).port}`;
 
   console.log('=== Starting User Invitation & Activation Lifecycle Test Suite ===');
   let adminCookie = '';
@@ -47,33 +41,14 @@ async function run() {
 
   // 1. Login as Admin
   console.log('1. Authenticating as Admin...');
-  await query('DELETE FROM users WHERE email = ? OR id = ?;', [testAdminEmail, 'usr-test-invite-admin']);
-  await query(`
-    INSERT INTO branches (id, org_id, name, code, location, city, country, manager_name)
-    VALUES ('branch-main', 'org-omnitech', 'Global Headquarters', 'HQ', '100 Main St', 'New York', 'USA', 'HQ Manager')
-    ON DUPLICATE KEY UPDATE name = VALUES(name);
-  `);
-  const hash = await hashPassword(testAdminPassword);
-  await query(`
-    INSERT INTO users (id, org_id, email, password_hash, full_name, role, status, branch_id, branch_name)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-  `, [
-    'usr-test-invite-admin',
-    'org-omnitech',
-    testAdminEmail,
-    hash,
-    'Invite Test Admin',
-    'ADMIN',
-    'ACTIVE',
-    'branch-main',
-    'Global Headquarters'
-  ]);
+  tenant = await seedTestTenant({ prefix: 'test-invite', adminPassword: testAdminPassword });
+  const [tenantBranch] = await query<any>('SELECT `name` FROM `branches` WHERE `id` = ?;', [tenant.branchId]);
 
   const loginRes = await fetch(`${BASE_URL}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      email: testAdminEmail,
+      email: tenant.adminUser.email,
       password: testAdminPassword
     })
   });
@@ -96,10 +71,10 @@ async function run() {
     body: JSON.stringify({
       fullName: 'Alice Test Engineer',
       email: inviteEmail,
-      role: 'USER',
+      role: 'IT_SUPPORT', // only roles with system access receive an invite
       departmentName: 'Engineering',
-      branchId: 'branch-main',
-      branchName: 'Global Headquarters'
+      branchId: tenant.branchId,
+      branchName: tenantBranch.name
     })
   });
 
@@ -246,12 +221,14 @@ async function run() {
   if (serverInstance) {
     serverInstance.close();
   }
+  await tenant?.teardown();
   process.exit(0);
 }
 
 run()
-  .catch(err => {
+  .catch(async err => {
     console.error('Test failed with error:', err);
+    await tenant?.teardown();
     process.exit(1);
   })
   .finally(() => {

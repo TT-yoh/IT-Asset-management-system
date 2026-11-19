@@ -5,6 +5,9 @@
  * - Branch creation, manager assignment, and safe deletion (/api/branches)
  * - Role-based authorization & permission boundary enforcement
  * - Phase 12 Addendum 2: Tenant-safe facilities & budget writes
+ *
+ * Runs inside its own seeded test organisation (tests/helpers.ts seedTestTenant) and
+ * removes everything it created afterwards. It never touches a real organisation.
  */
 
 if (process.env.NODE_ENV !== 'test') {
@@ -13,12 +16,14 @@ if (process.env.NODE_ENV !== 'test') {
 
 import app from '../server/index';
 import { query } from '../server/db';
-import { hashPassword, createSessionToken } from '../server/auth';
+import { seedTestTenant, type SeedTestTenantResult } from './helpers';
 
-const testAdminEmail = process.env.TEST_ADMIN_EMAIL || 'test-admin-facilities@omniasset.internal';
-const testAdminPassword = process.env.TEST_ADMIN_PASSWORD || 'TestPass123!Secure';
+const testAdminPassword = 'TestPass123!Secure';
 
-let BASE_URL = 'http://localhost:3001';
+let tenant: SeedTestTenantResult;
+let foreignTenant: SeedTestTenantResult;
+
+let BASE_URL = '';
 let serverInstance: any = null;
 
 interface TestStep {
@@ -50,28 +55,11 @@ function headers(extra: Record<string, string> = {}) {
 
 // 1. Admin Login
 test('1. Admin Authentication for Facilities Management', async () => {
-  await query('DELETE FROM users WHERE id = ? OR email = ?;', ['usr-test-fac-admin', testAdminEmail]);
-  const hash = await hashPassword(testAdminPassword);
-  await query(`
-    INSERT INTO users (id, org_id, email, password_hash, full_name, role, status, branch_id, branch_name)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-  `, [
-    'usr-test-fac-admin',
-    'org-omnitech',
-    testAdminEmail,
-    hash,
-    'Facilities Test Admin',
-    'ADMIN',
-    'ACTIVE',
-    'branch-main',
-    'Global Headquarters'
-  ]);
-
   const res = await fetch(`${BASE_URL}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      email: testAdminEmail,
+      email: tenant.adminUser.email,
       password: testAdminPassword
     })
   });
@@ -84,8 +72,6 @@ test('1. Admin Authentication for Facilities Management', async () => {
 
 // 2. Department Creation
 test('2. Admin Creates Department (POST /api/departments)', async () => {
-  await query('DELETE FROM departments WHERE name = ? AND org_id = ?;', ['Cloud Infrastructure & DevOps', 'org-omnitech']);
-  await query('DELETE FROM departments WHERE name = ? AND org_id = ?;', ['Cloud Infrastructure & Platform Engineering', 'org-omnitech']);
   const res = await fetch(`${BASE_URL}/api/departments`, {
     method: 'POST',
     headers: headers(),
@@ -101,6 +87,7 @@ test('2. Admin Creates Department (POST /api/departments)', async () => {
     throw new Error('Department creation response invalid');
   }
   testDeptId = data.id;
+  tenant.registerId('department', testDeptId);
 });
 
 // 3. Department Retrieval
@@ -152,7 +139,6 @@ test('4. Admin Updates Department (PUT /api/departments/:id)', async () => {
 
 // 5. Branch Facility Creation with Branch Manager
 test('5. Admin Creates Facility Branch with Manager (POST /api/branches)', async () => {
-  await query('DELETE FROM branches WHERE name = ? AND org_id = ?;', ['Harare Innovation Center', 'org-omnitech']);
   testBranchCode = `FAC-${Math.floor(Math.random() * 9000 + 1000)}`;
 
   const res = await fetch(`${BASE_URL}/api/branches`, {
@@ -173,6 +159,7 @@ test('5. Admin Creates Facility Branch with Manager (POST /api/branches)', async
     throw new Error('Branch creation response invalid');
   }
   testBranchId = data.id;
+  tenant.registerId('branch', testBranchId);
 
   // Verify via GET
   const resGet = await fetch(`${BASE_URL}/api/branches`, {
@@ -295,6 +282,7 @@ test('10. Duplicate branch code returns HTTP 409 DUPLICATE', async () => {
   });
   if (!res1.ok) throw new Error(`Initial branch creation failed: ${await res1.text()}`);
   const data1 = await res1.json();
+  tenant.registerId('branch', data1.id);
 
   const res2 = await fetch(`${BASE_URL}/api/branches`, {
     method: 'POST',
@@ -319,7 +307,7 @@ test('10. Duplicate branch code returns HTTP 409 DUPLICATE', async () => {
 
 // 11. Phase 12.5: Cross-Tenant Protection (Org B admin cannot modify Org A branch)
 test('11. Org B admin cannot read, modify or delete Org A branch', async () => {
-  // Create branch in org-omnitech
+  // Create branch in this test's own organisation (Org A)
   const resBranch = await fetch(`${BASE_URL}/api/branches`, {
     method: 'POST',
     headers: headers(),
@@ -330,19 +318,10 @@ test('11. Org B admin cannot read, modify or delete Org A branch', async () => {
   });
   const branchData = await resBranch.json();
   const targetBranchId = branchData.id;
+  tenant.registerId('branch', targetBranchId);
 
-  // Ensure tenant-beta organization exists
-  await query("INSERT IGNORE INTO organizations (id, name, type) VALUES ('tenant-beta', 'Tenant Beta', 'Enterprise');");
-  await query('DELETE FROM users WHERE id = ?;', ['usr-foreign-admin']);
-  await query(`
-    INSERT INTO users (id, org_id, email, password_hash, full_name, role, status, branch_id, branch_name)
-    VALUES ('usr-foreign-admin', 'tenant-beta', 'foreign-admin@example.com', 'hash', 'Foreign Admin', 'ADMIN', 'ACTIVE', 'br-1', 'Branch 1');
-  `);
-
-  const foreignToken = createSessionToken({
-    userId: 'usr-foreign-admin',
-    ver: 1
-  });
+  // Org B is a second seeded test organisation with its own ADMIN
+  const foreignToken = foreignTenant.sessionToken;
   const foreignHeaders = {
     'Content-Type': 'application/json',
     'X-Requested-With': 'XMLHttpRequest',
@@ -369,7 +348,6 @@ test('11. Org B admin cannot read, modify or delete Org A branch', async () => {
   }
 
   // Cleanup
-  await query('DELETE FROM users WHERE id = ?;', ['usr-foreign-admin']);
   await fetch(`${BASE_URL}/api/branches/${targetBranchId}`, { method: 'DELETE', headers: headers() });
 });
 
@@ -385,13 +363,15 @@ test('12. Branch delete blocked with 409 when staff members belong to it', async
     })
   });
   const branch = await resBranch.json();
+  tenant.registerId('branch', branch.id);
 
   // Create user in this branch
   const testUserId = `usr-staffed-${Date.now()}`;
   await query(`
     INSERT INTO users (id, org_id, email, password_hash, full_name, role, status, branch_id, branch_name)
-    VALUES (?, 'org-omnitech', ?, 'hash', 'Test Staff', 'USER', 'ACTIVE', ?, 'Staffed Facility');
-  `, [testUserId, `${testUserId}@example.com`, branch.id]);
+    VALUES (?, ?, ?, 'hash', 'Test Staff', 'USER', 'ACTIVE', ?, 'Staffed Facility');
+  `, [testUserId, tenant.orgId, `${testUserId}@example.test`, branch.id]);
+  tenant.registerId('user', testUserId);
 
   // Try to delete branch
   const resDelete = await fetch(`${BASE_URL}/api/branches/${branch.id}`, {
@@ -415,21 +395,16 @@ test('12. Branch delete blocked with 409 when staff members belong to it', async
 async function run() {
   console.log('🏛️ Running Admin Facilities & Department Management Tests...\n');
 
-  try {
-    const healthCheck = await fetch(`${BASE_URL}/api/health`).catch(() => null);
-    if (!healthCheck || !healthCheck.ok) {
-      serverInstance = app.listen(0);
-      const address = serverInstance.address() as any;
-      BASE_URL = `http://127.0.0.1:${address.port}`;
-    }
-  } catch {
-    serverInstance = app.listen(0);
-    const address = serverInstance.address() as any;
-    BASE_URL = `http://127.0.0.1:${address.port}`;
-  }
+  // Always run against an in-process server on a random port. Never reuse a server that
+  // happens to be listening on :3001: that one may be a dev server on the production database.
+  serverInstance = app.listen(0);
+  BASE_URL = `http://127.0.0.1:${(serverInstance.address() as any).port}`;
 
   let passed = 0;
   let failed = 0;
+
+  tenant = await seedTestTenant({ prefix: 'test-fac', adminPassword: testAdminPassword });
+  foreignTenant = await seedTestTenant({ prefix: 'test-fac-foreign' });
 
   try {
     for (const step of steps) {
@@ -444,6 +419,8 @@ async function run() {
       }
     }
   } finally {
+    await tenant.teardown();
+    await foreignTenant.teardown();
     if (serverInstance) {
       await new Promise(r => serverInstance.close(r));
     }

@@ -148,7 +148,7 @@ The following commands are available for database maintenance:
   ```bash
   npm test
   ```
-  Runs 73 automated tests covering tenant scoping, RBAC permission matrices, monotonic cryptographic audit integrity, optimistic concurrency control, and end-to-end business workflows.
+  Runs 73 automated tests covering tenant scoping, RBAC permission matrices, monotonic cryptographic audit integrity, optimistic concurrency control, and end-to-end business workflows. Tests run against a separate test database configured in `.env.test` and refuse to run against production. See [TESTING.md](TESTING.md) for the setup.
 
 - **Purge Dummy Data to Pristine Baseline**:
   ```bash

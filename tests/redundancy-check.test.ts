@@ -1,28 +1,22 @@
 import app from '../server/index';
 import { query } from '../server/db';
-import { hashPassword } from '../server/auth';
+import { seedTestTenant, type SeedTestTenantResult } from './helpers';
 import { AssetService } from '../src/lib/asset-service';
 import type { Asset } from '../src/types';
 
-let BASE_URL = 'http://localhost:3001';
+let BASE_URL = '';
 let serverInstance: any = null;
 
-const testAdminEmail = process.env.TEST_ADMIN_EMAIL || 'test-admin-redundancy@omniasset.internal';
-const testAdminPassword = process.env.TEST_ADMIN_PASSWORD || 'TestPass123!Secure';
+const testAdminPassword = 'TestPass123!Secure';
+
+// Runs inside its own seeded test organisation and removes it afterwards.
+let tenant: SeedTestTenantResult | undefined;
 
 async function run() {
-  try {
-    const probe = await fetch('http://localhost:3001/api/health', { signal: AbortSignal.timeout(600) });
-    if (!probe.ok) {
-      serverInstance = app.listen(0);
-      const address = serverInstance.address() as any;
-      BASE_URL = `http://127.0.0.1:${address.port}`;
-    }
-  } catch {
-    serverInstance = app.listen(0);
-    const address = serverInstance.address() as any;
-    BASE_URL = `http://127.0.0.1:${address.port}`;
-  }
+  // Always run against an in-process server on a random port. Never reuse a server that
+  // happens to be listening on :3001: that one may be a dev server on the production database.
+  serverInstance = app.listen(0);
+  BASE_URL = `http://127.0.0.1:${(serverInstance.address() as any).port}`;
 
   console.log('--- Starting Redundancy Check Test Suite ---');
   let sessionCookie = '';
@@ -36,28 +30,13 @@ async function run() {
 
   // 1. Login as Admin
   console.log('1. Logging in as Admin...');
-  await query('DELETE FROM users WHERE email = ?', [testAdminEmail]);
-  const hash = await hashPassword(testAdminPassword);
-  await query(`
-    INSERT INTO users (id, org_id, email, password_hash, full_name, role, status, branch_id, branch_name)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-  `, [
-    'usr-test-red-admin',
-    'org-omnitech',
-    testAdminEmail,
-    hash,
-    'Redundancy Test Admin',
-    'ADMIN',
-    'ACTIVE',
-    'branch-main',
-    'Global Headquarters'
-  ]);
+  tenant = await seedTestTenant({ prefix: 'test-redundancy', adminPassword: testAdminPassword });
 
   const loginRes = await fetch(`${BASE_URL}/api/auth/login`, {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify({
-      email: testAdminEmail,
+      email: tenant.adminUser.email,
       password: testAdminPassword
     })
   });
@@ -266,10 +245,12 @@ async function run() {
   if (serverInstance) {
     serverInstance.close();
   }
+  await tenant?.teardown();
   process.exit(0);
 }
 
-run().catch(err => {
+run().catch(async err => {
   console.error('Test failed with error:', err);
+  await tenant?.teardown();
   process.exit(1);
 });

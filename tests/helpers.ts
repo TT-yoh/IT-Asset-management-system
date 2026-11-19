@@ -213,7 +213,15 @@ export async function seedTestTenant(options: SeedTestTenantOptions = {}): Promi
         await query('DELETE FROM `branches` WHERE `id` = ? AND `org_id` = ?;', [bid, orgId]);
       }
 
-      // 8. Organization
+      // 8. Anything else the API created inside this seeded test org (e.g. invited users,
+      //    branches or departments a test did not register). orgId is unique to this run.
+      await query('DELETE FROM `budgets` WHERE `org_id` = ?;', [orgId]);
+      await query('DELETE FROM `notifications` WHERE `org_id` = ?;', [orgId]);
+      await query('DELETE FROM `users` WHERE `org_id` = ?;', [orgId]);
+      await query('DELETE FROM `departments` WHERE `org_id` = ?;', [orgId]);
+      await query('DELETE FROM `branches` WHERE `org_id` = ?;', [orgId]);
+
+      // 9. Organization
       await query('DELETE FROM `organizations` WHERE `id` = ?;', [orgId]);
     } catch (err: any) {
       console.warn(`[TEARDOWN WARNING] Teardown for ${orgId} encountered error:`, err.message);

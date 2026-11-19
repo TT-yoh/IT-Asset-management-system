@@ -20,7 +20,7 @@ const testOrgId = 'org-e2e-test';
 const testAdminEmail = process.env.TEST_ADMIN_EMAIL || 'test-admin-e2e@omniasset.internal';
 const testAdminPassword = process.env.TEST_ADMIN_PASSWORD || 'TestPass123!Secure';
 
-let BASE_URL = 'http://localhost:3001';
+let BASE_URL = '';
 let serverInstance: any = null;
 
 interface TestStep {
@@ -534,18 +534,10 @@ test('18. User Logout (POST /api/auth/logout)', async () => {
 async function run() {
   console.log('🚀 Running OmniAsset 100% System Functionality Verification Suite...');
 
-  try {
-    const healthCheck = await fetch(`${BASE_URL}/api/health`).catch(() => null);
-    if (!healthCheck || !healthCheck.ok) {
-      serverInstance = app.listen(0);
-      const address = serverInstance.address() as any;
-      BASE_URL = `http://127.0.0.1:${address.port}`;
-    }
-  } catch {
-    serverInstance = app.listen(0);
-    const address = serverInstance.address() as any;
-    BASE_URL = `http://127.0.0.1:${address.port}`;
-  }
+  // Always run against an in-process server on a random port. Never reuse a server that
+  // happens to be listening on :3001: that one may be a dev server on the production database.
+  serverInstance = app.listen(0);
+  BASE_URL = `http://127.0.0.1:${(serverInstance.address() as any).port}`;
 
   console.log(`📡 Target API Gateway: ${BASE_URL}\n`);
 

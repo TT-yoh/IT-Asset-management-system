@@ -1,10 +1,90 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import net from 'net';
+import fs from 'fs';
 import { z } from 'zod';
 
-// Load .env once at process entry
-dotenv.config();
+// Load environment files once at process entry.
+// Test processes (NODE_ENV=test) read ONLY .env.test, never .env, so they cannot pick
+// up the production database credentials. Variables already set in the shell still win.
+const BOOT_NODE_ENV = String(process.env.NODE_ENV || '').trim().toLowerCase();
+if (BOOT_NODE_ENV === 'test') {
+  const testEnvFile = path.resolve(process.cwd(), process.env.TEST_ENV_FILE || '.env.test');
+  if (fs.existsSync(testEnvFile)) {
+    dotenv.config({ path: testEnvFile, quiet: true });
+  } else {
+    console.warn(`[config] NODE_ENV=test but ${testEnvFile} was not found. Copy .env.test.example to .env.test (see docs/TESTING.md).`);
+  }
+} else {
+  dotenv.config({ quiet: true });
+}
+
+/** Schema name of the live production database. Tests may never use it. */
+export const PRODUCTION_DB_SCHEMA = 'it_asset_ledger';
+
+export interface DbTarget {
+  host?: string;
+  database?: string;
+}
+
+/**
+ * Resolves the host/schema a test process would connect to.
+ * TEST_DATABASE_URL takes precedence over TIDB_* (same rule as server/db.ts).
+ */
+export function resolveDbTarget(raw: Record<string, any>): DbTarget {
+  let host = raw.TIDB_HOST ? String(raw.TIDB_HOST).trim() : undefined;
+  let database = raw.TIDB_DATABASE ? String(raw.TIDB_DATABASE).trim() : undefined;
+  if (raw.TEST_DATABASE_URL) {
+    try {
+      const u = new URL(String(raw.TEST_DATABASE_URL));
+      host = u.hostname || host;
+      database = u.pathname.replace(/^\//, '') || database;
+    } catch {
+      // Unparsable URL: fall back to the TIDB_* values
+    }
+  }
+  return { host, database };
+}
+
+/**
+ * Reads the production database target from the production env file (.env, or
+ * PRODUCTION_ENV_FILE) without loading it into process.env. Returns null when absent.
+ */
+export function readProductionDbTarget(): DbTarget | null {
+  const file = path.resolve(process.cwd(), process.env.PRODUCTION_ENV_FILE || '.env');
+  try {
+    if (!fs.existsSync(file)) return null;
+    const parsed = dotenv.parse(fs.readFileSync(file));
+    const target = resolveDbTarget({ TIDB_HOST: parsed.TIDB_HOST, TIDB_DATABASE: parsed.TIDB_DATABASE });
+    return target.database ? target : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Throws if a test process is about to use the production database: the schema is
+ * it_asset_ledger, or the host and schema match the production .env.
+ */
+export function assertNotProductionDatabase(
+  target: DbTarget,
+  production: DbTarget | null = readProductionDbTarget()
+): void {
+  const db = (target.database || '').toLowerCase();
+  const host = (target.host || '').toLowerCase();
+  const fail = (why: string) => {
+    throw new Error(`\n======================================================\nFATAL: Refusing to run tests against the production database (${why}). Configure a separate test database in .env.test (see docs/TESTING.md).\n======================================================\n`);
+  };
+  if (db === PRODUCTION_DB_SCHEMA) {
+    fail(`schema "${target.database}"`);
+  }
+  if (production?.database && db && db === production.database.toLowerCase()) {
+    const prodHost = (production.host || '').toLowerCase();
+    if (!prodHost || !host || prodHost === host) {
+      fail(`host "${target.host || '(unset)'}" and schema "${target.database}" match the production .env`);
+    }
+  }
+}
 
 const FORBIDDEN_PLACEHOLDERS = new Set([
   'generate-a-strong-random-32-byte-hex-secret',
@@ -260,19 +340,11 @@ export function validateConfig(raw: Record<string, any>): Readonly<AppConfig> {
     }
   }
 
-  // A8: Test DB allowlist
+  // A8: Test DB allowlist + production-database refusal
   if (isTest) {
-    let testDbName: string | undefined;
-    if (raw.TEST_DATABASE_URL) {
-      try {
-        const u = new URL(raw.TEST_DATABASE_URL);
-        testDbName = u.pathname.replace(/^\//, '');
-      } catch {
-        testDbName = undefined;
-      }
-    } else if (raw.TIDB_DATABASE) {
-      testDbName = String(raw.TIDB_DATABASE).trim();
-    }
+    const testTarget = resolveDbTarget(raw);
+    assertNotProductionDatabase(testTarget);
+    const testDbName = testTarget.database;
 
     if (testDbName) {
       const lowerDb = testDbName.toLowerCase();
@@ -280,12 +352,11 @@ export function validateConfig(raw: Record<string, any>): Readonly<AppConfig> {
         lowerDb.endsWith('_test') ||
         lowerDb.endsWith('_dev') ||
         lowerDb === 'test' ||
-        lowerDb === 'dev' ||
-        lowerDb === 'it_asset_ledger';
+        lowerDb === 'dev';
       const hasProd = lowerDb.includes('prod') || lowerDb.includes('production');
 
       if (!isAllowed || hasProd) {
-        throw new Error(`\n======================================================\nFATAL: Refusing to run tests against database "${testDbName}". Test database must end with _test, _dev, or be test, dev, or it_asset_ledger, and must never contain "prod".\n======================================================\n`);
+        throw new Error(`\n======================================================\nFATAL: Refusing to run tests against database "${testDbName}". Test database must end with _test, _dev, or be test or dev, and must never contain "prod".\n======================================================\n`);
       }
     }
   }

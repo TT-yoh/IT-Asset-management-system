@@ -11,3 +11,4 @@ api/_server.js
 server.js
 .env*
 !.env.example
+!.env.test.example

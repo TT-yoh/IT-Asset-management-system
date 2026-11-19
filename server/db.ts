@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise';
 import fs from 'fs';
-import config from './config';
+import config, { assertNotProductionDatabase } from './config';
 
 let pool: mysql.Pool | null = null;
 let isPoolInitialized = false;
@@ -53,11 +53,17 @@ export function getDbPool(): mysql.Pool | null {
     }
   }
 
-  if (!targetHost || !targetUser || !targetPassword || !targetDatabase) {
+  // A local test database may use a passwordless account (e.g. the TiDB docker image's root).
+  if (!targetHost || !targetUser || (!targetPassword && !config.isTest) || !targetDatabase) {
     if (config.isTest) {
       return null;
     }
     throw new Error('FATAL: Database configuration missing (TIDB_HOST, TIDB_USER, TIDB_PASSWORD, TIDB_DATABASE).');
+  }
+
+  // Last line of defence: a test process never opens a pool to the production database.
+  if (config.isTest) {
+    assertNotProductionDatabase({ host: targetHost, database: targetDatabase });
   }
 
   let sslConfig: mysql.SslOptions | undefined;

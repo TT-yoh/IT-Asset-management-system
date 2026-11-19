@@ -9,7 +9,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import mysql from 'mysql2/promise';
-import { config } from '../server/config.ts';
+import { config, assertNotProductionDatabase } from '../server/config.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -153,26 +153,57 @@ export function calculateChecksum(content) {
 }
 
 /**
+ * Resolves the connection target from validated config.
+ * With NODE_ENV=test (npm run db:migrate:test) config.ts has loaded .env.test, and
+ * TEST_DATABASE_URL, when set, overrides the TIDB_* values (same rule as server/db.ts).
+ */
+export function resolveMigrationTarget() {
+  const target = {
+    host: config.TIDB_HOST,
+    port: config.TIDB_PORT,
+    user: config.TIDB_USER,
+    password: config.TIDB_PASSWORD,
+    database: config.TIDB_DATABASE
+  };
+
+  if (config.isTest && config.TEST_DATABASE_URL) {
+    const u = new URL(config.TEST_DATABASE_URL);
+    target.host = u.hostname || target.host;
+    target.port = u.port ? Number(u.port) : target.port;
+    target.user = u.username ? decodeURIComponent(u.username) : target.user;
+    target.password = u.password ? decodeURIComponent(u.password) : target.password;
+    target.database = u.pathname.replace(/^\//, '') || target.database;
+  }
+
+  if (config.isTest) {
+    // Never let the test setup run DDL against the production schema.
+    assertNotProductionDatabase({ host: target.host, database: target.database });
+  }
+
+  return target;
+}
+
+/**
  * Establishes TLS-verified connection strictly from validated config
  */
 export async function createMigrationConnection() {
-  const host = config.TIDB_HOST;
-  const port = config.TIDB_PORT;
-  const user = config.TIDB_USER;
-  const password = config.TIDB_PASSWORD;
-  const database = config.TIDB_DATABASE;
+  const { host, port, user, password, database } = resolveMigrationTarget();
 
-  if (!host || !user || !password || !database) {
+  // A local test database may use a passwordless account; everything else needs one.
+  if (!host || !user || (!password && !config.isTest) || !database) {
     throw new Error('Database connection credentials missing from validated configuration.');
   }
 
-  const sslConfig = {
-    minVersion: 'TLSv1.2',
-    rejectUnauthorized: !config.isTest,
-    ...(config.TIDB_CA_PATH && fs.existsSync(config.TIDB_CA_PATH)
-      ? { ca: fs.readFileSync(config.TIDB_CA_PATH) }
-      : {})
-  };
+  // TLS can only be switched off with NODE_ENV=test (enforced by config.ts).
+  const sslConfig = config.isTest && config.TIDB_SSL === false
+    ? undefined
+    : {
+        minVersion: 'TLSv1.2',
+        rejectUnauthorized: !config.isTest,
+        ...(config.TIDB_CA_PATH && fs.existsSync(config.TIDB_CA_PATH)
+          ? { ca: fs.readFileSync(config.TIDB_CA_PATH) }
+          : {})
+      };
 
   const conn = await mysql.createConnection({
     host,
@@ -211,8 +242,10 @@ export async function runMigrations(options = {}) {
   console.log('================================================================');
   console.log('  OmniAsset Authoritative Migration Runner');
   console.log('================================================================');
-  console.log(`Database Host : ${config.TIDB_HOST}:${config.TIDB_PORT}`);
-  console.log(`Target Schema : ${config.TIDB_DATABASE}`);
+  const target = resolveMigrationTarget();
+  console.log(`Environment   : ${config.NODE_ENV}`);
+  console.log(`Database Host : ${target.host}:${target.port}`);
+  console.log(`Target Schema : ${target.database}`);
   console.log(`Execution Mode: ${isDryRun ? 'DRY-RUN' : isStatus ? 'STATUS CHECK' : 'APPLY'}`);
   console.log('----------------------------------------------------------------\n');
 
