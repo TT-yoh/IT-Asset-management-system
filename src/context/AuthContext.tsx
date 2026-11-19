@@ -21,6 +21,7 @@ import { clearOfflineStoreOnLogout, setActiveSessionContext } from '../lib/offli
 import { useFeedback } from './FeedbackContext';
 import { RegisterCompanyData } from '../components/RegisterCompanyModal';
 import { validatePasswordPolicy as sharedValidatePasswordPolicy } from '../../shared/password-policy';
+import { hasSystemAccess } from '../../shared/permissions';
 
 export const validatePasswordPolicy = (
   pwd: string,
@@ -63,7 +64,7 @@ interface AuthContextType {
     departmentName?: string;
     branchId?: string;
     branchName?: string;
-  }) => Promise<{ success: boolean; inviteToken?: string; emailDelivered?: boolean; user?: User; error?: string }>;
+  }) => Promise<{ success: boolean; inviteToken?: string; emailDelivered?: boolean; systemAccess?: boolean; user?: User; error?: string }>;
   handleRegisterUser: (newUser: User) => void;
   handleUpdateUser: (updatedUser: User) => void;
   /** Show changes that another route has already saved on the server (no second save). */
@@ -488,7 +489,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     departmentName?: string;
     branchId?: string;
     branchName?: string;
-  }): Promise<{ success: boolean; inviteToken?: string; emailDelivered?: boolean; user?: User; error?: string }> => {
+  }): Promise<{ success: boolean; inviteToken?: string; emailDelivered?: boolean; systemAccess?: boolean; user?: User; error?: string }> => {
     try {
       const res = await fetch('/api/users/invite', {
         method: 'POST',
@@ -496,7 +497,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         credentials: 'include',
         body: JSON.stringify({
           fullName: data.fullName.trim(),
-          email: data.email.trim().toLowerCase(),
+          email: (data.email || "").trim().toLowerCase() || undefined,
           role: data.role,
           departmentId: data.departmentId || undefined,
           departmentName: data.departmentName || undefined,
@@ -510,10 +511,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return { success: false, error: resData.error || 'Failed to issue invitation.' };
       }
 
+      const withAccess = hasSystemAccess(data.role);
       const invitedUser: User = {
         id: resData.userId || `usr-${Date.now()}`,
         orgId: currentOrg.id,
-        email: data.email.trim().toLowerCase(),
+        email: (data.email || '').trim().toLowerCase(),
         fullName: data.fullName.trim(),
         role: data.role,
         departmentId: data.departmentId || undefined,
@@ -522,25 +524,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         branchName: data.branchName,
         twoFactorEnabled: false,
         avatar: `https://images.unsplash.com/photo-${1534528741775 + (systemUsers.length % 10)}?w=100&auto=format&fit=crop&q=80`,
-        status: 'INVITED',
+        // Staff without system access are active straight away; there is no invite to accept.
+        status: withAccess ? 'INVITED' : 'ACTIVE',
         // A newly created account starts at version 1; edits must send the version they are based on.
         version: 1,
-        invitedAt: resData.invitedAt || new Date().toISOString()
+        invitedAt: withAccess ? (resData.invitedAt || new Date().toISOString()) : undefined
       };
 
+      // The server already stored the record: show it now and reload for the exact copy.
+      // (Saving it again here used to advance the server version behind the app's back.)
       setSystemUsers(prev => {
-        const exists = prev.findIndex(u => u.email.toLowerCase() === invitedUser.email.toLowerCase());
-        const updated = exists !== -1
-          ? prev.map((u, i) => i === exists ? invitedUser : u)
-          : [...prev, invitedUser];
-        persistUser(invitedUser, updated);
-        return updated;
+        const exists = prev.findIndex(u => u.id === invitedUser.id);
+        return exists !== -1 ? prev.map((u, i) => i === exists ? invitedUser : u) : [...prev, invitedUser];
       });
+      window.dispatchEvent(new Event(RESYNC_EVENT));
 
       return {
         success: true,
         inviteToken: resData.inviteToken,
         emailDelivered: resData.emailDelivered === true,
+        systemAccess: withAccess,
         user: invitedUser
       };
     } catch (err: any) {

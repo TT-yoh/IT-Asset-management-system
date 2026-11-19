@@ -249,14 +249,20 @@ async function runTests() {
     fullName: 'Attacker',
     role: 'ADMIN'
   });
-  assert(res7.status === 403, 'Regular USER cannot invite new users (returns 403 Forbidden)');
+  // USER is a staff record with no system access: even a valid-looking session is refused
+  // before any permission check (401), which is stricter than the old 403.
+  assert(res7.status === 401, 'Staff (no system access) cannot invite new users (session refused, 401)');
 
   // Test 3.2: Non-admin cannot call users:update endpoint
   const res8a = await apiRequest('PUT', '/api/users/test-user-a1', tokenUserA, {
     fullName: 'Alpha User 1',
     role: 'ADMIN'
   });
-  assert(res8a.status === 403, 'Regular USER cannot update user records (returns 403 Forbidden)');
+  assert(res8a.status === 401, 'Staff (no system access) cannot update user records (session refused, 401)');
+
+  // Test 3.2b: Staff cannot even read data with a session minted for them
+  const res8b = await apiRequest('GET', '/api/init', tokenUserA);
+  assert(res8b.status === 401, 'Staff (no system access) cannot load any data (session refused, 401)');
 
   // Test 3.3: Separation of Duties on Damage Write-off
   // Create a checkout for test-support-a1 (who has checkouts:return permission)

@@ -3,7 +3,7 @@ import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../db';
 import { authenticate, requirePermission, invalidateUserCache, asyncHandler } from '../middleware';
 import { generateSecureToken, hashToken } from '../auth';
-import { canAssignRole, UserRole } from '../permissions';
+import { canAssignRole, hasSystemAccess, STAFF_ROLE, UserRole } from '../permissions';
 import { recordAuditEvent } from '../audit';
 import { sendInviteEmail } from '../mailer';
 
@@ -123,14 +123,21 @@ userRouter.post('/invite', requirePermission('users:invite'), asyncHandler(async
   const data = req.body;
   const ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
-  if (!data.email || !data.fullName) {
-    res.status(400).json({ error: 'Email and full name are required.' });
+  const targetRole: UserRole = (data.role as UserRole) || STAFF_ROLE;
+  if (!canAssignRole(actorRole, targetRole)) {
+    res.status(403).json({ error: 'Cannot assign a role higher than your own or grant administrator privileges.' });
     return;
   }
 
-  const targetRole: UserRole = (data.role as UserRole) || 'USER';
-  if (!canAssignRole(actorRole, targetRole)) {
-    res.status(403).json({ error: 'Cannot assign a role higher than your own or grant administrator privileges.' });
+  // Staff without system access only need a name; an email is needed to send an invite.
+  const withAccess = hasSystemAccess(targetRole);
+  const fullName = typeof data.fullName === 'string' ? data.fullName.trim() : '';
+  if (!fullName) {
+    res.status(400).json({ error: 'Full name is required.' });
+    return;
+  }
+  if (withAccess && !data.email) {
+    res.status(400).json({ error: 'An email address is required to give this person system access.' });
     return;
   }
 
@@ -169,13 +176,16 @@ userRouter.post('/invite', requirePermission('users:invite'), asyncHandler(async
     departmentName = String(data.departmentName).trim();
   }
 
-  const cleanEmail = String(data.email).trim().toLowerCase();
+  const cleanEmail = data.email ? String(data.email).trim().toLowerCase() : '';
+  if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    res.status(400).json({ error: 'Enter a valid email address, or leave it empty.' });
+    return;
+  }
 
   // Global email uniqueness check (protect against cross-tenant collisions and account takeover)
-  const existing = await query<any>(
-    'SELECT `id`, `org_id`, `status` FROM `users` WHERE LOWER(`email`) = ? LIMIT 1;',
-    [cleanEmail]
-  );
+  const existing = cleanEmail
+    ? await query<any>('SELECT `id`, `org_id`, `status` FROM `users` WHERE LOWER(`email`) = ? LIMIT 1;', [cleanEmail])
+    : [];
 
   if (existing.length > 0) {
     const existingUser = existing[0];
@@ -190,7 +200,7 @@ userRouter.post('/invite', requirePermission('users:invite'), asyncHandler(async
     }
 
     // If in the same org and still pending invitation, re-issue fresh token
-    if (existingUser.status === 'INVITED') {
+    if (existingUser.status === 'INVITED' && withAccess) {
       const freshToken = generateSecureToken('inv');
       const freshTokenHash = hashToken(freshToken);
       const freshInvitedAt = new Date().toISOString();
@@ -202,7 +212,7 @@ userRouter.post('/invite', requirePermission('users:invite'), asyncHandler(async
           freshTokenHash,
           freshInvitedAt,
           freshExpiresAt,
-          data.fullName.trim(),
+          fullName,
           targetRole,
           departmentId,
           departmentName,
@@ -227,7 +237,7 @@ userRouter.post('/invite', requirePermission('users:invite'), asyncHandler(async
 
     // Active, suspended, or already onboarded user
     res.status(409).json({
-      error: 'An active account with this email address already exists.',
+      error: 'Someone in the staff list already has this email address.',
       code: 'EMAIL_ALREADY_EXISTS'
     });
     return;
@@ -235,6 +245,44 @@ userRouter.post('/invite', requirePermission('users:invite'), asyncHandler(async
 
   // Server-generated UUID ignores client-provided primary key
   const userId = crypto.randomUUID();
+
+  // Staff record: no invite token, no email, nothing to activate.
+  if (!withAccess) {
+    try {
+      await withTransaction(async (tx) => {
+        await tx(`
+          INSERT INTO \`users\` (
+            \`id\`, \`org_id\`, \`email\`, \`full_name\`, \`role\`, \`department_id\`,
+            \`department_name\`, \`branch_id\`, \`branch_name\`, \`status\`, \`version\`, \`token_version\`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 1, 1);
+        `, [userId, orgId, cleanEmail || null, fullName, STAFF_ROLE, departmentId, departmentName, branchId, branchName]);
+
+        await recordAuditEvent(tx, {
+          orgId,
+          actorId,
+          userName: actorName,
+          role: actorRole,
+          action: 'ADD_STAFF',
+          entityType: 'User',
+          entityId: userId,
+          entityName: fullName,
+          changes: { email: cleanEmail || null, systemAccess: false, branchId },
+          ipAddress
+        });
+      });
+    } catch (_err) {
+      res.status(500).json({ error: 'The staff member could not be added.' });
+      return;
+    }
+
+    res.status(201).json({
+      success: true,
+      userId,
+      systemAccess: false,
+      message: `${fullName} was added to the staff list. No invitation was sent.`
+    });
+    return;
+  }
   const inviteToken = generateSecureToken('inv');
   const inviteTokenHash = hashToken(inviteToken);
   const invitedAt = new Date().toISOString();
@@ -251,7 +299,7 @@ userRouter.post('/invite', requirePermission('users:invite'), asyncHandler(async
         userId,
         orgId, // Derived strictly from session!
         cleanEmail,
-        data.fullName.trim(),
+        fullName,
         targetRole,
         departmentId,
         departmentName,
@@ -270,7 +318,7 @@ userRouter.post('/invite', requirePermission('users:invite'), asyncHandler(async
         action: 'INVITE_USER',
         entityType: 'User',
         entityId: userId,
-        entityName: data.fullName.trim(),
+        entityName: fullName,
         changes: {
           email: cleanEmail,
           assignedRole: targetRole,
@@ -314,6 +362,13 @@ userRouter.post('/:id/reinvite', requirePermission('users:invite'), asyncHandler
   }
 
   const user = users[0];
+  if (!hasSystemAccess(user.role)) {
+    res.status(409).json({
+      error: `${user.full_name} has no system access, so there is no invitation to send. Give them an IT or management role first.`,
+      code: 'NO_SYSTEM_ACCESS'
+    });
+    return;
+  }
   if (user.status !== 'INVITED') {
     res.status(409).json({
       error: 'Cannot re-invite an account that has already been activated.',
@@ -432,7 +487,8 @@ userRouter.put('/:id', requirePermission('users:update'), asyncHandler(async (re
     }
 
     // Direct transition from INVITED to ACTIVE without password setup is forbidden
-    if (existing.status === 'INVITED' && data.status === 'ACTIVE') {
+    // (Staff without system access have no invite to finish, so they may go straight to ACTIVE.)
+    if (existing.status === 'INVITED' && data.status === 'ACTIVE' && hasSystemAccess(targetRole)) {
       // Must be onboarded with a secure password via invite link
       res.status(400).json({ error: 'Pending invited users must activate their account through the onboarding invite link.' });
       return;
@@ -501,18 +557,64 @@ userRouter.put('/:id', requirePermission('users:update'), asyncHandler(async (re
     }
   }
 
+  // Email: optional for staff, required for anyone with system access.
+  let targetEmail: string | null = existing.email || null;
+  if (data.email !== undefined) {
+    const cleaned = data.email ? String(data.email).trim().toLowerCase() : '';
+    if (cleaned && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleaned)) {
+      res.status(400).json({ error: 'Enter a valid email address, or leave it empty.' });
+      return;
+    }
+    if (cleaned && cleaned !== (existing.email || '').toLowerCase()) {
+      const clash = await query<any>('SELECT `id` FROM `users` WHERE LOWER(`email`) = ? AND `id` != ? LIMIT 1;', [cleaned, targetUserId]);
+      if (clash.length > 0) {
+        res.status(409).json({ error: 'Someone in the staff list already has this email address.', code: 'EMAIL_ALREADY_EXISTS' });
+        return;
+      }
+    }
+    targetEmail = cleaned || null;
+  }
+
+  // System access follows the role. Removing it cancels any pending invite (the person is
+  // simply an active staff member). Granting it to someone who never set a password sends
+  // a fresh invite.
+  const hadAccess = hasSystemAccess(existing.role);
+  const willHaveAccess = hasSystemAccess(targetRole);
+  if (willHaveAccess && !targetEmail) {
+    res.status(400).json({ error: 'Add an email address before giving this person system access, so the invitation can reach them.' });
+    return;
+  }
+  let inviteToken: string | null = null;
+  let inviteTokenHash: string | null = existing.invite_token_hash || null;
+  let invitedAt: string | null = existing.invited_at || null;
+  let inviteExpiresAt: string | null = existing.invite_expires_at || null;
+  if (!willHaveAccess) {
+    inviteTokenHash = null;
+    inviteExpiresAt = null;
+    if (targetStatus === 'INVITED') targetStatus = 'ACTIVE';
+  } else if (!hadAccess && !existing.password_hash && targetStatus !== 'SUSPENDED' && targetStatus !== 'DELETED') {
+    inviteToken = generateSecureToken('inv');
+    inviteTokenHash = hashToken(inviteToken);
+    invitedAt = new Date().toISOString();
+    inviteExpiresAt = new Date(Date.now() + 48 * 3600 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+    targetStatus = 'INVITED';
+  }
+
   const shouldBumpToken = targetRole !== existing.role || targetBranchId !== existing.branch_id || targetStatus !== existing.status;
 
   try {
     await withTransaction(async (tx) => {
       const updateRes = await tx(`
         UPDATE \`users\` SET
-          \`full_name\` = ?, \`role\` = ?, \`status\` = ?, \`department_id\` = ?, \`department_name\` = ?,
-          \`branch_id\` = ?, \`branch_name\` = ?, \`avatar\` = ?, \`version\` = \`version\` + 1,
+          \`full_name\` = ?, \`email\` = ?, \`role\` = ?, \`status\` = ?, \`department_id\` = ?, \`department_name\` = ?,
+          \`branch_id\` = ?, \`branch_name\` = ?, \`avatar\` = ?,
+          \`invite_token_hash\` = ?, \`invited_at\` = ?, \`invite_expires_at\` = ?,
+          \`version\` = \`version\` + 1,
           \`token_version\` = \`token_version\` + ${shouldBumpToken ? 1 : 0}
         WHERE \`id\` = ? AND \`org_id\` = ? AND \`version\` = ?;
       `, [
         data.fullName || existing.full_name,
+        targetEmail,
         targetRole,
         targetStatus,
         targetDepartmentId,
@@ -520,6 +622,9 @@ userRouter.put('/:id', requirePermission('users:update'), asyncHandler(async (re
         targetBranchId,
         targetBranchName,
         data.avatar !== undefined ? data.avatar : existing.avatar,
+        inviteTokenHash,
+        invitedAt,
+        inviteExpiresAt,
         targetUserId,
         orgId,
         currentVersion
@@ -548,6 +653,7 @@ userRouter.put('/:id', requirePermission('users:update'), asyncHandler(async (re
           previousStatus: existing.status,
           updatedStatus: targetStatus,
           departmentId: targetDepartmentId,
+          ...(hadAccess !== willHaveAccess ? { systemAccess: willHaveAccess } : {}),
           version: currentVersion + 1
         },
         ipAddress
@@ -556,7 +662,18 @@ userRouter.put('/:id', requirePermission('users:update'), asyncHandler(async (re
 
     invalidateUserCache(targetUserId);
 
-    res.json({ success: true, message: 'User updated successfully.', version: currentVersion + 1 });
+    let message = 'User updated successfully.';
+    let emailDelivered: boolean | undefined;
+    if (inviteToken && targetEmail) {
+      emailDelivered = (await sendInviteEmail(targetEmail, inviteToken)).delivered;
+      message = emailDelivered
+        ? `System access granted. An invitation was emailed to ${targetEmail}.`
+        : `System access granted, but the invitation email could not be sent to ${targetEmail}. Use Re-Invite to try again.`;
+    } else if (hadAccess && !willHaveAccess) {
+      message = 'System access removed. They stay in the staff list and keep their assets.';
+    }
+
+    res.json({ success: true, message, emailDelivered, status: targetStatus, version: currentVersion + 1 });
   } catch (err: any) {
     const statusCode = err.statusCode || 500;
     res.status(statusCode).json({ error: statusCode === 409 ? err.message : 'User update transaction failed.' });

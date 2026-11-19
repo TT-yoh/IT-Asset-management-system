@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { asyncHandler } from './asyncHandler';
 import config from '../config';
 import { verifySessionToken, createSessionToken, SESSION_TTL_SECONDS } from '../auth';
-import { AuthContextPayload, UserRole, PermissionAction, hasPermission } from '../permissions';
+import { AuthContextPayload, UserRole, PermissionAction, hasPermission, hasSystemAccess } from '../permissions';
 import { query } from '../db';
 
 // Extend Express Request interface to include authenticated session payload
@@ -194,6 +194,13 @@ export const authenticate = asyncHandler(async (req: Request, res: Response, nex
   // Reject if status is not ACTIVE
   if (user.status !== 'ACTIVE') {
     res.status(401).json({ error: 'Account is not active or has been suspended.' });
+    return;
+  }
+
+  // Staff records (no system access) never hold a session, even one issued before
+  // their access was removed.
+  if (!hasSystemAccess(user.role)) {
+    res.status(401).json({ error: 'This account does not have access to the system.' });
     return;
   }
 

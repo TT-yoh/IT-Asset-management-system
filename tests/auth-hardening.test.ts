@@ -121,8 +121,10 @@ async function runTests() {
   const activeUserEmail = 'active@auth-test.internal';
   await query(`
     INSERT INTO users (id, org_id, email, full_name, role, status, branch_id, branch_name, password_hash, token_version, version)
-    VALUES (?, ?, ?, ?, 'USER', 'ACTIVE', ?, 'Auth Test Branch', ?, 1, 1);
+    VALUES (?, ?, ?, ?, 'IT_SUPPORT', 'ACTIVE', ?, 'Auth Test Branch', ?, 1, 1);
   `, [activeUserId, testOrgId, activeUserEmail, 'Active User', testBranchId, hashedPass]);
+  // (IT_SUPPORT, not USER: USER is a staff record with no system access and never holds a
+  // session; tests/staff-access.test.ts covers that.)
 
   // Request with valid session cookie
   const mockReq: any = {
@@ -141,7 +143,7 @@ async function runTests() {
 
   await authenticate(mockReq, mockRes, () => { nextCalled = true; });
   assert(nextCalled, 'authenticate middleware succeeds for active user with matching token_version');
-  assert(mockReq.auth?.userId === activeUserId && mockReq.auth?.role === 'USER', 'req.auth populated with fresh DB user record');
+  assert(mockReq.auth?.userId === activeUserId && mockReq.auth?.role === 'IT_SUPPORT', 'req.auth populated with fresh DB user record');
 
   // Token revocation: bump token_version in DB
   await query('UPDATE users SET token_version = token_version + 1 WHERE id = ?;', [activeUserId]);

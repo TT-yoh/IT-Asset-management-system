@@ -27,6 +27,9 @@ import {
   SESSION_TTL_SECONDS
 } from '../auth';
 import { authenticate, invalidateUserCache, asyncHandler } from '../middleware';
+import { hasSystemAccess, STAFF_ROLE } from '../permissions';
+
+const NO_ACCESS_MESSAGE = 'This account does not have access to the system. Ask your IT team if you need it.';
 import { sendPasswordResetEmail } from '../mailer';
 
 export const authRouter = Router();
@@ -78,6 +81,10 @@ authRouter.post('/login', asyncHandler(async (req: Request, res: Response) => {
     const user = users[0];
     if (!user || user.status !== 'ACTIVE') {
       res.status(401).json({ error: 'Invalid corporate credentials.' });
+      return;
+    }
+    if (!hasSystemAccess(user.role)) {
+      res.status(403).json({ error: NO_ACCESS_MESSAGE, code: 'NO_SYSTEM_ACCESS' });
       return;
     }
 
@@ -186,6 +193,12 @@ authRouter.post('/login', asyncHandler(async (req: Request, res: Response) => {
     }
     // Generic error: never reveal account state pre-auth
     res.status(401).json({ error: 'Invalid corporate credentials.' });
+    return;
+  }
+
+  // The password was right, so saying why is safe: staff records have no system access.
+  if (!hasSystemAccess(user.role)) {
+    res.status(403).json({ error: NO_ACCESS_MESSAGE, code: 'NO_SYSTEM_ACCESS' });
     return;
   }
 
@@ -742,6 +755,10 @@ authRouter.get('/invite/:token', asyncHandler(async (req: Request, res: Response
   }
 
   const user = users[0]!;
+  if (!hasSystemAccess(user.role)) {
+    res.status(404).json({ valid: false, error: 'This invitation is no longer valid. Ask your IT team if you need access.' });
+    return;
+  }
   if (user.status !== 'INVITED') {
     res.status(409).json({
       valid: false,
@@ -805,8 +822,8 @@ authRouter.post('/activate', asyncHandler(async (req: Request, res: Response) =>
   const tokenHash = hashToken(cleanToken);
 
   const users = await query<any>(
-    "SELECT `id`, `org_id`, `email`, `full_name`, `role`, `department_id`, `department_name`, `branch_id`, `branch_name`, `status`, `invite_expires_at`, `token_version` FROM `users` WHERE `invite_token_hash` = ? AND `status` = 'INVITED' LIMIT 1;",
-    [tokenHash]
+    "SELECT `id`, `org_id`, `email`, `full_name`, `role`, `department_id`, `department_name`, `branch_id`, `branch_name`, `status`, `invite_expires_at`, `token_version` FROM `users` WHERE `invite_token_hash` = ? AND `status` = 'INVITED' AND `role` <> ? LIMIT 1;",
+    [tokenHash, STAFF_ROLE]
   );
 
   if (users.length === 0) {
@@ -898,8 +915,8 @@ authRouter.post('/forgot-password', asyncHandler(async (req: Request, res: Respo
 
   const cleanEmail = String(email).trim().toLowerCase();
   const users = await query<any>(
-    "SELECT `id`, `status` FROM `users` WHERE LOWER(`email`) = ? AND `status` = 'ACTIVE' LIMIT 1;",
-    [cleanEmail]
+    "SELECT `id`, `status` FROM `users` WHERE LOWER(`email`) = ? AND `status` = 'ACTIVE' AND `role` <> ? LIMIT 1;",
+    [cleanEmail, STAFF_ROLE]
   );
 
   if (users.length > 0) {
@@ -947,8 +964,8 @@ authRouter.post('/reset-password', asyncHandler(async (req: Request, res: Respon
   const tokenHash = hashToken(cleanToken);
 
   const users = await query<any>(
-    'SELECT `id`, `email`, `full_name`, `reset_expires_at` FROM `users` WHERE `reset_token_hash` = ? LIMIT 1;',
-    [tokenHash]
+    'SELECT `id`, `email`, `full_name`, `reset_expires_at` FROM `users` WHERE `reset_token_hash` = ? AND `role` <> ? LIMIT 1;',
+    [tokenHash, STAFF_ROLE]
   );
 
   if (users.length === 0) {

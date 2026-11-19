@@ -795,7 +795,7 @@ export const FacilitiesPanel: React.FC<FacilitiesPanelProps> = ({
                     <option value="">-- Appoint from active staff list --</option>
                     {orgUsers.map(u => (
                       <option key={u.id} value={u.id}>
-                        {u.fullName} ({u.role} • {u.email})
+                        {u.fullName} ({u.role}{u.email ? ` • ${u.email}` : ""})
                       </option>
                     ))}
                   </select>

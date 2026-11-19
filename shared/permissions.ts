@@ -5,6 +5,26 @@
 
 export type UserRole = 'ADMIN' | 'DIRECTOR' | 'BRANCH_MANAGER' | 'IT_SUPPORT' | 'FINANCE' | 'USER';
 
+/**
+ * Only IT and management sign in. `USER` is a staff record kept so assets can be assigned
+ * to the person: no invite, no password, no sessions. Granting access means giving the
+ * person one of the other roles.
+ */
+export const STAFF_ROLE: UserRole = 'USER';
+
+export function hasSystemAccess(role: UserRole | string | undefined | null): boolean {
+  return Boolean(role) && role !== STAFF_ROLE;
+}
+
+export const ROLE_LABELS: Record<UserRole, string> = {
+  ADMIN: 'Administrator',
+  DIRECTOR: 'Director',
+  BRANCH_MANAGER: 'Branch Manager',
+  IT_SUPPORT: 'IT Support',
+  FINANCE: 'Finance',
+  USER: 'Staff (no system access)'
+};
+
 export interface AuthContextPayload {
   userId: string;
   orgId: string;

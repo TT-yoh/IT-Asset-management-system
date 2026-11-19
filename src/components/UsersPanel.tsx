@@ -3,6 +3,10 @@ import { User, Organization, Branch, Asset, AuditLogItem, Department } from '../
 import { useFeedback } from '../context/FeedbackContext';
 import { Pagination } from './ui/Pagination';
 import { RESYNC_EVENT } from '../lib/tidb-storage';
+import { hasSystemAccess, ROLE_LABELS, UserRole } from '../../shared/permissions';
+
+// Staff first: it is the default for new people, who usually just hold assets.
+const ROLE_OPTIONS: UserRole[] = ['USER', 'IT_SUPPORT', 'BRANCH_MANAGER', 'FINANCE', 'DIRECTOR', 'ADMIN'];
 import { 
   Users, 
   UserPlus, 
@@ -52,7 +56,7 @@ interface UsersPanelProps {
     departmentName?: string;
     branchId?: string;
     branchName?: string;
-  }) => Promise<{ success: boolean; inviteToken?: string; emailDelivered?: boolean; user?: User; error?: string }>;
+  }) => Promise<{ success: boolean; inviteToken?: string; emailDelivered?: boolean; systemAccess?: boolean; user?: User; error?: string }>;
   onUpdateUser?: (updatedUser: User) => void;
   onDeleteUser?: (userId: string) => Promise<{ success: boolean; error?: string }>;
   onUpdateAsset?: (asset: Asset) => void;
@@ -207,10 +211,10 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
   const pagedUsers = filteredUsers.slice((currentUserPage - 1) * userPageSize, currentUserPage * userPageSize);
 
   // Calculate statistics
-  const activeCount = orgUsers.filter(u => (u.status || 'ACTIVE') === 'ACTIVE').length;
+  const activeCount = orgUsers.filter(u => (u.status || 'ACTIVE') === 'ACTIVE' && hasSystemAccess(u.role)).length;
+  const staffOnlyCount = orgUsers.filter(u => !hasSystemAccess(u.role) && u.status !== 'DELETED').length;
   const invitedCount = orgUsers.filter(u => u.status === 'INVITED').length;
   const suspendedCount = orgUsers.filter(u => u.status === 'SUSPENDED').length;
-  const adminsCount = orgUsers.filter(u => u.role === 'ADMIN' || u.role === 'DIRECTOR').length;
   const itSupportCount = orgUsers.filter(u => u.role === 'IT_SUPPORT').length;
 
   const getRoleBadgeColor = (role: string) => {
@@ -242,7 +246,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
   const handleStartEdit = (u: User) => {
     setEditingUser(u);
     setEditFullName(u.fullName);
-    setEditEmail(u.email);
+    setEditEmail(u.email || '');
     setEditRole(u.role);
     setEditBranchId(u.branchId);
     setEditDeptId(u.departmentId);
@@ -261,7 +265,16 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
     // If editing self, role cannot be changed away from ADMIN, and status cannot be SUSPENDED
     const isEditingSelf = currentUser?.id === editingUser.id;
     const finalRole = isEditingSelf ? 'ADMIN' : editRole;
-    const finalStatus = isEditingSelf ? 'ACTIVE' : editStatus;
+    const hadAccess = hasSystemAccess(editingUser.role);
+    const willHaveAccess = hasSystemAccess(finalRole);
+    // Staff without access have no invite to wait for; the server works out INVITED itself
+    // when access is granted.
+    const finalStatus = isEditingSelf ? 'ACTIVE' : (!willHaveAccess && editStatus === 'INVITED' ? 'ACTIVE' : editStatus);
+
+    if (willHaveAccess && !editEmail.trim()) {
+      showToast('Add an email address so the invitation can reach them.', 'error');
+      return;
+    }
 
     const updated: User = {
       ...editingUser,
@@ -277,7 +290,15 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
 
     onUpdateUser(updated);
     setEditingUser(null);
-    showToast(`Staff member "${updated.fullName}" was updated successfully.`);
+    if (!hadAccess && willHaveAccess) {
+      showToast(`${updated.fullName} now has system access. An invitation is being emailed to ${updated.email}.`);
+      // The server moved them to INVITED; reload so the list shows it.
+      setTimeout(() => window.dispatchEvent(new Event(RESYNC_EVENT)), 1500);
+    } else if (hadAccess && !willHaveAccess) {
+      showToast(`${updated.fullName} no longer has system access. They stay in the staff list and keep their assets.`, 'info');
+    } else {
+      showToast(`Staff member "${updated.fullName}" was updated successfully.`);
+    }
   };
 
   // Quick Toggle Account Suspension
@@ -348,7 +369,8 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
   const handleInviteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isInviting) return;
-    if (!newFullName.trim() || !newEmail.trim()) return;
+    if (!newFullName.trim()) return;
+    if (hasSystemAccess(newRole) && !newEmail.trim()) return;
 
     const branch = branches.find(b => b.id === selectedBranchId) || branches[0];
     if (!branch) {
@@ -388,7 +410,9 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
           setNewFullName('');
           setNewEmail('');
           setNewRole('USER');
-          if (res.emailDelivered) {
+          if (res.systemAccess === false) {
+            showToast(`${invitedName} was added to the staff list. No invitation was sent.`);
+          } else if (res.emailDelivered) {
             showToast(`Invitation emailed to ${invitedName} (${invitedEmail}).`);
           } else {
             showToast(`${invitedName} was added, but the invitation email could not be sent. Check the server mail settings, then use Resend.`, 'error');
@@ -593,7 +617,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                 className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 transition cursor-pointer"
               >
                 <UserPlus className="w-4 h-4" />
-                <span>Invite New Staff</span>
+                <span>Add Staff</span>
               </button>
             )}
           </div>
@@ -602,9 +626,15 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
         {/* 5 KPI Stat Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Active Accounts</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">System Users</span>
             <div className="text-2xl font-black text-emerald-400 mt-1">{activeCount}</div>
-            <span className="text-[10px] text-slate-500">Verified corporate logins</span>
+            <span className="text-[10px] text-slate-500">IT & management who can sign in</span>
+          </div>
+
+          <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Staff (No Access)</span>
+            <div className="text-2xl font-black text-slate-200 mt-1">{staffOnlyCount}</div>
+            <span className="text-[10px] text-slate-500">Hold assets, cannot sign in</span>
           </div>
 
           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4">
@@ -617,12 +647,6 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Suspended</span>
             <div className="text-2xl font-black text-rose-400 mt-1">{suspendedCount}</div>
             <span className="text-[10px] text-slate-500">Access revoked</span>
-          </div>
-
-          <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Admins & Governance</span>
-            <div className="text-2xl font-black text-purple-400 mt-1">{adminsCount}</div>
-            <span className="text-[10px] text-slate-500">Full control & policy</span>
           </div>
 
           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4">
@@ -655,12 +679,9 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
             className="px-2.5 py-1.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
           >
             <option value="ALL">All Roles</option>
-            <option value="ADMIN">ADMIN</option>
-            <option value="DIRECTOR">DIRECTOR</option>
-            <option value="BRANCH_MANAGER">BRANCH_MANAGER</option>
-            <option value="IT_SUPPORT">IT_SUPPORT</option>
-            <option value="FINANCE">FINANCE</option>
-            <option value="USER">USER</option>
+            {ROLE_OPTIONS.map(r => (
+              <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+            ))}
           </select>
         </div>
 
@@ -738,6 +759,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                 pagedUsers.map(user => {
                   const userAssets = getUserAssets(user.id);
                   const isInvited = user.status === 'INVITED';
+                  const hasAccess = hasSystemAccess(user.role);
                   const isSuspended = user.status === 'SUSPENDED';
                   const isCurrentUser = currentUser?.id === user.id;
 
@@ -770,7 +792,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                               )}
                             </div>
                             <span className="text-[11px] text-slate-400 font-mono block break-all">
-                              {user.email}
+                              {user.email || <span className="italic text-slate-600 font-sans">No email</span>}
                             </span>
                           </div>
                         </div>
@@ -778,8 +800,8 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
 
                       {/* Role Badge */}
                       <td className="py-3 px-4">
-                        <span className={`px-2 py-0.5 rounded-md font-mono text-[10px] font-bold border ${getRoleBadgeColor(user.role)}`}>
-                          {user.role}
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${getRoleBadgeColor(user.role)}`}>
+                          {hasAccess ? (ROLE_LABELS[user.role as UserRole] || user.role) : 'Staff'}
                         </span>
                       </td>
 
@@ -822,20 +844,27 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                             <span>ACTIVE</span>
                           </span>
                         )}
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold flex items-center gap-1 w-fit ${
-                          user.twoFactorEnabled
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                            : 'bg-slate-800 text-slate-400'
-                        }`}>
-                          <Lock className="w-3 h-3" />
-                          <span>{user.twoFactorEnabled ? '2FA ON' : 'Standard'}</span>
-                        </span>
+                        {hasAccess ? (
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold flex items-center gap-1 w-fit ${
+                            user.twoFactorEnabled
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                              : 'bg-slate-800 text-slate-400'
+                          }`}>
+                            <Lock className="w-3 h-3" />
+                            <span>{user.twoFactorEnabled ? '2FA ON' : 'Standard'}</span>
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 w-fit bg-slate-800/60 text-slate-500 border border-slate-700">
+                            <Ban className="w-3 h-3" />
+                            <span>No system access</span>
+                          </span>
+                        )}
                       </td>
 
                       {/* Actions */}
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          {isInvited && (
+                          {isInvited && hasAccess && (
                             <>
                               <button
                                 type="button"
@@ -934,7 +963,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                     Modify Staff Account
                   </h3>
                   <span className="text-[10px] text-slate-400 font-mono">
-                    {editingUser.email}
+                    {editingUser.email || editingUser.fullName}
                   </span>
                 </div>
               </div>
@@ -965,11 +994,11 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
 
               <div>
                 <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1">
-                  Email Address
+                  Email Address {hasSystemAccess(editRole) ? '*' : <span className="normal-case font-normal text-slate-500">(optional for staff)</span>}
                 </label>
                 <input
                   type="email"
-                  required
+                  required={hasSystemAccess(editRole)}
                   value={editEmail}
                   onChange={(e) => setEditEmail(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
@@ -987,12 +1016,9 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                     onChange={(e) => setEditRole(e.target.value as any)}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    <option value="USER">USER (Standard)</option>
-                    <option value="IT_SUPPORT">IT_SUPPORT</option>
-                    <option value="BRANCH_MANAGER">BRANCH_MANAGER</option>
-                    <option value="FINANCE">FINANCE</option>
-                    <option value="DIRECTOR">DIRECTOR</option>
-                    <option value="ADMIN">ADMIN</option>
+                    {ROLE_OPTIONS.map(r => (
+                      <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                    ))}
                   </select>
                   {currentUser?.id === editingUser.id && (
                     <span className="text-[10px] text-amber-400 mt-1 block">
@@ -1013,7 +1039,9 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                   >
                     <option value="ACTIVE">ACTIVE</option>
                     <option value="SUSPENDED">SUSPENDED</option>
-                    <option value="INVITED">INVITED</option>
+                    {editingUser.status === 'INVITED' && hasSystemAccess(editRole) && (
+                      <option value="INVITED">INVITED (pending)</option>
+                    )}
                   </select>
                   {currentUser?.id === editingUser.id && (
                     <span className="text-[10px] text-amber-400 mt-1 block">
@@ -1022,6 +1050,19 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                   )}
                 </div>
               </div>
+
+              {/* What saving will do to this person's ability to sign in */}
+              {hasSystemAccess(editingUser.role) !== hasSystemAccess(editRole) && (
+                <div className={`p-3 rounded-xl border text-[11px] leading-relaxed ${
+                  hasSystemAccess(editRole)
+                    ? 'bg-sky-500/10 border-sky-500/30 text-sky-200'
+                    : 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+                }`}>
+                  {hasSystemAccess(editRole)
+                    ? 'This gives them system access. An invitation will be emailed so they can set a password.'
+                    : 'This removes their system access. They stay in the staff list, keep their assets, and can no longer sign in.'}
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1177,7 +1218,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
               <div className="flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-emerald-400" />
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                  Invite Staff Member
+                  Add Staff Member
                 </h3>
               </div>
               <button
@@ -1207,11 +1248,11 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
 
               <div>
                 <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1">
-                  Corporate Email *
+                  Email {hasSystemAccess(newRole) ? '*' : <span className="normal-case font-normal text-slate-500">(optional for staff)</span>}
                 </label>
                 <input
                   type="email"
-                  required
+                  required={hasSystemAccess(newRole)}
                   value={newEmail}
                   onChange={(e) => setNewEmail(e.target.value)}
                   placeholder="e.g. rachel.adams@enterprise.io"
@@ -1229,12 +1270,9 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                     onChange={(e) => setNewRole(e.target.value as any)}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500 cursor-pointer"
                   >
-                    <option value="USER">USER (Standard Employee)</option>
-                    <option value="IT_SUPPORT">IT_SUPPORT (Helpdesk)</option>
-                    <option value="BRANCH_MANAGER">BRANCH_MANAGER</option>
-                    <option value="FINANCE">FINANCE</option>
-                    <option value="DIRECTOR">DIRECTOR</option>
-                    <option value="ADMIN">ADMIN</option>
+                    {ROLE_OPTIONS.map(r => (
+                      <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                    ))}
                   </select>
                 </div>
 
@@ -1275,6 +1313,16 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                 </select>
               </div>
 
+              <div className={`p-3 rounded-xl border text-[11px] leading-relaxed ${
+                hasSystemAccess(newRole)
+                  ? 'bg-sky-500/10 border-sky-500/30 text-sky-200'
+                  : 'bg-slate-950 border-slate-800 text-slate-400'
+              }`}>
+                {hasSystemAccess(newRole)
+                  ? 'They will get system access: an invitation is emailed so they can set a password and sign in.'
+                  : 'Staff can be assigned assets but cannot sign in. No invitation is sent. You can give them access later by changing their role.'}
+              </div>
+
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
                 <button
                   type="button"
@@ -1289,7 +1337,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
                   aria-busy={isInviting}
                   className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  {isInviting ? 'Generating…' : 'Generate Invitation'}
+                  {isInviting ? 'Saving…' : hasSystemAccess(newRole) ? 'Add & Send Invitation' : 'Add Staff'}
                 </button>
               </div>
             </form>

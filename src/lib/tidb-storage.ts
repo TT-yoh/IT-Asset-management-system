@@ -761,6 +761,8 @@ export async function persistUser(user: User, _allUsers?: User[], reportMissingV
   }
   return sendSave(`Changes to ${user.fullName}`, `/api/users/${encodeURIComponent(user.id)}`, 'PUT', {
     fullName: user.fullName,
+    // Staff without system access may have no email (sent as empty, stored as none).
+    email: user.email || '',
     role: user.role,
     status: user.status,
     departmentId: user.departmentId,
