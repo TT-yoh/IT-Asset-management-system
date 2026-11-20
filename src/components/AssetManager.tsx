@@ -116,6 +116,7 @@ export interface AssetManagerProps {
   onBulkAddAssets?: (newAssets: Asset[]) => Promise<BulkImportResult | null> | void;
   onBatchUpdateStatus?: (assetIds: string[], status: AssetStatus, reason?: string) => void;
   onBatchTransferBranch?: (assetIds: string[], branchId: string, branchName: string) => void;
+  onBatchSetCost?: (assetIds: string[], purchaseCost: number, alsoSetValue: boolean) => void;
   onBatchDelete?: (assetIds: string[]) => void;
   searchQuery: string;
   initialStatusFilter?: string;
@@ -146,6 +147,7 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
   onBulkAddAssets,
   onBatchUpdateStatus,
   onBatchTransferBranch,
+  onBatchSetCost,
   onBatchDelete,
   searchQuery,
   initialStatusFilter = 'ALL',
@@ -169,6 +171,8 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
   const canEditAsset = isITTeam || currentUser.role === 'BRANCH_MANAGER';
   const canDeleteAsset = isITTeam;
   const canWriteOff = hasPermission(currentUser.role, 'assets:writeoff');
+  // Changing book value is limited to admins and finance; the server enforces the same rule.
+  const canSetValue = hasPermission(currentUser.role, 'assets:valuation');
   const canImportAssets = isITTeam;
   const isBranchRestricted = currentUser.role === 'BRANCH_MANAGER' || currentUser.role === 'USER';
 
@@ -315,6 +319,12 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
     } else if (onUpdateAsset) {
       assets.filter((a) => selectedAssetIds.has(a.id)).forEach((a) => onUpdateAsset({ ...a, branchId, branchName }));
     }
+    setSelectedAssetIds(new Set());
+  };
+
+  const handleBatchSetCost = (purchaseCost: number, alsoSetValue: boolean) => {
+    if (!onBatchSetCost) return;
+    onBatchSetCost(Array.from(selectedAssetIds), purchaseCost, alsoSetValue && canSetValue);
     setSelectedAssetIds(new Set());
   };
 
@@ -765,6 +775,8 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
         canWriteOff={canWriteOff}
         onBatchStatusChange={handleBatchStatusChange}
         onBatchTransferBranch={handleBatchTransfer}
+        onBatchSetCost={onBatchSetCost && canEditAsset ? handleBatchSetCost : undefined}
+        canSetValue={canSetValue}
         onBatchDelete={handleBatchDeleteAction}
         onBatchPrintLabels={() => setIsLabelPrinterOpen(true)}
         onClearSelection={() => setSelectedAssetIds(new Set())}

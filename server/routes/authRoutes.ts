@@ -30,6 +30,31 @@ import { authenticate, invalidateUserCache, asyncHandler } from '../middleware';
 import { hasSystemAccess, STAFF_ROLE } from '../permissions';
 
 const NO_ACCESS_MESSAGE = 'This account does not have access to the system. Ask your IT team if you need it.';
+
+/**
+ * Display details of the user's organization, sent with sign-in and session replies so the
+ * app shows the real name straight away instead of a placeholder. Never fails the request.
+ */
+async function loadOrganizationSummary(orgId: string) {
+  try {
+    const rows = await query<any>(
+      'SELECT `id`, `name`, `type`, `logo`, `branding_color`, `branches_count` FROM `organizations` WHERE `id` = ? LIMIT 1;',
+      [orgId]
+    );
+    const o = rows[0];
+    if (!o) return undefined;
+    return {
+      id: o.id,
+      name: o.name,
+      type: o.type || 'Enterprise',
+      logo: o.logo || undefined,
+      brandingColor: o.branding_color || '#0ea5e9',
+      branchesCount: Number(o.branches_count) || 0
+    };
+  } catch {
+    return undefined;
+  }
+}
 import { sendPasswordResetEmail } from '../mailer';
 
 export const authRouter = Router();
@@ -149,7 +174,8 @@ authRouter.post('/login', asyncHandler(async (req: Request, res: Response) => {
         twoFactorEnabled: Boolean(user.two_factor_enabled),
         avatar: user.avatar,
         status: user.status
-      }
+      },
+      organization: await loadOrganizationSummary(user.org_id)
     });
     return;
   }
@@ -277,7 +303,8 @@ authRouter.post('/login', asyncHandler(async (req: Request, res: Response) => {
       twoFactorEnabled: Boolean(user.two_factor_enabled),
       avatar: user.avatar,
       status: user.status
-    }
+    },
+    organization: await loadOrganizationSummary(user.org_id)
   });
 }));
 
@@ -575,7 +602,8 @@ authRouter.get('/me', authenticate, asyncHandler(async (req: Request, res: Respo
       avatar: u.avatar,
       status: u.status,
       isSuperAdmin: Boolean(u.is_super_admin)
-    }
+    },
+    organization: await loadOrganizationSummary(u.org_id)
   });
 }));
 

@@ -146,10 +146,12 @@ export function splitSqlStatements(sqlText) {
 }
 
 /**
- * Calculates SHA-256 checksum for a file
+ * Calculates SHA-256 checksum for a file.
+ * Line endings are normalised to LF first, so a Windows checkout (CRLF) of an unchanged
+ * migration matches the checksum recorded when it was applied.
  */
 export function calculateChecksum(content) {
-  return crypto.createHash('sha256').update(content, 'utf8').digest('hex');
+  return crypto.createHash('sha256').update(String(content).replace(/\r\n/g, '\n'), 'utf8').digest('hex');
 }
 
 /**

@@ -190,7 +190,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             });
 
             setCurrentOrg(prevOrg => {
-              const matchedOrg = systemOrgs.find(o => o.id === serverUser.orgId) || {
+              const serverOrg = data.organization && data.organization.id === serverUser.orgId ? data.organization : undefined;
+              const matchedOrg = serverOrg || systemOrgs.find(o => o.id === serverUser.orgId) || {
                 id: serverUser.orgId,
                 name: 'Enterprise Organization',
                 type: 'Enterprise',

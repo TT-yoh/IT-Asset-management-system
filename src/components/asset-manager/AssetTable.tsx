@@ -95,29 +95,44 @@ export const AssetTable: React.FC<AssetTableProps> = ({
   const isAllSelected = allSelected ?? (assets.length > 0 && assets.every(a => selectedIds.has(a.id)));
   const selectAllCount = totalCount ?? assets.length;
 
-  const renderHeader = (label: string, key: AssetSortKey, align: 'left' | 'right' = 'left') => {
+  const renderSortButton = (label: string, key: AssetSortKey) => {
     const active = sortKey === key;
     const SortIcon = !active ? ArrowUpDown : sortDir === 'asc' ? ArrowUp : ArrowDown;
+    if (!onSort) return <span>{label}</span>;
+    return (
+      <button
+        type="button"
+        onClick={() => onSort(key)}
+        aria-label={`Sort by ${label}`}
+        className={`inline-flex items-center gap-1 font-medium cursor-pointer hover:text-white transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
+          active ? 'text-emerald-400' : ''
+        }`}
+      >
+        {label}
+        <SortIcon className={`w-3 h-3 ${active ? '' : 'opacity-50'}`} aria-hidden="true" />
+      </button>
+    );
+  };
+
+  /** A column that shows two values stacked (e.g. code above name) and can sort by either. */
+  const renderHeader = (label: string, key: AssetSortKey, align: 'left' | 'right' = 'left', second?: { label: string; key: AssetSortKey }) => {
+    const keys = second ? [key, second.key] : [key];
+    const activeKey = keys.find(k => k === sortKey);
     return (
       <th
         scope="col"
-        aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
-        className={`p-3 ${align === 'right' ? 'text-right' : ''}`}
+        aria-sort={activeKey ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+        className={`p-2.5 xl:p-3 ${align === 'right' ? 'text-right' : ''}`}
       >
-        {onSort ? (
-          <button
-            type="button"
-            onClick={() => onSort(key)}
-            className={`inline-flex items-center gap-1 font-medium cursor-pointer hover:text-white transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
-              active ? 'text-emerald-400' : ''
-            }`}
-          >
-            {label}
-            <SortIcon className={`w-3 h-3 ${active ? '' : 'opacity-50'}`} aria-hidden="true" />
-          </button>
-        ) : (
-          label
-        )}
+        <span className={`inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 ${align === 'right' ? 'justify-end' : ''}`}>
+          {renderSortButton(label, key)}
+          {second && (
+            <>
+              <span className="text-slate-600" aria-hidden="true">/</span>
+              {renderSortButton(second.label, second.key)}
+            </>
+          )}
+        </span>
       </th>
     );
   };
@@ -127,7 +142,7 @@ export const AssetTable: React.FC<AssetTableProps> = ({
       <table className="w-full text-left border-collapse text-xs">
         <thead>
           <tr className="border-b border-slate-800 bg-slate-950/80 text-slate-400 font-medium">
-            <th scope="col" className="p-3 w-10 text-center">
+            <th scope="col" className="p-2.5 xl:p-3 w-10 text-center">
               <input
                 type="checkbox"
                 checked={isAllSelected}
@@ -136,20 +151,18 @@ export const AssetTable: React.FC<AssetTableProps> = ({
                 className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-emerald-500 focus:ring-emerald-500/20 cursor-pointer accent-emerald-500"
               />
             </th>
-            {renderHeader('Asset Code', 'assetCode')}
-            {renderHeader('Device & Specs', 'name')}
+            {renderHeader('Code', 'assetCode', 'left', { label: 'Device', key: 'name' })}
             {renderHeader('Branch Facility', 'branchName')}
-            {renderHeader('Assigned Custodian', 'assignedToUserName')}
-            {renderHeader('Status', 'status')}
-            {renderHeader('Condition', 'condition')}
+            {renderHeader('Custodian', 'assignedToUserName')}
+            {renderHeader('Status', 'status', 'left', { label: 'Condition', key: 'condition' })}
             {renderHeader('Valuation', 'currentValue', 'right')}
-            <th scope="col" className="p-3 text-center">Actions</th>
+            <th scope="col" className="p-2.5 xl:p-3 text-center">Actions</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-800/60">
           {assets.length === 0 ? (
             <tr>
-              <td colSpan={9} className="p-8 text-center text-slate-500">
+              <td colSpan={7} className="p-8 text-center text-slate-500">
                 No assets found matching current criteria.
               </td>
             </tr>
@@ -164,7 +177,7 @@ export const AssetTable: React.FC<AssetTableProps> = ({
                     isSelected ? 'bg-emerald-500/5' : ''
                   }`}
                 >
-                  <td className="p-3 text-center">
+                  <td className="p-2.5 xl:p-3 text-center">
                     <input
                       type="checkbox"
                       checked={isSelected}
@@ -174,13 +187,8 @@ export const AssetTable: React.FC<AssetTableProps> = ({
                     />
                   </td>
 
-                  <td className="p-3 font-mono font-bold text-slate-200">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-emerald-400">{asset.assetCode}</span>
-                    </div>
-                  </td>
-
-                  <td className="p-3">
+                  <td className="p-2.5 xl:p-3">
+                    <div className="font-mono font-bold text-[11px] text-emerald-400">{asset.assetCode}</div>
                     <div className="font-semibold text-slate-100">{asset.name || 'Hardware Asset'}</div>
                     <div className="text-[11px] text-slate-400 font-mono">
                       {asset.model && asset.model !== asset.name ? `${asset.model} • ` : ''}
@@ -199,41 +207,44 @@ export const AssetTable: React.FC<AssetTableProps> = ({
                     </div>
                   </td>
 
-                  <td className="p-3 text-slate-300">
+                  <td className="p-2.5 xl:p-3 text-slate-300">
                     <div className="font-medium">{asset.branchName || 'Unassigned'}</div>
                     <div className="text-[10px] text-slate-500">{asset.categoryName || 'Hardware'}</div>
                   </td>
 
-                  <td className="p-3">
+                  <td className="p-2.5 xl:p-3">
                     {asset.assignedToUserName ? (
-                      <div className="flex items-center gap-1.5 text-slate-200">
-                        <div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-[10px] font-bold">
+                      <div className="flex items-start gap-1.5 text-slate-200">
+                        <div className="w-5 h-5 shrink-0 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-[10px] font-bold">
                           {(asset.assignedToUserName || 'U').charAt(0)}
                         </div>
-                        <span className="truncate max-w-[120px]">{asset.assignedToUserName}</span>
+                        {/* Long names wrap rather than widen the table (or get cut off). */}
+                        <span className="leading-tight break-words min-w-0 max-w-[9rem]">{asset.assignedToUserName}</span>
                       </div>
                     ) : (
-                      <span className="text-slate-500 text-[11px] italic">In Storage / Unassigned</span>
+                      <span className="text-slate-500 text-[11px] italic">In storage</span>
                     )}
                   </td>
 
-                  <td className="p-3">{getStatusBadge(asset.status)}</td>
-
-                  <td className="p-3">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700">
-                      {asset.condition || 'GOOD'}
-                    </span>
+                  <td className="p-2.5 xl:p-3">
+                    {getStatusBadge(asset.status)}
+                    <div className="mt-1">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700">
+                        {asset.condition || 'GOOD'}
+                      </span>
+                    </div>
                   </td>
 
-                  <td className="p-3 text-right font-mono text-slate-200">
+                  <td className="p-2.5 xl:p-3 text-right font-mono text-slate-200">
                     <div>${Number(asset.currentValue ?? asset.purchaseCost ?? 0).toLocaleString()}</div>
                     <div className="text-[10px] text-slate-500">
                       Cost: ${Number(asset.purchaseCost ?? 0).toLocaleString()}
                     </div>
                   </td>
 
-                  <td className="p-3">
-                    <div className="flex items-center justify-center gap-1">
+                  <td className="p-2.5 xl:p-3">
+                    {/* 2x2 on narrower screens so the actions never push the table sideways */}
+                    <div className="grid grid-cols-2 gap-1 w-fit mx-auto xl:flex xl:items-center xl:justify-center">
                       <button
                         onClick={() => onViewDetails(asset)}
                         title="View Asset Details"

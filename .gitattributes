@@ -1,0 +1,3 @@
+# Migration files are fingerprinted (SHA-256) when applied; keep their line endings
+# identical on every machine so Windows checkouts do not look like edited migrations.
+*.sql text eol=lf

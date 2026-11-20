@@ -11,6 +11,8 @@ interface DashboardProps {
   budgets: BudgetAllocation[];
   currentUser: User | null;
   onNavigateToAssets?: (status: string) => void;
+  /** True until the first data load finishes; avoids showing $0 / 0 units as if real. */
+  isLoading?: boolean;
 }
 
 export const Dashboard3D: React.FC<DashboardProps> = ({
@@ -19,7 +21,8 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
   maintenances,
   budgets,
   currentUser,
-  onNavigateToAssets
+  onNavigateToAssets,
+  isLoading = false
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const [activeTab3D, setActiveTab3D] = useState<'network' | 'server'>('network');
@@ -215,6 +218,27 @@ export const Dashboard3D: React.FC<DashboardProps> = ({
       renderer.dispose();
     };
   }, [orgAssets.length, activeTab3D, viewMode]);
+
+  if (isLoading && orgAssets.length === 0) {
+    return (
+      <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto" aria-busy="true">
+        <div>
+          <h2 className="text-xl md:text-2xl font-bold text-white tracking-tight">IT Asset Dashboard</h2>
+          <p className="text-xs text-slate-400 mt-1">Loading your organization's inventory…</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {['Total Fleet Value', 'Active & In Use', 'In Repair / Offline', 'Staff Custody Allocation'].map(label => (
+            <div key={label} className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-xl">
+              <div className="text-slate-400 text-xs font-medium">{label}</div>
+              <div className="h-7 w-24 mt-3 rounded-lg bg-slate-800 animate-pulse" />
+              <div className="h-3 w-32 mt-3 rounded bg-slate-800/70 animate-pulse" />
+            </div>
+          ))}
+        </div>
+        <div className="h-64 rounded-2xl bg-slate-900/60 border border-slate-800 animate-pulse" />
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto animate-in fade-in duration-200">

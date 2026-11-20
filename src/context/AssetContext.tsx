@@ -61,6 +61,7 @@ interface AssetContextType {
   handleBatchUpdateStatus: (assetIds: string[], newStatus: AssetStatus, reason?: string) => Promise<void>;
   handleBatchTransferBranch: (assetIds: string[], targetBranchId: string, targetBranchName: string) => Promise<void>;
   handleBatchDeleteAssets: (assetIds: string[]) => Promise<void>;
+  handleBatchSetCost: (assetIds: string[], purchaseCost: number, alsoSetValue: boolean) => Promise<void>;
   handleNewCheckout: (chk: CheckoutRecord, updatedAsset?: Asset) => Promise<void>;
   handleReturnAsset: (
     chkId: string,
@@ -600,6 +601,43 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     );
   };
 
+  /**
+   * Set the purchase cost of several assets at once (e.g. a batch of identical price
+   * checkers). With `alsoSetValue`, the current book value is set to the same amount; only
+   * roles allowed to change valuations should pass it (the server enforces this too).
+   * The form's "[Acquisition cost unknown ...]" marker is dropped from the notes, since the
+   * cost is now known; any other notes are kept.
+   */
+  const handleBatchSetCost = async (assetIds: string[], purchaseCost: number, alsoSetValue: boolean) => {
+    const UNKNOWN_COST_MARKER = '[Acquisition cost unknown - legacy/inherited intake]';
+    const cleanNotes = (notes?: string) =>
+      (notes || '').split('\n').filter(line => line.trim() !== UNKNOWN_COST_MARKER).join('\n').trim();
+    const idSet = new Set(assetIds);
+    setAssets(current => current.map(a => (idSet.has(a.id)
+      ? { ...a, purchaseCost, costSource: 'MANUAL', notes: cleanNotes(a.notes) || undefined, ...(alsoSetValue ? { currentValue: purchaseCost } : {}) }
+      : a)));
+    await runAssetBatch(
+      assetIds,
+      { done: `Set the cost to $${purchaseCost.toLocaleString()} for`, failed: 'Could not set the cost of' },
+      (asset) => fetch(`/api/assets/${encodeURIComponent(asset.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          purchaseCost,
+          costSource: 'MANUAL',
+          notes: cleanNotes(asset.notes),
+          ...(alsoSetValue ? { currentValue: purchaseCost } : {}),
+          baseVersion: asset.version || 1
+        })
+      }),
+      (asset) => queueOfflineMutation('assets', 'UPDATE', {
+        ...asset, purchaseCost, costSource: 'MANUAL', notes: cleanNotes(asset.notes),
+        ...(alsoSetValue ? { currentValue: purchaseCost } : {})
+      }, { baseVersion: asset.version || 1 })
+    );
+  };
+
   const handleBatchDeleteAssets = async (assetIds: string[]) => {
     const idSet = new Set(assetIds);
     setAssets(current => current.filter(a => !idSet.has(a.id)));
@@ -633,7 +671,12 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     setCheckouts(updatedCheckouts);
 
     try {
-      await persistCheckout(chk, updatedCheckouts);
+      const assetVersion = await persistCheckout(chk, updatedCheckouts);
+      // Assigning bumps the asset's version on the server; take it now, as with edits, in
+      // case the refresh below is skipped because another save overlapped it.
+      if (assetVersion !== undefined) {
+        setAssets(current => current.map(a => (a.id === chk.assetId ? { ...a, version: assetVersion } : a)));
+      }
       await refreshAppData();
     } catch (err) {
       if (err instanceof ServerRejectedError) {
@@ -832,6 +875,7 @@ export const AssetProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         handleBatchUpdateStatus,
         handleBatchTransferBranch,
         handleBatchDeleteAssets,
+        handleBatchSetCost,
         handleNewCheckout,
         handleReturnAsset,
         handleReportIssue,

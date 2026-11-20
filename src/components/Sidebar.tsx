@@ -57,7 +57,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* ====================================================================
           1. DESKTOP SIDEBAR (md and above)
          ==================================================================== */}
-      <aside className="hidden md:flex flex-col w-60 bg-slate-900/95 border-r border-slate-800 p-3 justify-between shrink-0 overflow-y-auto">
+      <aside className="hidden md:flex flex-col w-60 bg-slate-900/95 border-r border-slate-800 p-3 justify-between shrink-0 overflow-y-auto overflow-x-hidden">
         <div className="space-y-1 w-full">
           <div className="px-3 py-2 text-[10px] font-bold tracking-wider uppercase text-slate-500">
             Navigation
@@ -69,21 +69,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 key={item.id}
                 onClick={() => onSelectTab(item.id)}
+                title={item.label}
                 className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
                   isActive
                     ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-sm'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                 }`}
               >
-                <div className="flex items-center space-x-2.5">
-                  <div className={isActive ? 'text-emerald-400' : 'text-slate-400'}>
+                {/* min-w-0 + truncate: a long label shortens with "…" instead of pushing the badge out */}
+                <div className="flex items-center space-x-2.5 min-w-0">
+                  <div className={`shrink-0 ${isActive ? 'text-emerald-400' : 'text-slate-400'}`}>
                     {item.icon}
                   </div>
-                  <span>{item.label}</span>
+                  <span className="truncate">{item.label}</span>
                 </div>
 
                 {item.badge !== undefined && (
-                  <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md ml-2 ${
+                  <span className={`shrink-0 text-[10px] font-mono font-bold px-2 py-0.5 rounded-md ml-2 ${
                     isActive ? 'bg-emerald-400 text-slate-950' : 'bg-slate-800 text-slate-400 border border-slate-700/80'
                   }`}>
                     {item.badge}

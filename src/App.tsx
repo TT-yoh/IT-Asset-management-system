@@ -94,6 +94,7 @@ function AppShell() {
     handleBatchUpdateStatus,
     handleBatchTransferBranch,
     handleBatchDeleteAssets,
+    handleBatchSetCost,
     handleNewCheckout,
     handleReturnAsset,
     handleReportIssue,
@@ -380,6 +381,7 @@ function AppShell() {
                 maintenances={filteredMaintenances}
                 budgets={filteredBudgets}
                 currentUser={currentUser}
+                isLoading={isInitialDataLoading}
                 onNavigateToAssets={(status) => {
                   setInitialAssetStatusFilter(status);
                   navigateToTab('assets');
@@ -416,6 +418,7 @@ function AppShell() {
               onBatchUpdateStatus={handleBatchUpdateStatus}
               onBatchTransferBranch={handleBatchTransferBranch}
               onBatchDelete={handleBatchDeleteAssets}
+              onBatchSetCost={handleBatchSetCost}
               searchQuery={searchQuery}
               initialStatusFilter={initialAssetStatusFilter}
               enrollTag={enrollRequestTag}
