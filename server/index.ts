@@ -5,7 +5,7 @@ import rateLimit from 'express-rate-limit';
 import path from 'path';
 import fs from 'fs';
 import config from './config';
-import { query, ping } from './db';
+import { query, ping, isDbConnectError, databaseUnavailableError } from './db';
 import { hasPermission } from './permissions';
 import { asyncHandler, HttpError } from './errors';
 import {
@@ -417,6 +417,11 @@ app.all('/api/*', (req: Request, res: Response) => {
 
 // 14. Central Express Error Handling Middleware (Catches all async & sync rejections)
 app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
+  // Database out of reach (or the connection dropped mid-request): say so plainly instead
+  // of a generic internal error, so users know to retry rather than report a bug.
+  if (!(err instanceof HttpError) && (isDbConnectError(err) || ['PROTOCOL_CONNECTION_LOST', 'ECONNRESET', 'EPIPE'].includes(err?.code))) {
+    err = databaseUnavailableError(err);
+  }
   const requestId = (req as any).id || (req.headers['x-request-id'] as string) || crypto.randomUUID();
   const statusCode =
     typeof err.statusCode === 'number'

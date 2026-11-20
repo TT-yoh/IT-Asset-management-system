@@ -662,7 +662,8 @@ export async function bulkPersistAssets(newAssets: Asset[], _allAssets?: Asset[]
 /**
  * Persist Checkout Record via typed API.
  */
-export async function persistCheckout(chk: CheckoutRecord, _allCheckouts?: CheckoutRecord[]): Promise<boolean> {
+/** Saves a checkout. Resolves to the checked-out asset's new version, when the server says. */
+export async function persistCheckout(chk: CheckoutRecord, _allCheckouts?: CheckoutRecord[]): Promise<number | undefined> {
   const row = mapCheckoutToTiDBRow(chk);
   const res = await fetch('/api/checkouts', {
     method: 'POST',
@@ -673,7 +674,9 @@ export async function persistCheckout(chk: CheckoutRecord, _allCheckouts?: Check
 
   await throwIfNotSaved(res, 'Checkout');
   updateLastTiDBSyncTime();
-  return true;
+  const body = await res.json().catch(() => null);
+  const assetVersion = Number(body?.assetVersion);
+  return Number.isFinite(assetVersion) && assetVersion > 0 ? assetVersion : undefined;
 }
 
 /**

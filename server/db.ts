@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise';
 import fs from 'fs';
 import config, { assertNotProductionDatabase } from './config';
+import { HttpError } from './errors';
 
 let pool: mysql.Pool | null = null;
 let isPoolInitialized = false;
@@ -110,8 +111,56 @@ export function getDbPool(): mysql.Pool | null {
 export type QueryExecutor = <T = any>(sql: string, params?: any[]) => Promise<T[]>;
 
 /**
+ * Errors raised while opening a connection: the statement never reached the database, so
+ * retrying is safe even for writes. (A connection lost mid-statement is NOT in this list:
+ * the write may already have happened.)
+ */
+const CONNECT_ERROR_CODES = new Set([
+  'EHOSTUNREACH', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'ETIMEDOUT', 'EHOSTDOWN', 'ENETDOWN'
+]);
+
+export function isDbConnectError(err: any): boolean {
+  if (!err) return false;
+  if (CONNECT_ERROR_CODES.has(err.code)) return true;
+  // Node reports "could not reach any address" as an AggregateError of connect errors.
+  return Array.isArray(err.errors) && err.errors.length > 0 && err.errors.every((e: any) => CONNECT_ERROR_CODES.has(e?.code));
+}
+
+/** What callers (and users) see when the database stays unreachable after retrying. */
+export function databaseUnavailableError(cause?: any): HttpError {
+  const error = new HttpError(
+    503,
+    'The database cannot be reached right now. Your data is safe; please try again in a moment.',
+    'DB_UNAVAILABLE',
+    true
+  );
+  (error as any).cause = cause;
+  return error;
+}
+
+// Short back-off: long enough to ride out a network blip, short enough to keep requests snappy.
+const CONNECT_RETRY_DELAYS_MS = config.isTest ? [0] : [400, 1200];
+
+async function withConnectRetry<T>(run: () => Promise<T>, label: string): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await run();
+    } catch (err: any) {
+      if (!isDbConnectError(err)) throw err;
+      if (attempt >= CONNECT_RETRY_DELAYS_MS.length) {
+        console.error(`[DB] ${label}: database unreachable after ${attempt + 1} attempt(s) (${err.code || err.errors?.[0]?.code || 'connect error'}).`);
+        throw databaseUnavailableError(err);
+      }
+      await new Promise((resolve) => setTimeout(resolve, CONNECT_RETRY_DELAYS_MS[attempt]));
+    }
+  }
+}
+
+/**
  * Executes a parameterized SQL query safely.
  * Never catches and falls back to in-memory store; SQL errors propagate to callers unchanged.
+ * If the database cannot be reached, the query is retried briefly and then fails with a 503
+ * DB_UNAVAILABLE error carrying a message that is safe to show to users.
  */
 export async function query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
   if (config.isTest && forceInMemoryForTest) {
@@ -122,8 +171,10 @@ export async function query<T = any>(sql: string, params: any[] = []): Promise<T
 
   if (activePool) {
     try {
-      const [rows] = await activePool.execute(sql, params);
-      return rows as T[];
+      return await withConnectRetry(async () => {
+        const [rows] = await activePool.execute(sql, params);
+        return rows as T[];
+      }, 'query');
     } catch (err: any) {
       // Log server-side only without leaking credentials or details to clients
       console.error(`[DB ERROR] Code: ${err.code || 'UNKNOWN'} - SQL: ${sql}`);
@@ -159,7 +210,8 @@ export async function withTransaction<T>(
 
   let conn: mysql.PoolConnection | null = null;
   try {
-    conn = await activePool.getConnection();
+    // Only opening the connection is retried; nothing has been sent yet at that point.
+    conn = await withConnectRetry(() => activePool.getConnection(), 'transaction');
     await conn.beginTransaction();
 
     const txExecutor: QueryExecutor = async (sql: string, params: any[] = []) => {

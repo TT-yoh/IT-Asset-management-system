@@ -20,6 +20,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { subscribeOfflineStatus, OfflineSyncStatus } from '../lib/offline-sync';
+import { subscribeServerHealth, ServerHealth } from '../lib/api';
 import { UserSettingsModal } from './UserSettingsModal';
 import { useFeedback } from '../context/FeedbackContext';
 import { ThemeToggle } from './ui/ThemeToggle';
@@ -85,6 +86,18 @@ export const Navbar: React.FC<NavbarProps> = ({
     const unsub = subscribeOfflineStatus((st) => setSyncStatus(st));
     return () => unsub();
   }, []);
+
+  // The browser can be online while the server or its database is not.
+  const [serverHealth, setServerHealthState] = useState<ServerHealth>('ok');
+  useEffect(() => subscribeServerHealth(setServerHealthState), []);
+  // While degraded, check readiness every 15s; a successful answer clears the warning.
+  useEffect(() => {
+    if (serverHealth === 'ok') return;
+    const timer = setInterval(() => {
+      fetch('/api/ready', { credentials: 'include' }).catch(() => {});
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [serverHealth]);
 
   if (!currentUser) return null;
 
@@ -220,7 +233,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                   ⚠️ {syncStatus.deadLetterCount} sync failed
                 </span>
               )}
-              {syncStatus.isOnline ? (
+              {syncStatus.isOnline && serverHealth !== 'ok' ? (
+                <div
+                  className="flex items-center gap-1.5 text-amber-400 font-medium"
+                  title="Changes may not save until the connection is back. Use Sync DB to retry."
+                >
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                  <span>{serverHealth === 'database-unreachable' ? 'Database unreachable, retrying' : 'Server unreachable, retrying'}</span>
+                </div>
+              ) : syncStatus.isOnline ? (
                 syncStatus.queuedCount > 0 ? (
                   <div className="flex items-center gap-1.5 text-amber-400 font-medium">
                     <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />

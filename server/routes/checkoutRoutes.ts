@@ -121,6 +121,7 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), idempotent(), as
   }
 
   const chkId = (data.id && typeof data.id === 'string' && /^[a-zA-Z0-9_-]{3,64}$/.test(data.id)) ? data.id : crypto.randomUUID();
+  let assetVersion: number | undefined;
 
   const insertSql = `
     INSERT INTO \`checkouts\` (
@@ -159,9 +160,11 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), idempotent(), as
         data.notes || null
       ]);
 
-      // Update asset assignment atomically ensuring asset is currently unassigned
+      // Update asset assignment atomically ensuring asset is currently unassigned. Bump the
+      // version too: assigning changes the asset, so an edit based on the earlier version
+      // must be refused rather than silently overwrite the new holder.
       const assignResult = await tx(
-        'UPDATE `assets` SET `assigned_to_user_id` = ?, `assigned_to_user_name` = ?, `assigned_at` = NOW() WHERE `id` = ? AND (`assigned_to_user_id` IS NULL OR `assigned_to_user_id` = "");',
+        'UPDATE `assets` SET `assigned_to_user_id` = ?, `assigned_to_user_name` = ?, `assigned_at` = NOW(), `version` = `version` + 1 WHERE `id` = ? AND (`assigned_to_user_id` IS NULL OR `assigned_to_user_id` = "");',
         [toUserId, toUserName, asset.id]
       );
 
@@ -172,6 +175,10 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), idempotent(), as
         err.code = 'ALREADY_CHECKED_OUT';
         throw err;
       }
+
+      // Tell the app the asset's new version so its next edit is based on it.
+      const versionRows = await tx('SELECT `version` FROM `assets` WHERE `id` = ? LIMIT 1;', [asset.id]);
+      assetVersion = Number((versionRows as any[])[0]?.version) || undefined;
 
       await recordAuditEvent(tx, {
         orgId,
@@ -193,11 +200,11 @@ checkoutRouter.post('/', requirePermission('checkouts:create'), idempotent(), as
       });
 
       if (req.idempotency) {
-        await req.idempotency.complete(tx, 201, { success: true, id: chkId });
+        await req.idempotency.complete(tx, 201, { success: true, id: chkId, assetVersion });
       }
     });
 
-    res.status(201).json({ success: true, id: chkId });
+    res.status(201).json({ success: true, id: chkId, assetVersion });
   } catch (err: any) {
     const isConflict =
       err.statusCode === 409 ||
